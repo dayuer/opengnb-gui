@@ -189,18 +189,20 @@ class Provisioner extends EventEmitter {
     }
 
     // Step 2: 安装 OpenClaw
-    const clawVer = (await this._execQuiet(nodeConfig, 'openclaw --version 2>/dev/null || echo "NOT_FOUND"')).trim();
+    // 注意: n 22 后 node/npm 在 /usr/local/bin，SSH 新会话可能还用旧 PATH
+    const envPath = 'export PATH=/usr/local/bin:$PATH;';
+    const clawVer = (await this._execQuiet(nodeConfig, `${envPath} openclaw --version 2>/dev/null || echo "NOT_FOUND"`)).trim();
     if (clawVer.includes('NOT_FOUND') || clawVer === '0.0.1') {
       log('      安装 openclaw@latest ...');
-      // 先清理可能存在的占位包
-      await this._exec(nodeConfig, 'sudo npm uninstall -g openclaw 2>/dev/null || true', log);
-      await this._exec(nodeConfig, 'sudo npm install -g openclaw@latest', log);
+      await this._exec(nodeConfig, `${envPath} sudo npm uninstall -g openclaw 2>/dev/null || true`, log);
+      // 大包安装需要长超时
+      await this._exec(nodeConfig, `${envPath} sudo npm install -g openclaw@latest`, log, 600000);
     } else {
       log(`      OpenClaw ${clawVer} ✓`);
     }
 
     // 验证安装
-    const verCheck = (await this._execQuiet(nodeConfig, 'openclaw --version 2>/dev/null || echo "FAIL"')).trim();
+    const verCheck = (await this._execQuiet(nodeConfig, `${envPath} openclaw --version 2>/dev/null || echo "FAIL"`)).trim();
     if (verCheck === 'FAIL') {
       throw new Error('openclaw 安装失败，命令不可用');
     }
@@ -210,7 +212,7 @@ class Provisioner extends EventEmitter {
     log('      执行 openclaw onboard ...');
     // onboard 需要以实际运行用户身份执行（创建 ~/.openclaw 目录）
     // 用 root 运行以便 systemd 服务以 root 身份运行
-    await this._exec(nodeConfig, 'sudo openclaw onboard --install-daemon --yes 2>&1 || sudo openclaw onboard --install-daemon 2>&1 || true', log);
+    await this._exec(nodeConfig, `${envPath} sudo openclaw onboard --install-daemon --yes 2>&1 || sudo openclaw onboard --install-daemon 2>&1 || true`, log);
 
     // Step 4: 确保 Gateway 服务运行
     log('      启动 Gateway ...');
@@ -318,9 +320,9 @@ class Provisioner extends EventEmitter {
    * 执行远程命令并记录日志
    * @private
    */
-  async _exec(nodeConfig, command, log) {
+  async _exec(nodeConfig, command, log, timeout = 600000) {
     try {
-      const result = await this.sshManager.exec(nodeConfig, command, 300000);
+      const result = await this.sshManager.exec(nodeConfig, command, timeout);
       if (result.stdout.trim()) log(`      ${result.stdout.trim().substring(0, 200)}`);
       if (result.stderr.trim() && result.code !== 0) log(`      [STDERR] ${result.stderr.trim().substring(0, 200)}`);
       return result;

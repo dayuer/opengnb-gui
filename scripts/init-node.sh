@@ -8,8 +8,9 @@
 #   4. 配置 GNB（密钥生成 + 公钥交换 + 配置文件 + systemd）
 #   5. 启动 GNB 并等待 TUN 接口
 #   6. 创建 synon 用户（sudo 免密）
-#   7. 下载 Console SSH 公钥
-#   8. 通知 Console 已就绪
+#   7. 安装 Node.js v22 + OpenClaw
+#   8. 下载 Console SSH 公钥
+#   9. 通知 Console 已就绪
 #
 # 用法（在目标节点以 root 执行）：
 #   curl -sSL https://api.synonclaw.com/api/enroll/init.sh | bash
@@ -34,7 +35,7 @@ json_val() { python3 -c "import sys,json; print(json.load(sys.stdin).get('$1',''
 
 echo ""
 echo "  ╔══════════════════════════════════════╗"
-echo "  ║  GNB Console — 节点初始化 v0.4.0     ║"
+echo "  ║  GNB Console — 节点初始化 v0.5.0     ║"
 echo "  ╚══════════════════════════════════════╝"
 echo ""
 echo "  Console:  $CONSOLE ($API_BASE)"
@@ -44,7 +45,7 @@ echo ""
 # ============================================
 # Step 1: 安装 GNB
 # ============================================
-echo "[1/8] 安装 GNB..."
+echo "[1/9] 安装 GNB..."
 
 # 清理旧安装
 if command -v gnb &>/dev/null || [ -d /opt/gnb ]; then
@@ -107,7 +108,7 @@ echo "      GNB 编译安装完成"
 # ============================================
 # Step 2: 获取 passcode 并提交注册
 # ============================================
-echo "[2/8] 提交注册..."
+echo "[2/9] 提交注册..."
 
 PASSCODE=$(curl -sS "$API_BASE/api/enroll/passcode?nodeId=$NODE_ID" | json_val passcode)
 if [ -z "$PASSCODE" ]; then
@@ -149,7 +150,7 @@ if [ "$STATUS" = "approved" ]; then
     echo "      已审批（之前已注册）"
     fetch_status
 else
-    echo "[3/8] 等待管理员审批..."
+    echo "[3/9] 等待管理员审批..."
     echo "      审批时将分配 GNB TUN 地址 (每 10 秒检查, Ctrl+C 退出)"
     echo ""
     while true; do
@@ -174,7 +175,7 @@ echo "      TUN 地址:    $TUN_ADDR"
 # ============================================
 # Step 4: 配置 GNB（密钥 + 公钥交换 + 配置文件）
 # ============================================
-echo "[4/8] 配置 GNB..."
+echo "[4/9] 配置 GNB..."
 
 GNB_CONF="/opt/gnb/conf/$GNB_NODE_ID"
 mkdir -p "$GNB_CONF"/{security,ed25519,scripts}
@@ -240,7 +241,7 @@ echo "      GNB 配置文件已写入"
 # ============================================
 # Step 5: 启动 GNB 并等待 TUN 接口
 # ============================================
-echo "[5/8] 启动 GNB..."
+echo "[5/9] 启动 GNB..."
 
 if command -v systemctl &>/dev/null; then
     cat > /etc/systemd/system/gnb.service << SVCEOF
@@ -290,7 +291,7 @@ fi
 # ============================================
 # Step 6: 创建 synon 用户
 # ============================================
-echo "[6/8] 创建运维用户 $SSH_USER..."
+echo "[6/9] 创建运维用户 $SSH_USER..."
 
 if id "$SSH_USER" &>/dev/null; then
     echo "      用户已存在"
@@ -307,9 +308,42 @@ if [ ! -f "$SUDOERS_FILE" ]; then
 fi
 
 # ============================================
-# Step 7: 下载 Console SSH 公钥
+# Step 7: 安装 Node.js v22 + OpenClaw
 # ============================================
-echo "[7/8] 下载 Console SSH 公钥..."
+echo "[7/9] 安装 Node.js v22 + OpenClaw..."
+
+# 检测当前 Node.js 版本
+NODE_VER=$(node --version 2>/dev/null | sed 's/v//' || echo "0")
+NODE_MAJOR=$(echo "$NODE_VER" | cut -d. -f1)
+
+if [ "$NODE_MAJOR" -lt 22 ] 2>/dev/null; then
+    echo "      Node.js ${NODE_VER:-未安装}, 需要 >= 22"
+    # 安装 n 版本管理器并升级到 v22
+    if command -v npm &>/dev/null; then
+        npm install -g n 2>/dev/null || true
+    else
+        curl -fsSL https://raw.githubusercontent.com/tj/n/master/bin/n | bash -s 22
+    fi
+    n 22 2>&1 | tail -3
+    hash -r 2>/dev/null
+    echo "      Node.js $(node --version) 已安装"
+else
+    echo "      Node.js v${NODE_VER} ✓"
+fi
+
+# 安装 OpenClaw
+if ! command -v openclaw &>/dev/null || openclaw --version 2>/dev/null | grep -q "0.0.1"; then
+    echo "      安装 openclaw@latest ..."
+    npm uninstall -g openclaw 2>/dev/null || true
+    npm install -g openclaw@latest 2>&1 | tail -3
+else
+    echo "      OpenClaw $(openclaw --version 2>/dev/null) ✓"
+fi
+
+# ============================================
+# Step 8: 下载 Console SSH 公钥
+# ============================================
+echo "[8/9] 下载 Console SSH 公钥..."
 
 PUBKEY=$(curl -sS "$API_BASE/api/enroll/pubkey" | json_val publicKey)
 if [ -z "$PUBKEY" ]; then
@@ -333,7 +367,7 @@ chown -R "$SSH_USER:$SSH_USER" "$SSH_DIR"
 # ============================================
 # Step 8: 通知 Console 已就绪
 # ============================================
-echo "[8/8] 通知 Console 节点已就绪..."
+echo "[9/9] 通知 Console 节点已就绪..."
 
 READY_RESP=$(curl -sS -X POST "$API_BASE/api/enroll/$NODE_ID/ready" \
   -H "Content-Type: application/json" \
