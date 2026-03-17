@@ -175,63 +175,66 @@ class Provisioner extends EventEmitter {
     // Step 1: 确保 Node.js 可用
     const nodeCheck = await this._execQuiet(nodeConfig, 'node --version 2>/dev/null || echo "NOT_FOUND"');
     if (nodeCheck.includes('NOT_FOUND')) {
-      log('      安装 Node.js (via nvm)...');
+      log('      安装 Node.js...');
+      // 尝试 nvm （以当前用户安装）
       await this._exec(nodeConfig, 'curl -o- https://raw.githubusercontent.com/nvm-sh/nvm/v0.40.3/install.sh | bash', log);
-      await this._exec(nodeConfig, 'export NVM_DIR="$HOME/.nvm" && . "$NVM_DIR/nvm.sh" && nvm install 22', log);
+      await this._exec(nodeConfig, 'export NVM_DIR="$HOME/.nvm" && [ -s "$NVM_DIR/nvm.sh" ] && . "$NVM_DIR/nvm.sh" && nvm install 22', log);
     } else {
       log(`      Node.js 已安装: ${nodeCheck.trim()}`);
     }
 
-    // nvm 环境前缀（每条命令都需要加载 nvm）
-    const nvmPrefix = 'export NVM_DIR="$HOME/.nvm" && . "$NVM_DIR/nvm.sh" &&';
+    // 构建环境前缀：优先用 PATH 中的 node，如果不在 PATH 中则尝试加载 nvm
+    const envPrefix = 'export PATH="/usr/local/bin:/usr/bin:$HOME/.nvm/versions/node/$(ls $HOME/.nvm/versions/node/ 2>/dev/null | tail -1)/bin:$PATH" 2>/dev/null;';
 
     // Step 2: 安装 OpenClaw
-    const clawCheck = await this._execQuiet(nodeConfig, `${nvmPrefix} openclaw --version 2>/dev/null || echo "NOT_FOUND"`);
+    const clawCheck = await this._execQuiet(nodeConfig, `${envPrefix} openclaw --version 2>/dev/null || echo "NOT_FOUND"`);
     if (clawCheck.includes('NOT_FOUND')) {
-      log('      npm install -g openclaw...');
-      await this._exec(nodeConfig, `${nvmPrefix} npm install -g openclaw`, log);
+      log('      sudo npm install -g openclaw ...');
+      await this._exec(nodeConfig, `${envPrefix} sudo npm install -g openclaw`, log);
     } else {
       log(`      OpenClaw 已安装: ${clawCheck.trim()}`);
     }
 
-    // Step 3: 获取 Node.js 和 openclaw 实际路径
-    const nodePath = (await this._execQuiet(nodeConfig, `${nvmPrefix} which node`)).trim();
-    const clawPath = (await this._execQuiet(nodeConfig, `${nvmPrefix} which openclaw`)).trim();
-    const nvmDir = (await this._execQuiet(nodeConfig, `${nvmPrefix} dirname $(which node)`)).trim();
+    // Step 3: 获取实际路径
+    const nodePath = (await this._execQuiet(nodeConfig, `${envPrefix} which node`)).trim();
+    const clawPath = (await this._execQuiet(nodeConfig, `${envPrefix} which openclaw`)).trim();
+    const binDir = (await this._execQuiet(nodeConfig, `${envPrefix} dirname $(which node)`)).trim();
 
     if (!nodePath || !clawPath) {
-      throw new Error('无法获取 node / openclaw 路径');
+      throw new Error(`无法定位 node(${nodePath}) 或 openclaw(${clawPath})`);
     }
+    log(`      node: ${nodePath}, openclaw: ${clawPath}`);
 
     // Step 4: 创建 systemd 服务
     log('      配置 openclaw-gateway 服务...');
-    const serviceContent = `[Unit]
-Description=OpenClaw Gateway
-After=network.target
+    const serviceContent = [
+      '[Unit]',
+      'Description=OpenClaw Gateway',
+      'After=network.target',
+      '',
+      '[Service]',
+      'Type=simple',
+      'User=root',
+      'WorkingDirectory=/root/.openclaw',
+      `Environment=PATH=${binDir}:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin`,
+      'Environment=HOME=/root',
+      `ExecStart=${nodePath} ${clawPath} gateway --bind loopback --port 18789`,
+      'Restart=always',
+      'RestartSec=5',
+      'StandardOutput=append:/var/log/openclaw-gateway.log',
+      'StandardError=append:/var/log/openclaw-gateway.log',
+      '',
+      '[Install]',
+      'WantedBy=multi-user.target',
+    ].join('\n');
 
-[Service]
-Type=simple
-User=root
-WorkingDirectory=$HOME/.openclaw
-Environment=PATH=${nvmDir}:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
-Environment=HOME=/root
-Environment=NVM_DIR=/root/.nvm
-ExecStart=${nodePath} ${clawPath} gateway --bind loopback --port 18789
-Restart=always
-RestartSec=5
-StandardOutput=append:/var/log/openclaw-gateway.log
-StandardError=append:/var/log/openclaw-gateway.log
-
-[Install]
-WantedBy=multi-user.target`;
-
-    await this._exec(nodeConfig, `cat > /etc/systemd/system/openclaw-gateway.service << 'SVCEOF'\n${serviceContent}\nSVCEOF`, log);
-    await this._exec(nodeConfig, 'systemctl daemon-reload && systemctl enable openclaw-gateway', log);
-    await this._exec(nodeConfig, 'systemctl restart openclaw-gateway', log);
+    await this._exec(nodeConfig, `sudo bash -c 'mkdir -p /root/.openclaw && cat > /etc/systemd/system/openclaw-gateway.service << SVCEOF\n${serviceContent}\nSVCEOF'`, log);
+    await this._exec(nodeConfig, 'sudo systemctl daemon-reload && sudo systemctl enable openclaw-gateway', log);
+    await this._exec(nodeConfig, 'sudo systemctl restart openclaw-gateway', log);
 
     // Step 5: 等待启动
     log('      等待 OpenClaw 启动...');
-    await this._exec(nodeConfig, 'sleep 3 && systemctl is-active openclaw-gateway', log);
+    await this._exec(nodeConfig, 'sleep 3 && sudo systemctl is-active openclaw-gateway', log);
     log('      ✅ OpenClaw 安装完成');
   }
 
