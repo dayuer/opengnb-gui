@@ -195,10 +195,14 @@ class Provisioner extends EventEmitter {
       log(`      OpenClaw 已安装: ${clawCheck.trim()}`);
     }
 
-    // Step 3: 获取实际路径
-    const nodePath = (await this._execQuiet(nodeConfig, `${envPrefix} which node`)).trim();
-    const clawPath = (await this._execQuiet(nodeConfig, `${envPrefix} which openclaw`)).trim();
-    const binDir = (await this._execQuiet(nodeConfig, `${envPrefix} dirname $(which node)`)).trim();
+    // Step 3: 获取实际路径（sudo 安装到 root 前缀，需要 sudo 查找）
+    const nodePath = (await this._execQuiet(nodeConfig, 'which node || sudo which node')).trim();
+    let clawPath = (await this._execQuiet(nodeConfig, 'which openclaw || sudo which openclaw')).trim();
+    if (!clawPath) {
+      const npmRoot = (await this._execQuiet(nodeConfig, 'sudo npm root -g')).trim();
+      if (npmRoot) clawPath = npmRoot.replace('/lib/node_modules', '/bin/openclaw');
+    }
+    const binDir = nodePath ? nodePath.replace(/\/node$/, '') : '/usr/bin';
 
     if (!nodePath || !clawPath) {
       throw new Error(`无法定位 node(${nodePath}) 或 openclaw(${clawPath})`);
