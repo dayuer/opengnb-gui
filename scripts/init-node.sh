@@ -29,7 +29,7 @@ if [ "$TUN_ADDR" = "auto" ]; then
     if [ -z "$TUN_ADDR" ]; then
         echo ""
         echo "  [错误] 未检测到 GNB TUN 接口，请先启动 GNB 或手动指定 TUN_ADDR"
-        echo "  用法: TUN_ADDR=10.1.0.x curl -sSL https://api.synonclaw.com/api/enroll/init.sh | bash"
+        echo "  用法: curl -sSL https://api.synonclaw.com/api/enroll/init.sh | TUN_ADDR=10.1.0.x bash"
         echo ""
         exit 1
     fi
