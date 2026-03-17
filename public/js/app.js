@@ -182,13 +182,13 @@ function renderNodeDetail(nodeId) {
 
     if (si.memTotalMB > 0) {
       html += `<div class="section-title">内存</div>`;
-      html += `<div class="stat-row"><span class="stat-label">总计 / 已用</span><span class="stat-value ${memColor}">${si.memUsedMB}MB / ${si.memTotalMB}MB (${memPct}%)</span></div>`;
+      html += `<div class="stat-row"><span class="stat-label">已用 / 总计</span><span class="stat-value ${memColor}">${si.memUsedMB}MB / ${si.memTotalMB}MB (${memPct}%)</span></div>`;
       html += `<div class="usage-bar"><div class="usage-fill ${memColor}" style="width:${memPct}%"></div></div>`;
     }
 
     if (si.diskTotal) {
       html += `<div class="section-title">磁盘 /</div>`;
-      html += `<div class="stat-row"><span class="stat-label">总计 / 已用</span><span class="stat-value ${diskColor}">${escHtml(si.diskUsed)} / ${escHtml(si.diskTotal)} (${escHtml(si.diskUsePct)})</span></div>`;
+      html += `<div class="stat-row"><span class="stat-label">已用 / 总计</span><span class="stat-value ${diskColor}">${escHtml(si.diskUsed)} / ${escHtml(si.diskTotal)} (${escHtml(si.diskUsePct)})</span></div>`;
       html += `<div class="usage-bar"><div class="usage-fill ${diskColor}" style="width:${diskPct}%"></div></div>`;
     }
   }
