@@ -193,10 +193,40 @@ class Provisioner extends EventEmitter {
     const envPath = 'export PATH=/usr/local/bin:$PATH;';
     const clawVer = (await this._execQuiet(nodeConfig, `${envPath} openclaw --version 2>/dev/null || echo "NOT_FOUND"`)).trim();
     if (clawVer.includes('NOT_FOUND') || clawVer === '0.0.1') {
-      log('      安装 openclaw@latest ...');
+      log('      安装 openclaw@latest (后台安装，轮询检查)...');
       await this._exec(nodeConfig, `${envPath} sudo npm uninstall -g openclaw 2>/dev/null || true`, log);
-      // 大包安装需要长超时
-      await this._exec(nodeConfig, `${envPath} sudo npm install -g openclaw@latest`, log, 600000);
+
+      // 用 nohup 后台安装，避免 SSH 超时
+      await this._execQuiet(nodeConfig,
+        `sudo nohup bash -c '${envPath} npm install -g openclaw@latest > /tmp/openclaw-install.log 2>&1 && echo INSTALL_DONE >> /tmp/openclaw-install.log || echo INSTALL_FAIL >> /tmp/openclaw-install.log' &`
+      );
+
+      // 轮询等待安装完成 (最长 10 分钟)
+      const maxWait = 600000; // 10min
+      const pollInterval = 15000; // 15s
+      const startTime = Date.now();
+      let installed = false;
+
+      while (Date.now() - startTime < maxWait) {
+        await new Promise(r => setTimeout(r, pollInterval));
+        const logTail = await this._execQuiet(nodeConfig, 'tail -3 /tmp/openclaw-install.log 2>/dev/null || echo PENDING');
+        if (logTail.includes('INSTALL_DONE')) {
+          installed = true;
+          log('      npm install 完成');
+          break;
+        }
+        if (logTail.includes('INSTALL_FAIL')) {
+          const errLog = await this._execQuiet(nodeConfig, 'tail -10 /tmp/openclaw-install.log 2>/dev/null');
+          log(`      npm install 失败: ${errLog.substring(0, 200)}`);
+          throw new Error('openclaw npm install 失败');
+        }
+        const elapsed = Math.round((Date.now() - startTime) / 1000);
+        log(`      安装中... (${elapsed}s)`);
+      }
+
+      if (!installed) {
+        throw new Error('openclaw 安装超时 (10分钟)');
+      }
     } else {
       log(`      OpenClaw ${clawVer} ✓`);
     }
