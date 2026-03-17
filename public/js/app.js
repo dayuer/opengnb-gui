@@ -146,14 +146,55 @@ function renderNodeDetail(nodeId) {
     return;
   }
 
+  const si = node.sysInfo || {};
+
+  // 内存使用率
+  let memPct = 0, memColor = 'green';
+  if (si.memTotalMB > 0) {
+    memPct = Math.round((si.memUsedMB / si.memTotalMB) * 100);
+    memColor = memPct > 90 ? 'red' : memPct > 70 ? 'yellow' : 'green';
+  }
+
+  // 磁盘使用率
+  const diskPct = si.diskUsePct ? parseInt(si.diskUsePct) : 0;
+  const diskColor = diskPct > 90 ? 'red' : diskPct > 70 ? 'yellow' : 'green';
+
   let html = `
-    <div class="section-title">主机信息</div>
+    <div class="section-title">连接</div>
     <div class="stat-row"><span class="stat-label">SSH 延迟</span><span class="stat-value green">${node.sshLatencyMs}ms</span></div>
     <div class="stat-row"><span class="stat-label">最后更新</span><span class="stat-value">${node.lastUpdate ? new Date(node.lastUpdate).toLocaleString() : '—'}</span></div>
   `;
 
+  // 系统信息
+  if (Object.keys(si).length) {
+    html += `<div class="section-title">系统</div>`;
+    if (si.os)       html += `<div class="stat-row"><span class="stat-label">操作系统</span><span class="stat-value">${escHtml(si.os)}</span></div>`;
+    if (si.kernel)   html += `<div class="stat-row"><span class="stat-label">内核</span><span class="stat-value">${escHtml(si.kernel)} ${escHtml(si.arch || '')}</span></div>`;
+    if (si.hostname) html += `<div class="stat-row"><span class="stat-label">主机名</span><span class="stat-value">${escHtml(si.hostname)}</span></div>`;
+    if (si.uptime)   html += `<div class="stat-row"><span class="stat-label">运行时长</span><span class="stat-value">${escHtml(si.uptime)}</span></div>`;
+
+    if (si.cpuModel) {
+      html += `<div class="section-title">CPU</div>`;
+      html += `<div class="stat-row"><span class="stat-label">型号</span><span class="stat-value">${escHtml(si.cpuModel)}</span></div>`;
+      if (si.cpuCores) html += `<div class="stat-row"><span class="stat-label">核心数</span><span class="stat-value">${si.cpuCores}</span></div>`;
+      if (si.loadAvg) html += `<div class="stat-row"><span class="stat-label">负载</span><span class="stat-value">${escHtml(si.loadAvg)}</span></div>`;
+    }
+
+    if (si.memTotalMB > 0) {
+      html += `<div class="section-title">内存</div>`;
+      html += `<div class="stat-row"><span class="stat-label">总计 / 已用</span><span class="stat-value ${memColor}">${si.memUsedMB}MB / ${si.memTotalMB}MB (${memPct}%)</span></div>`;
+      html += `<div class="usage-bar"><div class="usage-fill ${memColor}" style="width:${memPct}%"></div></div>`;
+    }
+
+    if (si.diskTotal) {
+      html += `<div class="section-title">磁盘 /</div>`;
+      html += `<div class="stat-row"><span class="stat-label">总计 / 已用</span><span class="stat-value ${diskColor}">${escHtml(si.diskUsed)} / ${escHtml(si.diskTotal)} (${escHtml(si.diskUsePct)})</span></div>`;
+      html += `<div class="usage-bar"><div class="usage-fill ${diskColor}" style="width:${diskPct}%"></div></div>`;
+    }
+  }
+
   if (node.core && Object.keys(node.core).length) {
-    html += `<div class="section-title">核心</div>`;
+    html += `<div class="section-title">GNB</div>`;
     for (const [key, val] of Object.entries(node.core)) {
       html += `<div class="stat-row"><span class="stat-label">${escHtml(key)}</span><span class="stat-value">${escHtml(String(val))}</span></div>`;
     }

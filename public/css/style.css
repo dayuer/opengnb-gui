@@ -258,6 +258,21 @@ html, body {
 
 #ai-send:hover { opacity: .85; }
 
+/* ——— 使用率条 ——— */
+
+.usage-bar {
+  height: 6px; background: var(--bg-tertiary); border-radius: 3px;
+  margin: 4px 12px 8px; overflow: hidden;
+}
+
+.usage-fill {
+  height: 100%; border-radius: 3px; transition: width 0.5s ease;
+}
+
+.usage-fill.green { background: var(--green); }
+.usage-fill.yellow { background: var(--yellow); }
+.usage-fill.red { background: var(--red); }
+
 /* ——— 滚动条 ——— */
 
 ::-webkit-scrollbar { width: 6px; }

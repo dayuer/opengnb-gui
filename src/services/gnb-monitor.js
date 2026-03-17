@@ -95,17 +95,32 @@ class GnbMonitor extends EventEmitter {
     const startTime = Date.now();
 
     try {
-      // 执行 gnb_ctl -b <gnb.map> -s 获取节点状态
+      // 1) gnb_ctl 状态
       const statusCmd = `${nodeConfig.gnbCtlPath || 'gnb_ctl'} -b ${nodeConfig.gnbMapPath} -s`;
       const statusResult = await this.sshManager.exec(nodeConfig, statusCmd);
 
-      // 执行 gnb_ctl -b <gnb.map> -a 获取地址列表
+      // 2) gnb_ctl 地址列表
       const addrCmd = `${nodeConfig.gnbCtlPath || 'gnb_ctl'} -b ${nodeConfig.gnbMapPath} -a`;
       const addrResult = await this.sshManager.exec(nodeConfig, addrCmd);
 
+      // 3) 系统信息 — 一条命令采集全部
+      const sysCmd = [
+        'echo "::HOSTNAME::$(hostname)"',
+        'echo "::OS::$(cat /etc/os-release 2>/dev/null | grep PRETTY_NAME | cut -d= -f2 | tr -d \\")"',
+        'echo "::KERNEL::$(uname -r)"',
+        'echo "::ARCH::$(uname -m)"',
+        'echo "::UPTIME::$(uptime -p 2>/dev/null || uptime)"',
+        'echo "::LOAD::$(cat /proc/loadavg 2>/dev/null | cut -d" " -f1-3 || sysctl -n vm.loadavg 2>/dev/null)"',
+        'echo "::CPU_MODEL::$(grep "model name" /proc/cpuinfo 2>/dev/null | head -1 | cut -d: -f2 | xargs || sysctl -n machdep.cpu.brand_string 2>/dev/null)"',
+        'echo "::CPU_CORES::$(nproc 2>/dev/null || sysctl -n hw.ncpu 2>/dev/null)"',
+        'echo "::MEM::$(free -m 2>/dev/null | awk \'NR==2{printf "%s %s %s", $2, $3, $7}\' || echo "")"',
+        'echo "::DISK::$(df -h / 2>/dev/null | awk \'NR==2{printf "%s %s %s %s", $2, $3, $4, $5}\')"',
+      ].join(' && ');
+      const sysResult = await this.sshManager.exec(nodeConfig, sysCmd);
+      const sysInfo = this._parseSysInfo(sysResult.stdout);
+
       const statusData = parseGnbCtlStatus(statusResult.stdout);
       const addrData = parseGnbCtlAddressList(addrResult.stdout);
-
       const elapsed = Date.now() - startTime;
 
       this.latestState.set(nodeConfig.id, {
@@ -115,6 +130,7 @@ class GnbMonitor extends EventEmitter {
         core: statusData.core,
         nodes: statusData.nodes,
         addresses: addrData,
+        sysInfo,
         error: null,
       });
     } catch (err) {
@@ -125,9 +141,55 @@ class GnbMonitor extends EventEmitter {
         core: {},
         nodes: [],
         addresses: [],
+        sysInfo: {},
         error: err.message,
       });
     }
+  }
+
+  /**
+   * 解析系统信息输出
+   * @private
+   */
+  _parseSysInfo(stdout) {
+    const info = {};
+    const lines = (stdout || '').split('\n');
+    for (const line of lines) {
+      const match = line.match(/^::(\w+)::(.*)$/);
+      if (!match) continue;
+      const [, key, val] = match;
+      const v = val.trim();
+      switch (key) {
+        case 'HOSTNAME': info.hostname = v; break;
+        case 'OS':       info.os = v; break;
+        case 'KERNEL':   info.kernel = v; break;
+        case 'ARCH':     info.arch = v; break;
+        case 'UPTIME':   info.uptime = v; break;
+        case 'LOAD':     info.loadAvg = v; break;
+        case 'CPU_MODEL': info.cpuModel = v; break;
+        case 'CPU_CORES': info.cpuCores = parseInt(v, 10) || 0; break;
+        case 'MEM': {
+          const parts = v.split(/\s+/);
+          if (parts.length >= 3) {
+            info.memTotalMB = parseInt(parts[0], 10) || 0;
+            info.memUsedMB = parseInt(parts[1], 10) || 0;
+            info.memAvailMB = parseInt(parts[2], 10) || 0;
+          }
+          break;
+        }
+        case 'DISK': {
+          const parts = v.split(/\s+/);
+          if (parts.length >= 4) {
+            info.diskTotal = parts[0];
+            info.diskUsed = parts[1];
+            info.diskAvail = parts[2];
+            info.diskUsePct = parts[3];
+          }
+          break;
+        }
+      }
+    }
+    return info;
   }
 }
 
