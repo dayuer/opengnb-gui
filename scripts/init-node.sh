@@ -20,14 +20,17 @@ NODE_ID="${NODE_ID:-$(hostname -s)}"
 NODE_NAME="${NODE_NAME:-$NODE_ID}"
 TUN_ADDR="${TUN_ADDR:-auto}"
 
-# TUN_ADDR=auto 时自动检测本机公网 IP
+# TUN_ADDR=auto 时从 GNB TUN 接口获取 IP（Console 通过 GNB 内网 SSH 连接节点）
 if [ "$TUN_ADDR" = "auto" ]; then
-    TUN_ADDR=$(curl -sS --max-time 3 https://ifconfig.me 2>/dev/null \
-            || curl -sS --max-time 3 https://api.ipify.org 2>/dev/null \
-            || hostname -I 2>/dev/null | awk '{print $1}' \
+    TUN_ADDR=$(ip -4 addr show tun_gnb 2>/dev/null | grep -oP 'inet \K[\d.]+' \
+            || ip -4 addr show gnb 2>/dev/null | grep -oP 'inet \K[\d.]+' \
+            || ifconfig tun_gnb 2>/dev/null | grep -oE 'inet [0-9.]+' | awk '{print $2}' \
             || echo "")
     if [ -z "$TUN_ADDR" ]; then
-        echo "  [失败] 无法自动检测 IP，请手动设置 TUN_ADDR"
+        echo ""
+        echo "  [错误] 未检测到 GNB TUN 接口，请先启动 GNB 或手动指定 TUN_ADDR"
+        echo "  用法: TUN_ADDR=10.1.0.x curl -sSL https://api.synonclaw.com/api/enroll/init.sh | bash"
+        echo ""
         exit 1
     fi
 fi
