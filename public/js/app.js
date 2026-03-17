@@ -296,5 +296,18 @@ function formatBytes(b) {
 $('#ai-send').addEventListener('click', sendAiMessage);
 $('#ai-input').addEventListener('keydown', (e) => { if (e.key === 'Enter') sendAiMessage(); });
 
+// 快捷按钮
+document.querySelectorAll('.quick-btn').forEach(btn => {
+  btn.addEventListener('click', () => {
+    let cmd = btn.dataset.cmd;
+    // 自动追加当前选中的节点 ID
+    if (selectedNodeId && !cmd.includes(selectedNodeId)) {
+      cmd += ` ${selectedNodeId}`;
+    }
+    $('#ai-input').value = cmd;
+    sendAiMessage();
+  });
+});
+
 // --- 启动 ---
 connectWS();

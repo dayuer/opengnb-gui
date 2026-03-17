@@ -54,10 +54,17 @@
       <!-- 右侧：AI 运维 -->
       <aside id="ai-panel">
         <div class="panel-header">
-          <h2>AI 运维</h2>
-          <span class="badge accent">Claude</span>
+          <h2>运维控制台</h2>
+          <span class="badge accent">指令</span>
         </div>
         <div id="ai-messages"></div>
+        <div id="ai-quick-actions">
+          <button class="quick-btn" data-cmd="安装 openclaw">📦 安装 OpenClaw</button>
+          <button class="quick-btn" data-cmd="状态">📊 状态</button>
+          <button class="quick-btn" data-cmd="重启 gnb">🔄 重启 GNB</button>
+          <button class="quick-btn" data-cmd="重启 openclaw">🔄 重启 Claw</button>
+          <button class="quick-btn" data-cmd="日志">📋 日志</button>
+        </div>
         <div id="ai-input-area">
           <input type="text" id="ai-input" placeholder="输入运维指令..." autocomplete="off">
           <button id="ai-send">发送</button>
