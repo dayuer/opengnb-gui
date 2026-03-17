@@ -1,167 +1,240 @@
 'use strict';
 
-const SSHManager = require('./ssh-manager');
-
 /**
- * AI 运维服务 — Claude 智能运维工程师
- * 接收自然语言指令，生成 SSH 命令，经人工确认后执行
+ * AI 运维服务 — 内置命令路由器
+ *
+ * 不依赖外部 AI API，通过关键词匹配将用户指令路由到
+ * Provisioner（SSH 执行）或直接返回节点状态。
+ *
+ * 支持的指令：
+ *   - "安装 openclaw [节点ID]" → provisioner.provision(node, {installGnb:false})
+ *   - "配置下发 [节点ID]"      → provisioner.provision(node)
+ *   - "状态"                   → 返回所有节点状态
+ *   - "重启 gnb [节点ID]"      → SSH 执行 systemctl restart gnb
+ *   - "日志 [节点ID]"          → SSH 获取 journalctl 日志
+ *   - 其他                     → 返回帮助信息
  */
 class AiOps {
   /**
    * @param {object} options
    * @param {Array} options.nodesConfig - 节点配置
-   * @param {SSHManager} options.sshManager - SSH 管理器
+   * @param {import('./ssh-manager')} options.sshManager
    * @param {Function} options.getNodeStatus - 获取节点状态的回调
-   * @param {string} [options.apiKey] - Anthropic API Key
-   * @param {string} [options.apiUrl] - API URL (可通过 OpenClaw 中转)
+   * @param {import('./provisioner')} options.provisioner
    */
   constructor(options) {
     this.nodesConfig = options.nodesConfig;
     this.sshManager = options.sshManager;
     this.getNodeStatus = options.getNodeStatus;
-    this.apiKey = options.apiKey || process.env.ANTHROPIC_API_KEY || '';
-    this.apiUrl = options.apiUrl || process.env.AI_API_URL || 'https://api.anthropic.com/v1/messages';
-
-    /** @type {Map<string, object>} 待确认的命令 */
-    this.pendingCommands = new Map();
+    this.provisioner = options.provisioner;
   }
 
   /**
-   * 处理用户的运维对话
-   * @param {string} userMessage - 用户输入
-   * @returns {Promise<object>} - {response, commands}
+   * 处理用户指令
+   * @param {string} userMessage
+   * @returns {Promise<object>}
    */
   async chat(userMessage) {
-    const statusContext = this.getNodeStatus();
+    const msg = (userMessage || '').trim();
+    if (!msg) return { response: '请输入指令', commands: [] };
 
-    const systemPrompt = `你是一位资深的 GNB P2P VPN 网络运维工程师。你的任务是帮助管理员管理 GNB 节点网络。
+    // 解析节点 ID（可能在消息末尾或消息中）
+    const nodeId = this._extractNodeId(msg);
 
-当前网络中有以下节点：
-${JSON.stringify(statusContext, null, 2)}
+    // --- 指令路由 ---
 
-你可以建议执行的操作：
-- 查看节点状态: gnb_ctl -b <gnb.map路径> -s
-- 查看地址列表: gnb_ctl -b <gnb.map路径> -a
-- 查看在线节点: gnb_ctl -b <gnb.map路径> -o
-- 重启 GNB 服务: systemctl restart gnb
-- 查看 GNB 日志: journalctl -u gnb --no-pager -n 50
-- 检查网络连通: ping -c 3 <TUN地址>
-- 修改配置文件: 编辑 /opt/gnb/conf/<nodeid>/ 下的文件
+    // 安装 OpenClaw
+    if (/安装\s*(openclaw|claw)/i.test(msg)) {
+      return this._handleInstallClaw(nodeId);
+    }
 
-当你建议执行命令时，请用以下 JSON 格式返回：
-{"commands": [{"nodeId": "<节点ID>", "command": "<命令>", "description": "<操作说明>"}]}
+    // 完整配置下发
+    if (/配置下发|provision|部署/i.test(msg)) {
+      return this._handleProvision(nodeId);
+    }
 
-如果只是回答问题不需要执行命令，直接用文本回复。
-对于任何可能修改系统状态的命令（重启、修改配置），必须明确标注风险等级。`;
+    // 查看状态
+    if (/状态|status|info/i.test(msg)) {
+      return this._handleStatus(nodeId);
+    }
+
+    // 重启 GNB
+    if (/重启\s*(gnb|服务)|restart/i.test(msg)) {
+      return this._handleRestart(nodeId, 'gnb');
+    }
+
+    // 重启 OpenClaw
+    if (/重启\s*(openclaw|claw)/i.test(msg)) {
+      return this._handleRestart(nodeId, 'openclaw-gateway');
+    }
+
+    // 查看日志
+    if (/日志|log|journal/i.test(msg)) {
+      return this._handleLogs(nodeId);
+    }
+
+    // 执行自定义命令: "exec <nodeId> <command>"
+    if (/^(exec|run|执行)\s/i.test(msg)) {
+      return this._handleExec(msg);
+    }
+
+    // 帮助
+    return this._handleHelp();
+  }
+
+  // --- 指令处理 ---
+
+  async _handleInstallClaw(nodeId) {
+    const nodeConfig = this._resolveNode(nodeId);
+    if (!nodeConfig) return { response: this._nodeNotFoundMsg(nodeId), commands: [] };
+
+    // 异步执行，不阻塞响应
+    this.provisioner.provision(nodeConfig, { installGnb: false, installClaw: true });
+    return {
+      response: `🚀 开始在 ${nodeConfig.name || nodeConfig.id} 上安装 OpenClaw...\n安装进度将实时推送到此面板。`,
+      commands: [],
+    };
+  }
+
+  async _handleProvision(nodeId) {
+    const nodeConfig = this._resolveNode(nodeId);
+    if (!nodeConfig) return { response: this._nodeNotFoundMsg(nodeId), commands: [] };
+
+    this.provisioner.provision(nodeConfig);
+    return {
+      response: `🚀 开始对 ${nodeConfig.name || nodeConfig.id} 执行完整配置下发...\n包含：系统准备 → GNB → OpenClaw → 验证`,
+      commands: [],
+    };
+  }
+
+  async _handleStatus(nodeId) {
+    const allStatus = this.getNodeStatus();
+    if (nodeId) {
+      const node = allStatus.find(n => n.id === nodeId);
+      if (!node) return { response: this._nodeNotFoundMsg(nodeId), commands: [] };
+      return { response: this._formatNodeStatus(node), commands: [] };
+    }
+    if (!allStatus.length) return { response: '当前无已接入节点', commands: [] };
+    const lines = allStatus.map(n => {
+      const dot = n.online ? '🟢' : '🔴';
+      return `${dot} ${n.name || n.id} (${n.tunAddr}) — ${n.online ? `${n.sshLatencyMs}ms` : '离线'}`;
+    });
+    return { response: `节点状态：\n${lines.join('\n')}`, commands: [] };
+  }
+
+  async _handleRestart(nodeId, service) {
+    const nodeConfig = this._resolveNode(nodeId);
+    if (!nodeConfig) return { response: this._nodeNotFoundMsg(nodeId), commands: [] };
 
     try {
-      const response = await fetch(this.apiUrl, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'x-api-key': this.apiKey,
-          'anthropic-version': '2023-06-01',
-        },
-        body: JSON.stringify({
-          model: 'claude-sonnet-4-20250514',
-          max_tokens: 2048,
-          system: systemPrompt,
-          messages: [{ role: 'user', content: userMessage }],
-        }),
-      });
-
-      if (!response.ok) {
-        const errText = await response.text();
-        return {
-          response: `AI 服务调用失败 (${response.status}): ${errText}`,
-          commands: [],
-        };
-      }
-
-      const data = await response.json();
-      const aiText = data.content?.[0]?.text || '无响应';
-
-      // 尝试从响应中提取命令
-      const commands = this._extractCommands(aiText);
-
-      if (commands.length > 0) {
-        const confirmId = `cmd_${Date.now()}`;
-        this.pendingCommands.set(confirmId, commands);
-
-        return {
-          response: aiText,
-          commands,
-          confirmId,
-          requireConfirm: true,
-        };
-      }
-
-      return { response: aiText, commands: [], requireConfirm: false };
+      const result = await this.sshManager.exec(nodeConfig, `systemctl restart ${service} && sleep 1 && systemctl is-active ${service}`);
+      return { response: `✅ ${service} 已重启: ${result.stdout.trim()}`, commands: [] };
     } catch (err) {
-      return {
-        response: `AI 服务连接失败: ${err.message}`,
-        commands: [],
-      };
+      return { response: `❌ 重启失败: ${err.message}`, commands: [] };
     }
   }
 
-  /**
-   * 确认并执行待定命令
-   * @param {string} confirmId
-   * @returns {Promise<Array<object>>} 各命令执行结果
-   */
-  async confirmAndExec(confirmId) {
-    const commands = this.pendingCommands.get(confirmId);
-    if (!commands) {
-      return [{ error: '确认 ID 不存在或已过期' }];
-    }
-    this.pendingCommands.delete(confirmId);
+  async _handleLogs(nodeId) {
+    const nodeConfig = this._resolveNode(nodeId);
+    if (!nodeConfig) return { response: this._nodeNotFoundMsg(nodeId), commands: [] };
 
-    const results = [];
-
-    for (const cmd of commands) {
-      const nodeConfig = this.nodesConfig.find(n => n.id === cmd.nodeId);
-      if (!nodeConfig) {
-        results.push({ nodeId: cmd.nodeId, error: '节点未配置' });
-        continue;
-      }
-
-      try {
-        const execResult = await this.sshManager.exec(nodeConfig, cmd.command);
-        results.push({
-          nodeId: cmd.nodeId,
-          command: cmd.command,
-          stdout: execResult.stdout,
-          stderr: execResult.stderr,
-          code: execResult.code,
-        });
-      } catch (err) {
-        results.push({
-          nodeId: cmd.nodeId,
-          command: cmd.command,
-          error: err.message,
-        });
-      }
-    }
-
-    return results;
-  }
-
-  /**
-   * 从 AI 响应中提取命令 JSON
-   * @private
-   */
-  _extractCommands(text) {
     try {
-      const match = text.match(/\{[\s\S]*"commands"[\s\S]*\}/);
-      if (match) {
-        const parsed = JSON.parse(match[0]);
-        return Array.isArray(parsed.commands) ? parsed.commands : [];
-      }
-    } catch (_) {
-      /* 解析失败视为无命令 */
+      const result = await this.sshManager.exec(nodeConfig, 'journalctl -u gnb -u openclaw-gateway --no-pager -n 20 --output short-iso');
+      return { response: `📋 最近日志:\n\`\`\`\n${result.stdout.trim()}\n\`\`\``, commands: [] };
+    } catch (err) {
+      return { response: `❌ 获取日志失败: ${err.message}`, commands: [] };
     }
-    return [];
+  }
+
+  async _handleExec(msg) {
+    // 格式: exec <nodeId> <command>
+    const parts = msg.replace(/^(exec|run|执行)\s+/i, '').trim();
+    const spaceIdx = parts.indexOf(' ');
+    if (spaceIdx < 0) return { response: '格式: exec <节点ID> <命令>', commands: [] };
+
+    const nodeId = parts.substring(0, spaceIdx);
+    const command = parts.substring(spaceIdx + 1);
+    const nodeConfig = this._resolveNode(nodeId);
+    if (!nodeConfig) return { response: this._nodeNotFoundMsg(nodeId), commands: [] };
+
+    try {
+      const result = await this.sshManager.exec(nodeConfig, command, 30000);
+      let output = result.stdout.trim();
+      if (result.stderr.trim()) output += `\n[STDERR] ${result.stderr.trim()}`;
+      return { response: `\`\`\`\n${output || '(空输出)'}\n\`\`\``, commands: [] };
+    } catch (err) {
+      return { response: `❌ 执行失败: ${err.message}`, commands: [] };
+    }
+  }
+
+  _handleHelp() {
+    return {
+      response: `📖 可用指令：
+• 安装 openclaw <节点ID> — 在终端安装 OpenClaw
+• 配置下发 <节点ID> — 完整配置下发（GNB + OpenClaw）
+• 状态 [节点ID] — 查看节点状态
+• 重启 gnb <节点ID> — 重启 GNB 服务
+• 重启 openclaw <节点ID> — 重启 OpenClaw
+• 日志 <节点ID> — 查看最近日志
+• exec <节点ID> <命令> — 执行自定义命令`,
+      commands: [],
+    };
+  }
+
+  // --- 工具方法 ---
+
+  _extractNodeId(msg) {
+    // 尝试从消息中提取节点 ID
+    // 支持格式: "安装 openclaw VM-0-16-debian", "安装 openclaw 到 VM-0-16-debian"
+    const cleaned = msg.replace(/^(安装|配置下发|重启|日志|状态)\s*(openclaw|claw|gnb|服务)?\s*(到|on|for)?\s*/i, '').trim();
+    if (cleaned && !cleaned.includes(' ')) return cleaned;
+
+    // 如果只有一个节点，直接使用
+    if (this.nodesConfig.length === 1) return this.nodesConfig[0].id;
+
+    return null;
+  }
+
+  _resolveNode(nodeId) {
+    if (!nodeId) {
+      // 如果只有一个节点，自动选择
+      if (this.nodesConfig.length === 1) return this.nodesConfig[0];
+      return null;
+    }
+    return this.nodesConfig.find(n => n.id === nodeId || n.name === nodeId);
+  }
+
+  _nodeNotFoundMsg(nodeId) {
+    if (!nodeId) {
+      const ids = this.nodesConfig.map(n => n.id).join(', ');
+      return `请指定节点 ID。可用节点: ${ids || '无'}`;
+    }
+    return `节点 "${nodeId}" 未找到`;
+  }
+
+  _formatNodeStatus(node) {
+    const lines = [
+      `${node.online ? '🟢' : '🔴'} ${node.name || node.id}`,
+      `TUN: ${node.tunAddr}`,
+      `SSH: ${node.sshLatencyMs > 0 ? node.sshLatencyMs + 'ms' : '不可达'}`,
+    ];
+    if (node.sysInfo) {
+      const si = node.sysInfo;
+      if (si.os) lines.push(`OS: ${si.os}`);
+      if (si.cpuModel) lines.push(`CPU: ${si.cpuModel} (${si.cpuCores}核)`);
+      if (si.memTotalMB) lines.push(`内存: ${si.memUsedMB}/${si.memTotalMB}MB`);
+      if (si.diskTotal) lines.push(`磁盘: ${si.diskUsed}/${si.diskTotal} (${si.diskUsePct})`);
+      if (si.loadAvg) lines.push(`负载: ${si.loadAvg}`);
+      if (si.uptime) lines.push(`运行: ${si.uptime}`);
+    }
+    return lines.join('\n');
+  }
+
+  /**
+   * 兼容旧 API — 确认执行（不再需要，保留空实现）
+   */
+  async confirmAndExec() {
+    return [{ error: '此版本无需确认，指令直接执行' }];
   }
 }
 

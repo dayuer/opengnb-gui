@@ -49,11 +49,13 @@ async function boot() {
     nodesConfig: approvedNodes,
     sshManager,
     getNodeStatus: () => monitor.getAllStatus(),
+    provisioner,
   });
 
   // 审批回调：更新监控
   keyManager.onApproval = (updatedNodes) => {
     monitor.nodesConfig = updatedNodes;
+    aiOps.nodesConfig = updatedNodes;
     if (!monitor._timer && updatedNodes.length > 0) monitor.start();
     console.log(`[Approval] 监控已更新: ${updatedNodes.length} 个节点`);
   };
