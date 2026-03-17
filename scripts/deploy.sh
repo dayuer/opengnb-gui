@@ -103,11 +103,41 @@ systemctl restart gnb-console
 
 echo "      gnb-console 服务: \$(systemctl is-active gnb-console)"
 
-# nginx 反向代理 (HTTPS 由 certbot 配置)
+# nginx 反向代理 (stream SNI: 443 → 8443 SSL termination)
 cat > /etc/nginx/sites-available/gnb-console << 'NGINX_EOF'
+# HTTP → HTTPS redirect
 server {
     listen 80;
     server_name $DOMAIN;
+
+    location /.well-known/acme-challenge/ {
+        root /var/www/certbot;
+    }
+
+    location / {
+        return 301 https://\$host\$request_uri;
+    }
+}
+
+# HTTPS: stream SNI routes 443 → 8443
+server {
+    listen 8443 ssl http2;
+    listen [::]:8443 ssl http2;
+    server_name $DOMAIN;
+
+    ssl_certificate     /etc/letsencrypt/live/$DOMAIN/fullchain.pem;
+    ssl_certificate_key /etc/letsencrypt/live/$DOMAIN/privkey.pem;
+    ssl_protocols       TLSv1.2 TLSv1.3;
+    ssl_ciphers         ECDHE-ECDSA-AES128-GCM-SHA256:ECDHE-RSA-AES128-GCM-SHA256:ECDHE-ECDSA-AES256-GCM-SHA384:ECDHE-RSA-AES256-GCM-SHA384;
+    ssl_prefer_server_ciphers off;
+    ssl_session_cache shared:GNB_SSL:10m;
+    ssl_session_timeout 10m;
+
+    add_header Strict-Transport-Security "max-age=31536000; includeSubDomains" always;
+    add_header X-Frame-Options "SAMEORIGIN" always;
+    add_header X-Content-Type-Options "nosniff" always;
+    add_header X-XSS-Protection "1; mode=block" always;
+    add_header Referrer-Policy "strict-origin-when-cross-origin" always;
 
     location / {
         proxy_pass http://127.0.0.1:$PORT;
