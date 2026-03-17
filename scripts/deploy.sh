@@ -59,7 +59,7 @@ ssh "$SSH_USER@$SERVER" << REMOTE_DEPLOY
 set -e
 if [ -d "$APP_DIR/.git" ]; then
     echo "      拉取最新代码..."
-    cd $APP_DIR && git pull origin $BRANCH
+    cd $APP_DIR && git fetch origin $BRANCH && git reset --hard origin/$BRANCH
 else
     echo "      克隆仓库..."
     rm -rf $APP_DIR
