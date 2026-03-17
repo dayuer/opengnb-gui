@@ -33,7 +33,13 @@ function createEnrollRouter(keyManager) {
   router.get('/status/:id', (req, res) => {
     const node = keyManager.getAllNodes().find(n => n.id === req.params.id);
     if (!node) return res.status(404).json({ status: 'unknown' });
-    res.json({ status: node.status, tunAddr: node.tunAddr || '' });
+    res.json({
+      status: node.status,
+      tunAddr: node.tunAddr || '',
+      gnbNodeId: node.gnbNodeId || '',
+      consoleGnbNodeId: keyManager.gnbNodeId,
+      consoleGnbTunAddr: keyManager.gnbTunAddr,
+    });
   });
 
   // POST /api/enroll/:id/ready — 节点通知就绪（synon + 公钥已部署）
@@ -64,6 +70,23 @@ function createEnrollRouter(keyManager) {
   router.post('/:id/reject', (req, res) => {
     const result = keyManager.rejectNode(req.params.id);
     res.status(result.success ? 200 : 404).json(result);
+  });
+
+  // --- GNB 公钥交换 ---
+
+  // GET /api/enroll/gnb-pubkey — 获取 Console 的 GNB Ed25519 公钥
+  router.get('/gnb-pubkey', (req, res) => {
+    const pubKey = keyManager.getGnbPublicKey();
+    if (!pubKey) return res.status(404).json({ error: 'Console GNB 公钥不存在' });
+    res.json({ publicKey: pubKey, nodeId: keyManager.gnbNodeId });
+  });
+
+  // POST /api/enroll/:id/gnb-pubkey — 终端上传自身 GNB 公钥
+  router.post('/:id/gnb-pubkey', (req, res) => {
+    const { publicKey } = req.body;
+    if (!publicKey) return res.status(400).json({ error: '缺少 publicKey' });
+    const result = keyManager.saveNodeGnbPubkey(req.params.id, publicKey);
+    res.status(result.success ? 200 : 400).json(result);
   });
 
   // DELETE /api/enroll/:id — 删除

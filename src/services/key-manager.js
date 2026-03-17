@@ -3,6 +3,7 @@
 const crypto = require('crypto');
 const fs = require('fs');
 const path = require('path');
+const { execSync } = require('child_process');
 
 /**
  * SSH 密钥管理器 + 节点注册（审批制）
@@ -24,6 +25,12 @@ class KeyManager {
     this.keyDir = path.join(this.dataDir, 'ssh');
     this.privateKeyPath = path.join(this.keyDir, 'console_ed25519');
     this.publicKeyPath = path.join(this.keyDir, 'console_ed25519.pub');
+
+    // GNB 配置路径（Console 节点）
+    this.gnbNodeId = process.env.GNB_NODE_ID || '1001';
+    this.gnbConfDir = process.env.GNB_CONF_DIR || `/opt/gnb/conf/${this.gnbNodeId}`;
+    this.gnbTunAddr = process.env.GNB_TUN_ADDR || '10.1.0.1';
+    this.gnbIndexAddr = process.env.GNB_INDEX_ADDR || ''; // 自动从 hostname 获取
 
     /**
      * 节点注册表
@@ -189,16 +196,124 @@ class KeyManager {
     if (!node) return { success: false, message: '节点不存在' };
     if (node.status === 'approved') return { success: true, message: '已审批', tunAddr: node.tunAddr };
 
-    // 审批时分配 TUN 地址
+    // 审批时分配 TUN 地址和 GNB 节点 ID
     if (options.tunAddr) node.tunAddr = options.tunAddr;
+    if (options.gnbNodeId) node.gnbNodeId = options.gnbNodeId;
 
     node.status = 'approved';
     node.approvedAt = new Date().toISOString();
     this._save();
 
+    // 自动更新 Console 的 GNB 配置
+    this._updateGnbConfig(node);
+
     if (this.onApproval) this.onApproval(this.getApprovedNodesConfig());
 
     return { success: true, message: `节点 ${nodeId} 已通过审批`, tunAddr: node.tunAddr };
+  }
+
+  /**
+   * 审批后自动更新 Console 的 GNB 配置文件并重启客户端
+   * - 将新节点追加到 route.conf 和 address.conf
+   * - 重启 GNB client 服务
+   * @param {object} node - 已审批的节点
+   */
+  _updateGnbConfig(node) {
+    if (!node.tunAddr) return;
+
+    const gnbNodeId = node.gnbNodeId || this._nextGnbNodeId();
+    node.gnbNodeId = gnbNodeId;
+    this._save();
+
+    const routeConf = path.join(this.gnbConfDir, 'route.conf');
+    const addressConf = path.join(this.gnbConfDir, 'address.conf');
+    const entry = `${gnbNodeId}|${node.tunAddr}|255.255.255.0`;
+
+    try {
+      // 检查 GNB 配置目录是否存在
+      if (!fs.existsSync(this.gnbConfDir)) {
+        console.log(`[GNB] 配置目录不存在: ${this.gnbConfDir}，跳过自动配置`);
+        return;
+      }
+
+      // 追加到 route.conf（去重）
+      if (fs.existsSync(routeConf)) {
+        const routeContent = fs.readFileSync(routeConf, 'utf8');
+        if (!routeContent.includes(`${gnbNodeId}|`)) {
+          fs.appendFileSync(routeConf, `\n${entry}`);
+          console.log(`[GNB] route.conf 已追加: ${entry}`);
+        }
+      }
+
+      // 追加到 address.conf（去重）
+      if (fs.existsSync(addressConf)) {
+        const addrContent = fs.readFileSync(addressConf, 'utf8');
+        if (!addrContent.includes(`${gnbNodeId}|`)) {
+          fs.appendFileSync(addressConf, `\n${entry}`);
+          console.log(`[GNB] address.conf 已追加: ${entry}`);
+        }
+      }
+
+      // 重启 GNB 客户端服务
+      try {
+        execSync('systemctl restart gnb', { timeout: 10000 });
+        console.log('[GNB] 客户端服务已重启');
+      } catch (e) {
+        console.log(`[GNB] 重启服务失败（可能是首次安装）: ${e.message}`);
+      }
+    } catch (err) {
+      console.error(`[GNB] 更新配置失败: ${err.message}`);
+    }
+  }
+
+  /**
+   * 自动分配下一个 GNB 节点 ID（从 1002 开始，Console 自身是 1001）
+   */
+  _nextGnbNodeId() {
+    const usedIds = this.nodes
+      .filter(n => n.gnbNodeId)
+      .map(n => parseInt(n.gnbNodeId, 10));
+    const consoleId = parseInt(this.gnbNodeId, 10);
+    usedIds.push(consoleId);
+    return String(Math.max(...usedIds) + 1);
+  }
+
+  /**
+   * 获取 Console GNB 节点的 Ed25519 公钥
+   */
+  getGnbPublicKey() {
+    const pubKeyPath = path.join(this.gnbConfDir, 'security', `${this.gnbNodeId}.public`);
+    try {
+      return fs.readFileSync(pubKeyPath, 'utf8').trim();
+    } catch {
+      return null;
+    }
+  }
+
+  /**
+   * 保存终端节点的 GNB 公钥到 Console 的 ed25519 目录
+   * @param {string} nodeId
+   * @param {string} pubKey - hex 编码的 Ed25519 公钥
+   */
+  saveNodeGnbPubkey(nodeId, pubKey) {
+    const node = this.nodes.find(n => n.id === nodeId);
+    if (!node || !node.gnbNodeId) {
+      return { success: false, message: '节点不存在或未分配 GNB ID' };
+    }
+    const ed25519Dir = path.join(this.gnbConfDir, 'ed25519');
+    if (!fs.existsSync(ed25519Dir)) fs.mkdirSync(ed25519Dir, { recursive: true });
+    const keyPath = path.join(ed25519Dir, `${node.gnbNodeId}.public`);
+    fs.writeFileSync(keyPath, pubKey.trim());
+    console.log(`[GNB] 已保存节点 ${nodeId} (gnb ${node.gnbNodeId}) 的公钥`);
+
+    // 保存公钥后重启 GNB 以加载
+    try {
+      execSync('systemctl restart gnb', { timeout: 10000 });
+    } catch (e) {
+      console.log(`[GNB] 重启服务跳过: ${e.message}`);
+    }
+
+    return { success: true, message: '公钥已保存' };
   }
 
   /**

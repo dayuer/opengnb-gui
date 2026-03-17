@@ -457,6 +457,137 @@ if command -v crontab &>/dev/null; then
     (crontab -l 2>/dev/null | grep -v "sync-mirror"; echo "0 5 * * * $APP_DIR/scripts/sync-mirror.sh >> /var/log/mirror-sync.log 2>&1") | crontab -
 fi
 
+# [8/8] GNB 编译安装 + Index/Client 分进程
+echo "[8/8] 安装 GNB P2P VPN..."
+
+GNB_NODE_ID="${GNB_NODE_ID:-1001}"
+GNB_TUN_ADDR="${GNB_TUN_ADDR:-10.1.0.1}"
+GNB_CONF="/opt/gnb/conf/$GNB_NODE_ID"
+
+if command -v gnb &>/dev/null; then
+    echo "      GNB 已安装: $(gnb --help 2>&1 | head -1)"
+else
+    echo "      编译 GNB..."
+    cd /tmp && rm -rf opengnb
+
+    # 优先用本地镜像
+    if [ -f "$APP_DIR/data/mirror/gnb/opengnb-src.tar.gz" ]; then
+        mkdir -p /tmp/opengnb
+        tar xzf "$APP_DIR/data/mirror/gnb/opengnb-src.tar.gz" -C /tmp/opengnb --strip-components=1
+    else
+        curl -sSL "https://github.com/opengnb/opengnb/archive/refs/heads/master.tar.gz" -o /tmp/opengnb-src.tar.gz
+        mkdir -p /tmp/opengnb
+        tar xzf /tmp/opengnb-src.tar.gz -C /tmp/opengnb --strip-components=1
+    fi
+
+    cd /tmp/opengnb
+
+    case "$(uname -s)" in
+        Linux)   GNB_MK="Makefile.linux" ;;
+        Darwin)  GNB_MK="Makefile.Darwin" ;;
+        FreeBSD) GNB_MK="Makefile.freebsd" ;;
+        *)       GNB_MK="Makefile.linux" ;;
+    esac
+
+    make -f "$GNB_MK" -j$(nproc 2>/dev/null || echo 2) 2>&1 | tail -3
+    mkdir -p /opt/gnb/bin
+    cp gnb gnb_ctl gnb_es gnb_crypto /opt/gnb/bin/ 2>/dev/null || true
+    ln -sf /opt/gnb/bin/gnb /usr/local/bin/gnb
+    ln -sf /opt/gnb/bin/gnb_ctl /usr/local/bin/gnb_ctl
+    echo "      GNB $(gnb --help 2>&1 | head -1)"
+fi
+
+# 配置 Console 节点
+mkdir -p "$GNB_CONF"/{security,ed25519,scripts}
+
+if [ ! -f "$GNB_CONF/node.conf" ]; then
+    cat > "$GNB_CONF/node.conf" << GNBEOF
+nodeid $GNB_NODE_ID
+listen 9002
+multi-socket on
+unified-forwarding auto
+GNBEOF
+fi
+
+if [ ! -f "$GNB_CONF/route.conf" ]; then
+    cat > "$GNB_CONF/route.conf" << GNBEOF
+${GNB_NODE_ID}|${GNB_TUN_ADDR}|255.255.255.0
+GNBEOF
+fi
+
+# address.conf: 获取本机公网 IP 作为 index 地址
+CONSOLE_PUBLIC_IP=$(curl -sS --max-time 3 ifconfig.me 2>/dev/null || hostname -I 2>/dev/null | awk '{print $1}' || echo "127.0.0.1")
+if [ ! -f "$GNB_CONF/address.conf" ]; then
+    cat > "$GNB_CONF/address.conf" << GNBEOF
+i|0|${CONSOLE_PUBLIC_IP}|9001
+${GNB_NODE_ID}|${GNB_TUN_ADDR}|255.255.255.0
+GNBEOF
+fi
+
+# 生成 Ed25519 密钥
+if [ ! -f "$GNB_CONF/security/${GNB_NODE_ID}.private" ]; then
+    cd "$GNB_CONF/security"
+    /opt/gnb/bin/gnb_crypto -c -p "${GNB_NODE_ID}.private" -k "${GNB_NODE_ID}.public"
+    # 自身公钥也放到 ed25519 目录
+    cp "${GNB_NODE_ID}.public" "$GNB_CONF/ed25519/${GNB_NODE_ID}.public"
+    echo "      Ed25519 密钥已生成"
+fi
+
+# systemd: Index 服务（纯公网 index，端口 9001）
+if command -v systemctl &>/dev/null; then
+    cat > /etc/systemd/system/gnb-index.service << SVCEOF
+[Unit]
+Description=GNB Public Index Service
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+ExecStartPre=/bin/mkdir -p /var/log/opengnb/index
+ExecStart=/opt/gnb/bin/gnb -P \\
+  --listen=0.0.0.0:9001 \\
+  --console-log-level=3 \\
+  --index-service-log-level=3 \\
+  --log-file-path=/var/log/opengnb/index
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target
+SVCEOF
+
+    # systemd: Client 服务（Safe 模式，端口 9002）
+    cat > /etc/systemd/system/gnb.service << SVCEOF
+[Unit]
+Description=GNB P2P VPN Client
+After=network-online.target gnb-index.service
+Wants=network-online.target
+
+[Service]
+Type=simple
+ExecStartPre=/bin/mkdir -p /var/log/opengnb/client
+ExecStart=/opt/gnb/bin/gnb -c ${GNB_CONF} \\
+  -i gnb_tun \\
+  --crypto rc4 \\
+  --crypto-key-update-interval hour \\
+  --address-secure=on \\
+  --console-log-level=3 \\
+  --log-file-path=/var/log/opengnb/client
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target
+SVCEOF
+
+    systemctl daemon-reload
+    systemctl enable gnb-index gnb
+    systemctl start gnb-index
+    sleep 2
+    systemctl start gnb
+    echo "      Index: $(systemctl is-active gnb-index) | Client: $(systemctl is-active gnb)"
+fi
+
 # 完成
 echo ""
 echo "  ╔══════════════════════════════════════════╗"
@@ -464,5 +595,6 @@ echo "  ║  ✅ GNB Console 安装完成                  ║"
 echo "  ╠══════════════════════════════════════════╣"
 echo "  ║  Dashboard: https://$DOMAIN              ║"
 echo "  ║  Health:    https://$DOMAIN/api/health   ║"
+echo "  ║  GNB TUN:   $GNB_TUN_ADDR               ║"
 echo "  ╚══════════════════════════════════════════╝"
 echo ""

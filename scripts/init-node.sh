@@ -2,12 +2,14 @@
 # GNB Console — 节点初始化脚本
 #
 # 流程：
-#   1. 自动安装 GNB（编译或已安装跳过）
-#   2. 通过 API 获取注册 passcode，安装完成后提交注册申请
-#   3. 等待管理员在 Web UI 审批
-#   4. 审批通过后，创建 synon 用户（sudo 免密）
-#   5. 下载 Console 的 SSH 公钥并写入 authorized_keys
-#   6. 通知 Console 已就绪（Console 将 SSH 远程安装 OpenClaw）
+#   1. 安装 GNB（编译或已安装跳过）
+#   2. 获取 passcode 并提交注册
+#   3. 等待管理员审批（审批时分配 TUN 地址和 GNB 节点 ID）
+#   4. 配置 GNB（密钥生成 + 公钥交换 + 配置文件 + systemd）
+#   5. 启动 GNB 并等待 TUN 接口
+#   6. 创建 synon 用户（sudo 免密）
+#   7. 下载 Console SSH 公钥
+#   8. 通知 Console 已就绪
 #
 # 用法（在目标节点以 root 执行）：
 #   curl -sSL https://api.synonclaw.com/api/enroll/init.sh | bash
@@ -18,8 +20,6 @@ set -euo pipefail
 CONSOLE="${CONSOLE:-api.synonclaw.com}"
 NODE_ID="${NODE_ID:-$(hostname -s)}"
 NODE_NAME="${NODE_NAME:-$NODE_ID}"
-GNB_MAP="${GNB_MAP:-/opt/gnb/conf/$NODE_ID/gnb.map}"
-GNB_CTL="${GNB_CTL:-gnb_ctl}"
 SSH_USER="synon"
 
 # 自动检测协议：域名用 https，IP 用 http
@@ -29,9 +29,12 @@ else
     API_BASE="https://$CONSOLE"
 fi
 
+# JSON 值提取工具函数（兼容无 jq 环境）
+json_val() { python3 -c "import sys,json; print(json.load(sys.stdin).get('$1',''))" 2>/dev/null || echo ""; }
+
 echo ""
 echo "  ╔══════════════════════════════════════╗"
-echo "  ║  GNB Console — 节点初始化 v0.3.0     ║"
+echo "  ║  GNB Console — 节点初始化 v0.4.0     ║"
 echo "  ╚══════════════════════════════════════╝"
 echo ""
 echo "  Console:  $CONSOLE ($API_BASE)"
@@ -39,22 +42,22 @@ echo "  Node ID:  $NODE_ID"
 echo ""
 
 # ============================================
-# Step 1: 安装 GNB（始终全新安装）
+# Step 1: 安装 GNB
 # ============================================
-echo "[1/6] 安装 GNB..."
+echo "[1/8] 安装 GNB..."
 
 # 清理旧安装
 if command -v gnb &>/dev/null || [ -d /opt/gnb ]; then
     echo "      检测到旧 GNB，清理中..."
+    systemctl stop gnb 2>/dev/null || true
+    killall gnb gnb_es 2>/dev/null || true
+    ip link delete gnb_tun 2>/dev/null || true
     rm -rf /opt/gnb /usr/local/bin/gnb /usr/local/bin/gnb_ctl
 fi
-
-echo "      从 Console 镜像下载源码..."
 
 # 安装编译依赖（多 OS 适配）
 if [ "$(uname)" = "Darwin" ]; then
     xcode-select --install 2>/dev/null || true
-    command -v brew &>/dev/null && brew install -q curl 2>/dev/null || true
 elif command -v apt-get &>/dev/null; then
     apt-get update -qq && apt-get install -y -qq build-essential curl
 elif command -v dnf &>/dev/null; then
@@ -71,85 +74,53 @@ fi
 
 cd /tmp && rm -rf opengnb
 
-# 优先从 Console 镜像下载（终端可能无法访问 GitHub）
+# 优先从 Console 镜像下载
 if curl -sSf "$API_BASE/api/mirror/gnb/opengnb-src.tar.gz" -o /tmp/opengnb-src.tar.gz 2>/dev/null; then
     echo "      从 Console 镜像下载成功"
     mkdir -p /tmp/opengnb
     tar xzf /tmp/opengnb-src.tar.gz -C /tmp/opengnb --strip-components=1
 else
     echo "      Console 镜像不可用，尝试 GitHub..."
-    if command -v git &>/dev/null; then
-        git clone --depth 1 https://github.com/opengnb/opengnb.git /tmp/opengnb
-    else
-        curl -sSL "https://github.com/opengnb/opengnb/archive/refs/heads/master.tar.gz" -o /tmp/opengnb-src.tar.gz
-        mkdir -p /tmp/opengnb
-        tar xzf /tmp/opengnb-src.tar.gz -C /tmp/opengnb --strip-components=1
-    fi
+    curl -sSL "https://github.com/opengnb/opengnb/archive/refs/heads/master.tar.gz" -o /tmp/opengnb-src.tar.gz
+    mkdir -p /tmp/opengnb
+    tar xzf /tmp/opengnb-src.tar.gz -C /tmp/opengnb --strip-components=1
 fi
 
 cd /tmp/opengnb
 
-# 自动选择平台 Makefile
 case "$(uname -s)" in
     Linux)   GNB_MAKEFILE="Makefile.linux" ;;
     Darwin)  GNB_MAKEFILE="Makefile.Darwin" ;;
     FreeBSD) GNB_MAKEFILE="Makefile.freebsd" ;;
-    OpenBSD) GNB_MAKEFILE="Makefile.openbsd" ;;
     *)       GNB_MAKEFILE="Makefile.linux" ;;
 esac
 
-if [ ! -f "$GNB_MAKEFILE" ]; then
-    echo "      [失败] 未找到 $GNB_MAKEFILE"
-    exit 1
-fi
+echo "      编译 GNB ($GNB_MAKEFILE)..."
+make -f "$GNB_MAKEFILE" -j$(nproc 2>/dev/null || echo 2) 2>&1 | tail -1
 
-echo "      编译 GNB (使用 $GNB_MAKEFILE)..."
-make -f "$GNB_MAKEFILE" -j$(nproc 2>/dev/null || echo 2)
-
-# 安装
 mkdir -p /opt/gnb/bin
-find /tmp/opengnb/bin -type f -executable -exec cp {} /opt/gnb/bin/ \; 2>/dev/null \
-    || cp /tmp/opengnb/bin/* /opt/gnb/bin/ 2>/dev/null || true
+cp gnb gnb_ctl gnb_es gnb_crypto /opt/gnb/bin/ 2>/dev/null || true
 ln -sf /opt/gnb/bin/gnb /usr/local/bin/gnb
 ln -sf /opt/gnb/bin/gnb_ctl /usr/local/bin/gnb_ctl
-
 echo "      GNB 编译安装完成"
 
-# 确保配置目录存在
-GNB_CONF_DIR="/opt/gnb/conf/$NODE_ID"
-mkdir -p "$GNB_CONF_DIR"
-
-# 生成 ED25519 密钥（如果不存在）
-if [ ! -f "$GNB_CONF_DIR/ed25519_private.key" ]; then
-    gnb -c "$GNB_CONF_DIR" --setup-node 2>/dev/null || true
-    echo "      已生成节点密钥"
-fi
-
 # ============================================
-# Step 2: 获取 passcode 并提交注册（不需要 TUN_ADDR）
+# Step 2: 获取 passcode 并提交注册
 # ============================================
-echo "[2/6] 获取注册 passcode 并提交注册..."
+echo "[2/8] 提交注册..."
 
-# 从 Console 获取一次性 passcode
-PASSCODE_RESP=$(curl -sS "$API_BASE/api/enroll/passcode?nodeId=$NODE_ID")
-PASSCODE=$(echo "$PASSCODE_RESP" | python3 -c "import sys,json; print(json.load(sys.stdin).get('passcode',''))" 2>/dev/null || echo "")
-
+PASSCODE=$(curl -sS "$API_BASE/api/enroll/passcode?nodeId=$NODE_ID" | json_val passcode)
 if [ -z "$PASSCODE" ]; then
-    echo "      [失败] 无法获取 passcode: $PASSCODE_RESP"
+    echo "      [失败] 无法获取 passcode"
     exit 1
 fi
 
-echo "      Passcode: ${PASSCODE:0:8}..."
-
-# 提交注册申请（无 TUN_ADDR，管理员审批时分配）
 ENROLL_RESP=$(curl -sS -X POST "$API_BASE/api/enroll" \
   -H "Content-Type: application/json" \
-  -d "{\"passcode\":\"$PASSCODE\",\"id\":\"$NODE_ID\",\"name\":\"$NODE_NAME\",\"gnbMapPath\":\"$GNB_MAP\",\"gnbCtlPath\":\"$GNB_CTL\"}")
+  -d "{\"passcode\":\"$PASSCODE\",\"id\":\"$NODE_ID\",\"name\":\"$NODE_NAME\"}")
 
-STATUS=$(echo "$ENROLL_RESP" | python3 -c "import sys,json; print(json.load(sys.stdin).get('status','error'))" 2>/dev/null || echo "error")
-MSG=$(echo "$ENROLL_RESP" | python3 -c "import sys,json; print(json.load(sys.stdin).get('message',''))" 2>/dev/null || echo "$ENROLL_RESP")
-
-echo "      $MSG"
+STATUS=$(echo "$ENROLL_RESP" | json_val status)
+echo "      $(echo "$ENROLL_RESP" | json_val message)"
 
 if [ "$STATUS" = "error" ]; then
     echo "      [失败] 注册失败"
@@ -157,55 +128,169 @@ if [ "$STATUS" = "error" ]; then
 fi
 
 # ============================================
-# Step 3: 等待管理员审批（审批时分配 TUN_ADDR）
+# Step 3: 等待管理员审批
 # ============================================
 TUN_ADDR=""
+GNB_NODE_ID=""
+CONSOLE_GNB_NODE_ID=""
+CONSOLE_GNB_TUN_ADDR=""
+
+fetch_status() {
+    local resp
+    resp=$(curl -sS "$API_BASE/api/enroll/status/$NODE_ID" 2>/dev/null || echo '{}')
+    STATUS=$(echo "$resp" | json_val status)
+    TUN_ADDR=$(echo "$resp" | json_val tunAddr)
+    GNB_NODE_ID=$(echo "$resp" | json_val gnbNodeId)
+    CONSOLE_GNB_NODE_ID=$(echo "$resp" | json_val consoleGnbNodeId)
+    CONSOLE_GNB_TUN_ADDR=$(echo "$resp" | json_val consoleGnbTunAddr)
+}
 
 if [ "$STATUS" = "approved" ]; then
-    echo "      节点已通过审批（之前已注册）"
-    # 从状态接口获取已分配的 TUN_ADDR
-    TUN_ADDR=$(curl -sS "$API_BASE/api/enroll/status/$NODE_ID" | python3 -c "import sys,json; print(json.load(sys.stdin).get('tunAddr',''))" 2>/dev/null || echo "")
+    echo "      已审批（之前已注册）"
+    fetch_status
 else
-    echo "[3/6] 等待管理员审批..."
-    echo "      管理员审批时将分配 GNB TUN 地址"
-    echo "      (每 10 秒检查一次, Ctrl+C 退出)"
+    echo "[3/8] 等待管理员审批..."
+    echo "      审批时将分配 GNB TUN 地址 (每 10 秒检查, Ctrl+C 退出)"
     echo ""
-
     while true; do
         sleep 10
-        CHECK=$(curl -sS "$API_BASE/api/enroll/status/$NODE_ID" 2>/dev/null || echo '{"status":"error"}')
-        CUR_STATUS=$(echo "$CHECK" | python3 -c "import sys,json; print(json.load(sys.stdin).get('status','error'))" 2>/dev/null || echo "error")
-
-        case "$CUR_STATUS" in
-            approved)
-                TUN_ADDR=$(echo "$CHECK" | python3 -c "import sys,json; print(json.load(sys.stdin).get('tunAddr',''))" 2>/dev/null || echo "")
-                echo ""
-                echo "      ✅ 审批通过！"
-                break
-                ;;
-            rejected)
-                echo ""
-                echo "      ❌ 审批被拒绝"
-                exit 1
-                ;;
-            pending)
-                printf "."
-                ;;
+        fetch_status
+        case "$STATUS" in
+            approved) echo "" && echo "      ✅ 审批通过！"; break ;;
+            rejected) echo "" && echo "      ❌ 审批被拒绝"; exit 1 ;;
+            pending)  printf "." ;;
         esac
     done
 fi
 
-if [ -z "$TUN_ADDR" ]; then
-    echo "      [错误] 审批未分配 TUN 地址，请管理员在审批时指定"
+if [ -z "$TUN_ADDR" ] || [ -z "$GNB_NODE_ID" ]; then
+    echo "      [错误] 审批未分配 TUN 地址或 GNB 节点 ID"
     exit 1
 fi
 
-echo "      GNB TUN 地址: $TUN_ADDR"
+echo "      GNB 节点 ID: $GNB_NODE_ID"
+echo "      TUN 地址:    $TUN_ADDR"
 
 # ============================================
-# Step 4: 创建 synon 用户 (审批通过后)
+# Step 4: 配置 GNB（密钥 + 公钥交换 + 配置文件）
 # ============================================
-echo "[4/6] 创建运维用户 $SSH_USER ..."
+echo "[4/8] 配置 GNB..."
+
+GNB_CONF="/opt/gnb/conf/$GNB_NODE_ID"
+mkdir -p "$GNB_CONF"/{security,ed25519,scripts}
+
+# 生成 Ed25519 密钥
+if [ ! -f "$GNB_CONF/security/${GNB_NODE_ID}.private" ]; then
+    cd "$GNB_CONF/security"
+    /opt/gnb/bin/gnb_crypto -c -p "${GNB_NODE_ID}.private" -k "${GNB_NODE_ID}.public"
+    cp "${GNB_NODE_ID}.public" "$GNB_CONF/ed25519/${GNB_NODE_ID}.public"
+    echo "      Ed25519 密钥已生成"
+fi
+
+# 下载 Console 的 GNB 公钥
+echo "      下载 Console GNB 公钥..."
+CONSOLE_PUBKEY_RESP=$(curl -sS "$API_BASE/api/enroll/gnb-pubkey")
+CONSOLE_PUBKEY=$(echo "$CONSOLE_PUBKEY_RESP" | json_val publicKey)
+
+if [ -n "$CONSOLE_PUBKEY" ]; then
+    echo -n "$CONSOLE_PUBKEY" > "$GNB_CONF/ed25519/${CONSOLE_GNB_NODE_ID}.public"
+    echo "      Console 公钥已保存 (node $CONSOLE_GNB_NODE_ID)"
+else
+    echo "      ⚠️ 无法获取 Console 公钥，GNB 加密通信可能受影响"
+fi
+
+# 上传本节点公钥到 Console
+LOCAL_PUBKEY=$(cat "$GNB_CONF/security/${GNB_NODE_ID}.public" 2>/dev/null || echo "")
+if [ -n "$LOCAL_PUBKEY" ]; then
+    curl -sS -X POST "$API_BASE/api/enroll/$NODE_ID/gnb-pubkey" \
+      -H "Content-Type: application/json" \
+      -d "{\"publicKey\":\"$LOCAL_PUBKEY\"}" > /dev/null
+    echo "      本节点公钥已上传到 Console"
+fi
+
+# 获取 Console 公网 IP
+CONSOLE_HOST=$(echo "$CONSOLE" | sed 's/:.*//') # 去掉端口
+if echo "$CONSOLE_HOST" | grep -qE '^[0-9]+\.[0-9]+'; then
+    CONSOLE_IP="$CONSOLE_HOST"
+else
+    CONSOLE_IP=$(dig +short "$CONSOLE_HOST" 2>/dev/null | head -1 || echo "$CONSOLE_HOST")
+fi
+
+# 写入配置文件
+cat > "$GNB_CONF/node.conf" << GNBEOF
+nodeid $GNB_NODE_ID
+listen 9002
+multi-socket on
+unified-forwarding auto
+GNBEOF
+
+cat > "$GNB_CONF/route.conf" << GNBEOF
+${CONSOLE_GNB_NODE_ID}|${CONSOLE_GNB_TUN_ADDR}|255.255.255.0
+${GNB_NODE_ID}|${TUN_ADDR}|255.255.255.0
+GNBEOF
+
+cat > "$GNB_CONF/address.conf" << GNBEOF
+i|0|${CONSOLE_IP}|9001
+${CONSOLE_GNB_NODE_ID}|${CONSOLE_GNB_TUN_ADDR}|255.255.255.0
+${GNB_NODE_ID}|${TUN_ADDR}|255.255.255.0
+GNBEOF
+
+echo "      GNB 配置文件已写入"
+
+# ============================================
+# Step 5: 启动 GNB 并等待 TUN 接口
+# ============================================
+echo "[5/8] 启动 GNB..."
+
+if command -v systemctl &>/dev/null; then
+    cat > /etc/systemd/system/gnb.service << SVCEOF
+[Unit]
+Description=GNB P2P VPN Node
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+ExecStartPre=/bin/mkdir -p /var/log/opengnb
+ExecStart=/opt/gnb/bin/gnb -c ${GNB_CONF} \\
+  -i gnb_tun \\
+  --crypto rc4 \\
+  --crypto-key-update-interval hour \\
+  --address-secure=on \\
+  --console-log-level=3 \\
+  --log-file-path=/var/log/opengnb
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target
+SVCEOF
+    systemctl daemon-reload
+    systemctl enable gnb
+    systemctl start gnb
+else
+    /opt/gnb/bin/gnb -c "$GNB_CONF" -i gnb_tun --crypto rc4 --address-secure=on -d
+fi
+
+# 等待 TUN 接口出现
+echo "      等待 TUN 接口 (最多 30 秒)..."
+for i in $(seq 1 15); do
+    if ip addr show gnb_tun 2>/dev/null | grep -q "inet "; then
+        TUN_IP=$(ip addr show gnb_tun 2>/dev/null | grep 'inet ' | awk '{print $2}')
+        echo "      ✅ TUN 接口已就绪: $TUN_IP"
+        break
+    fi
+    sleep 2
+done
+
+if ! ip addr show gnb_tun 2>/dev/null | grep -q "inet "; then
+    echo "      ⚠️ TUN 接口未就绪，请检查 GNB 日志: journalctl -u gnb"
+fi
+
+# ============================================
+# Step 6: 创建 synon 用户
+# ============================================
+echo "[6/8] 创建运维用户 $SSH_USER..."
 
 if id "$SSH_USER" &>/dev/null; then
     echo "      用户已存在"
@@ -214,7 +299,6 @@ else
     echo "      用户已创建"
 fi
 
-# sudo 免密
 SUDOERS_FILE="/etc/sudoers.d/$SSH_USER"
 if [ ! -f "$SUDOERS_FILE" ]; then
     echo "$SSH_USER ALL=(ALL) NOPASSWD: ALL" > "$SUDOERS_FILE"
@@ -223,22 +307,19 @@ if [ ! -f "$SUDOERS_FILE" ]; then
 fi
 
 # ============================================
-# Step 5: 下载 Console SSH 公钥
+# Step 7: 下载 Console SSH 公钥
 # ============================================
-echo "[5/6] 下载 Console SSH 公钥..."
+echo "[7/8] 下载 Console SSH 公钥..."
 
-PUBKEY_JSON=$(curl -sS "$API_BASE/api/enroll/pubkey")
-PUBKEY=$(echo "$PUBKEY_JSON" | python3 -c "import sys,json; print(json.load(sys.stdin)['publicKey'])" 2>/dev/null || echo "")
-
+PUBKEY=$(curl -sS "$API_BASE/api/enroll/pubkey" | json_val publicKey)
 if [ -z "$PUBKEY" ]; then
-    echo "      [失败] 无法获取公钥: $PUBKEY_JSON"
+    echo "      [失败] 无法获取 SSH 公钥"
     exit 1
 fi
 
 SSH_DIR="/home/$SSH_USER/.ssh"
 AUTH_KEYS="$SSH_DIR/authorized_keys"
-mkdir -p "$SSH_DIR"
-chmod 700 "$SSH_DIR"
+mkdir -p "$SSH_DIR" && chmod 700 "$SSH_DIR"
 
 if grep -qF "$PUBKEY" "$AUTH_KEYS" 2>/dev/null; then
     echo "      公钥已存在"
@@ -250,19 +331,20 @@ chmod 600 "$AUTH_KEYS"
 chown -R "$SSH_USER:$SSH_USER" "$SSH_DIR"
 
 # ============================================
-# Step 6: 通知 Console 节点已就绪
+# Step 8: 通知 Console 已就绪
 # ============================================
-echo "[6/6] 通知 Console 节点已就绪..."
+echo "[8/8] 通知 Console 节点已就绪..."
 
 READY_RESP=$(curl -sS -X POST "$API_BASE/api/enroll/$NODE_ID/ready" \
   -H "Content-Type: application/json" \
-  -d "{\"sshUser\":\"$SSH_USER\",\"sshPort\":22}")
+  -d "{\"sshUser\":\"$SSH_USER\",\"sshPort\":22,\"tunAddr\":\"$TUN_ADDR\"}")
 
-echo "      $(echo "$READY_RESP" | python3 -c "import sys,json; print(json.load(sys.stdin).get('message','就绪'))" 2>/dev/null || echo "已通知")"
+echo "      $(echo "$READY_RESP" | json_val message)"
 
 echo ""
 echo "  ╔══════════════════════════════════════╗"
 echo "  ║  ✅ 初始化完成                        ║"
-echo "  ║  Console 将通过 SSH 远程安装 OpenClaw  ║"
+echo "  ║  GNB TUN: $TUN_ADDR                  ║"
+echo "  ║  Console 将通过 SSH 远程管理此节点     ║"
 echo "  ╚══════════════════════════════════════╝"
 echo ""
