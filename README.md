@@ -23,18 +23,27 @@ npm run dev
 # 访问 http://localhost:3000
 ```
 
+## Console 服务器安装
+
+在服务器上以 root 执行：
+
+```bash
+curl -sSL https://api.synonclaw.com/api/enroll/setup.sh | \
+  DOMAIN=api.synonclaw.com EMAIL=admin@synonclaw.com bash
+```
+
 ## 节点接入
 
 在目标节点以 root 执行：
 
 ```bash
-curl -sSL http://<Console_TUN_IP>:3000/api/enroll/init.sh | \
+curl -sSL https://api.synonclaw.com/api/enroll/init.sh | \
   CONSOLE=<Console_TUN_IP>:3000 \
-  NODE_ID=<节点ID> TUN_ADDR=<节点TUN地址> bash
+  NODE_ID=<节点ID> NODE_NAME=<节点名称> TUN_ADDR=<节点TUN地址> bash
 ```
 
 脚本将自动执行 6 步：
-1. **安装 GNB**（源码编译，已安装则跳过）
+1. **安装 GNB**（优先从 Console 镜像下载，GitHub 作为 fallback）
 2. **获取 passcode 并注册**（通过 API 获取一次性注册码，提交注册申请）
 3. **等待管理员审批**（轮询，管理员在 Web UI 操作）
 4. **创建 synon 用户**（审批通过后，sudo 免密）
@@ -45,22 +54,27 @@ curl -sSL http://<Console_TUN_IP>:3000/api/enroll/init.sh | \
 
 ```
 opengnb-gui/
-├── config/nodes.json          # 节点配置模板
-├── scripts/init-node.sh       # 节点初始化脚本
+├── config/nodes.json              # 节点配置模板
+├── scripts/
+│   ├── setup-console.sh           # Console 服务器一键安装
+│   ├── init-node.sh               # 节点初始化脚本
+│   ├── deploy.sh                  # 部署脚本
+│   └── sync-mirror.sh             # GNB/OpenClaw 镜像同步
 ├── src/
-│   ├── server.js              # Express 入口
+│   ├── server.js                  # Express 入口
 │   ├── services/
-│   │   ├── ssh-manager.js     # SSH 连接池
-│   │   ├── gnb-parser.js      # gnb_ctl 输出解析
-│   │   ├── gnb-monitor.js     # 定时状态采集
-│   │   ├── key-manager.js     # 密钥管理 + 审批注册 + 备份
-│   │   ├── provisioner.js     # 远程安装配置
-│   │   └── ai-ops.js          # Claude AI 运维
+│   │   ├── ssh-manager.js         # SSH 连接池
+│   │   ├── gnb-parser.js          # gnb_ctl 输出解析
+│   │   ├── gnb-monitor.js         # 定时状态采集
+│   │   ├── key-manager.js         # 密钥管理 + 审批注册 + 备份
+│   │   ├── provisioner.js         # 远程安装配置
+│   │   └── ai-ops.js              # Claude AI 运维
 │   └── routes/
-│       ├── nodes.js           # 节点管理 API
-│       ├── enroll.js          # 注册审批 API
-│       └── ai.js              # AI 运维 API
-└── public/                    # Web Dashboard
+│       ├── nodes.js               # 节点管理 API
+│       ├── enroll.js              # 注册审批 API
+│       ├── mirror.js              # 软件镜像下载 API
+│       └── ai.js                  # AI 运维 API
+└── public/                        # Web Dashboard
     ├── index.html
     ├── css/style.css
     └── js/app.js
@@ -74,12 +88,20 @@ opengnb-gui/
 | GET | `/api/nodes` | 全部节点状态 |
 | GET | `/api/nodes/:id` | 单节点详情 |
 | POST | `/api/nodes/:id/exec` | 执行安全命令 |
-| GET | `/api/enroll/init.sh` | 下载初始化脚本 |
+| GET | `/api/enroll/init.sh` | 下载节点初始化脚本 |
+| GET | `/api/enroll/setup.sh` | 下载 Console 安装脚本 |
 | GET | `/api/enroll/pubkey` | 获取 Console SSH 公钥 |
-| POST | `/api/enroll` | 提交注册申请 |
+| GET | `/api/enroll/passcode` | 获取一次性注册码 |
+| POST | `/api/enroll` | 提交注册申请（需 passcode） |
+| GET | `/api/enroll/status/:id` | 查询审批状态 |
+| POST | `/api/enroll/:id/ready` | 节点通知就绪 |
 | GET | `/api/enroll/pending` | 待审批列表 |
 | POST | `/api/enroll/:id/approve` | 审批通过 |
 | POST | `/api/enroll/:id/reject` | 审批拒绝 |
+| GET | `/api/mirror/gnb` | GNB 镜像文件列表 |
+| GET | `/api/mirror/gnb/:file` | 下载 GNB 文件 |
+| GET | `/api/mirror/openclaw` | OpenClaw 镜像文件列表 |
+| GET | `/api/mirror/openclaw/:file` | 下载 OpenClaw 文件 |
 | POST | `/api/provision/:id` | 触发配置下发 |
 | POST | `/api/ai/chat` | AI 运维对话 |
 | POST | `/api/ai/confirm` | 确认执行 AI 建议命令 |

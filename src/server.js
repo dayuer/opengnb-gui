@@ -14,6 +14,7 @@ const Provisioner = require('./services/provisioner');
 const createNodesRouter = require('./routes/nodes');
 const createAiRouter = require('./routes/ai');
 const createEnrollRouter = require('./routes/enroll');
+const createMirrorRouter = require('./routes/mirror');
 
 const PORT = process.env.PORT || 3000;
 const DATA_DIR = process.env.DATA_DIR || path.resolve(__dirname, '../data');
@@ -72,8 +73,13 @@ async function boot() {
     const scriptPath = path.resolve(__dirname, '../scripts/init-node.sh');
     res.type('text/plain').sendFile(scriptPath);
   });
+  app.get('/api/enroll/setup.sh', (req, res) => {
+    const scriptPath = path.resolve(__dirname, '../scripts/setup-console.sh');
+    res.type('text/plain').sendFile(scriptPath);
+  });
 
   app.use('/api/enroll', createEnrollRouter(keyManager));
+  app.use('/api/mirror', createMirrorRouter(DATA_DIR));
 
   // 配置下发 API
   app.post('/api/provision/:id', async (req, res) => {

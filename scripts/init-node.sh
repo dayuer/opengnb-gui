@@ -43,18 +43,44 @@ echo "[1/6] 安装 GNB..."
 if command -v gnb &>/dev/null; then
     echo "      GNB 已安装: $(which gnb)"
 else
-    echo "      从源码编译安装..."
+    echo "      从 Console 镜像下载源码..."
 
-    # 安装编译依赖
-    if command -v apt-get &>/dev/null; then
-        apt-get update -qq && apt-get install -y -qq build-essential git
+    # 安装编译依赖（多 OS 适配）
+    if [ "$(uname)" = "Darwin" ]; then
+        xcode-select --install 2>/dev/null || true
+        command -v brew &>/dev/null && brew install -q curl 2>/dev/null || true
+    elif command -v apt-get &>/dev/null; then
+        apt-get update -qq && apt-get install -y -qq build-essential curl
+    elif command -v dnf &>/dev/null; then
+        dnf install -y -q gcc make curl
     elif command -v yum &>/dev/null; then
-        yum install -y -q gcc make git
+        yum install -y -q gcc make curl
+    elif command -v apk &>/dev/null; then
+        apk add -q build-base curl bash
+    elif command -v pacman &>/dev/null; then
+        pacman -Sy --noconfirm base-devel curl >/dev/null
+    elif command -v zypper &>/dev/null; then
+        zypper install -y -n gcc make curl
     fi
 
-    # 克隆并编译
     cd /tmp && rm -rf opengnb
-    git clone --depth 1 https://github.com/opengnb/opengnb.git /tmp/opengnb
+
+    # 优先从 Console 镜像下载（终端可能无法访问 GitHub）
+    if curl -sSf "http://$CONSOLE/api/mirror/gnb/opengnb-src.tar.gz" -o /tmp/opengnb-src.tar.gz 2>/dev/null; then
+        echo "      从 Console 镜像下载成功"
+        mkdir -p /tmp/opengnb
+        tar xzf /tmp/opengnb-src.tar.gz -C /tmp/opengnb --strip-components=1
+    else
+        echo "      Console 镜像不可用，尝试 GitHub..."
+        if command -v git &>/dev/null; then
+            git clone --depth 1 https://github.com/opengnb/opengnb.git /tmp/opengnb
+        else
+            curl -sSL "https://github.com/opengnb/opengnb/archive/refs/heads/master.tar.gz" -o /tmp/opengnb-src.tar.gz
+            mkdir -p /tmp/opengnb
+            tar xzf /tmp/opengnb-src.tar.gz -C /tmp/opengnb --strip-components=1
+        fi
+    fi
+
     cd /tmp/opengnb && make -j$(nproc)
 
     # 安装
