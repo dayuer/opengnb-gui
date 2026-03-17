@@ -33,7 +33,7 @@ function createEnrollRouter(keyManager) {
   router.get('/status/:id', (req, res) => {
     const node = keyManager.getAllNodes().find(n => n.id === req.params.id);
     if (!node) return res.status(404).json({ status: 'unknown' });
-    res.json({ status: node.status });
+    res.json({ status: node.status, tunAddr: node.tunAddr || '' });
   });
 
   // POST /api/enroll/:id/ready — 节点通知就绪（synon + 公钥已部署）
@@ -54,9 +54,9 @@ function createEnrollRouter(keyManager) {
     res.json({ nodes: keyManager.getAllNodes() });
   });
 
-  // POST /api/enroll/:id/approve — 审批通过
+  // POST /api/enroll/:id/approve — 审批通过（body 可携带 tunAddr）
   router.post('/:id/approve', (req, res) => {
-    const result = keyManager.approveNode(req.params.id);
+    const result = keyManager.approveNode(req.params.id, req.body || {});
     res.status(result.success ? 200 : 404).json(result);
   });
 

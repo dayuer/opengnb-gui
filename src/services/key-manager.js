@@ -101,8 +101,8 @@ class KeyManager {
    * @returns {{success: boolean, status: string, message: string}}
    */
   submitEnrollment(nodeInfo) {
-    if (!nodeInfo.id || !nodeInfo.tunAddr) {
-      return { success: false, status: 'error', message: '缺少 id 或 tunAddr' };
+    if (!nodeInfo.id) {
+      return { success: false, status: 'error', message: '缺少 id' };
     }
 
     // 验证 passcode
@@ -139,6 +139,7 @@ class KeyManager {
 
     this.nodes.push({
       ...record,
+      tunAddr: record.tunAddr || '',
       sshUser: 'synon',
       sshPort: 22,
       gnbMapPath: record.gnbMapPath || `/opt/gnb/conf/${record.id}/gnb.map`,
@@ -183,10 +184,13 @@ class KeyManager {
    * @param {string} nodeId
    * @returns {{success: boolean, message: string}}
    */
-  approveNode(nodeId) {
+  approveNode(nodeId, options = {}) {
     const node = this.nodes.find(n => n.id === nodeId);
     if (!node) return { success: false, message: '节点不存在' };
-    if (node.status === 'approved') return { success: true, message: '已审批' };
+    if (node.status === 'approved') return { success: true, message: '已审批', tunAddr: node.tunAddr };
+
+    // 审批时分配 TUN 地址
+    if (options.tunAddr) node.tunAddr = options.tunAddr;
 
     node.status = 'approved';
     node.approvedAt = new Date().toISOString();
@@ -194,7 +198,7 @@ class KeyManager {
 
     if (this.onApproval) this.onApproval(this.getApprovedNodesConfig());
 
-    return { success: true, message: `节点 ${nodeId} 已通过审批` };
+    return { success: true, message: `节点 ${nodeId} 已通过审批`, tunAddr: node.tunAddr };
   }
 
   /**
