@@ -88,11 +88,11 @@ class AiOps {
     const nodeConfig = this._resolveNode(nodeId);
     if (!nodeConfig) return { response: this._nodeNotFoundMsg(nodeId), commands: [] };
 
-    // 异步执行，不阻塞响应
     this.provisioner.provision(nodeConfig, { installGnb: false, installClaw: true });
     return {
       response: `🚀 开始在 ${nodeConfig.name || nodeConfig.id} 上安装 OpenClaw...\n安装进度将实时推送到此面板。`,
       commands: [],
+      targetNodeId: nodeConfig.id,
     };
   }
 
@@ -104,6 +104,7 @@ class AiOps {
     return {
       response: `🚀 开始对 ${nodeConfig.name || nodeConfig.id} 执行完整配置下发...\n包含：系统准备 → GNB → OpenClaw → 验证`,
       commands: [],
+      targetNodeId: nodeConfig.id,
     };
   }
 
@@ -128,9 +129,9 @@ class AiOps {
 
     try {
       const result = await this.sshManager.exec(nodeConfig, `systemctl restart ${service} && sleep 1 && systemctl is-active ${service}`);
-      return { response: `✅ ${service} 已重启: ${result.stdout.trim()}`, commands: [] };
+      return { response: `✅ ${service} 已重启: ${result.stdout.trim()}`, commands: [], targetNodeId: nodeConfig.id };
     } catch (err) {
-      return { response: `❌ 重启失败: ${err.message}`, commands: [] };
+      return { response: `❌ 重启失败: ${err.message}`, commands: [], targetNodeId: nodeConfig.id };
     }
   }
 
@@ -140,9 +141,9 @@ class AiOps {
 
     try {
       const result = await this.sshManager.exec(nodeConfig, 'journalctl -u gnb -u openclaw-gateway --no-pager -n 20 --output short-iso');
-      return { response: `📋 最近日志:\n\`\`\`\n${result.stdout.trim()}\n\`\`\``, commands: [] };
+      return { response: `📋 最近日志:\n\`\`\`\n${result.stdout.trim()}\n\`\`\``, commands: [], targetNodeId: nodeConfig.id };
     } catch (err) {
-      return { response: `❌ 获取日志失败: ${err.message}`, commands: [] };
+      return { response: `❌ 获取日志失败: ${err.message}`, commands: [], targetNodeId: nodeConfig.id };
     }
   }
 

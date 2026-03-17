@@ -5,22 +5,34 @@ const express = require('express');
 /**
  * AI 运维 API 路由
  * @param {import('../services/ai-ops')} aiOps
+ * @param {Function} saveOpsLog - saveOpsLog(nodeId, role, content)
  */
-function createAiRouter(aiOps) {
+function createAiRouter(aiOps, saveOpsLog) {
   const router = express.Router();
 
-  // POST /api/ai/chat — AI 运维对话
+  // POST /api/ai/chat — 运维指令
   router.post('/chat', async (req, res) => {
-    const { message } = req.body;
+    const { message, nodeId } = req.body;
     if (!message) {
       return res.status(400).json({ error: '缺少 message 参数' });
     }
 
+    // 运行命令路由
     const result = await aiOps.chat(message);
+
+    // 确定日志归属的节点
+    const logNodeId = result.targetNodeId || nodeId || '_global';
+
+    // 持久化
+    if (saveOpsLog) {
+      saveOpsLog(logNodeId, 'user', message);
+      saveOpsLog(logNodeId, 'assistant', result.response);
+    }
+
     res.json(result);
   });
 
-  // POST /api/ai/confirm — 确认执行 AI 建议的命令
+  // POST /api/ai/confirm — 确认执行
   router.post('/confirm', async (req, res) => {
     const { confirmId } = req.body;
     if (!confirmId) {

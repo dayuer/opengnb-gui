@@ -28,6 +28,37 @@ app.use(express.static(path.resolve(__dirname, '../public')));
 const keyManager = new KeyManager({ dataDir: DATA_DIR });
 const sshManager = new SSHManager();
 
+// --- 运维日志持久化（按终端分开存储） ---
+const OPS_LOG_DIR = path.join(DATA_DIR, 'ops-logs');
+const MAX_OPS_LOG = 200;
+try { fs.mkdirSync(OPS_LOG_DIR, { recursive: true }); } catch (_) {}
+
+function loadOpsLog(nodeId) {
+  try {
+    return JSON.parse(fs.readFileSync(path.join(OPS_LOG_DIR, `${nodeId}.json`), 'utf-8'));
+  } catch (_) { return []; }
+}
+
+function saveOpsLog(nodeId, role, content) {
+  const logPath = path.join(OPS_LOG_DIR, `${nodeId}.json`);
+  let logs = loadOpsLog(nodeId);
+  logs.push({ role, content, ts: new Date().toISOString() });
+  if (logs.length > MAX_OPS_LOG) logs = logs.slice(-MAX_OPS_LOG);
+  try { fs.writeFileSync(logPath, JSON.stringify(logs, null, 2)); } catch (_) {}
+}
+
+function loadAllOpsLogs() {
+  try {
+    const files = fs.readdirSync(OPS_LOG_DIR).filter(f => f.endsWith('.json'));
+    const all = {};
+    for (const f of files) {
+      const nodeId = f.replace('.json', '');
+      all[nodeId] = loadOpsLog(nodeId);
+    }
+    return all;
+  } catch (_) { return {}; }
+}
+
 async function boot() {
   await keyManager.init();
 
@@ -68,7 +99,7 @@ async function boot() {
 
   // --- API 路由 ---
   app.use('/api/nodes', createNodesRouter(monitor, sshManager, monitor.nodesConfig));
-  app.use('/api/ai', createAiRouter(aiOps));
+  app.use('/api/ai', createAiRouter(aiOps, saveOpsLog));
 
   // 初始化脚本下载（必须在 enroll 路由之前注册，否则被 /:id 参数路由吞掉）
   app.get('/api/enroll/init.sh', (req, res) => {
@@ -129,6 +160,11 @@ async function boot() {
       pending: keyManager.getPendingNodes(),
       timestamp: new Date().toISOString(),
     }));
+    // 发送历史日志（按终端分组）
+    const allLogs = loadAllOpsLogs();
+    if (Object.keys(allLogs).length > 0) {
+      ws.send(JSON.stringify({ type: 'chat_history', logs: allLogs }));
+    }
     ws.on('close', () => console.log('[WS] 客户端断开'));
   });
 
@@ -145,8 +181,9 @@ async function boot() {
     }
   });
 
-  // 配置下发日志推送
+  // 配置下发日志推送 + 持久化
   provisioner.on('log', ({ nodeId, message }) => {
+    saveOpsLog(nodeId, 'assistant', message);
     const payload = JSON.stringify({ type: 'provision_log', nodeId, message });
     for (const client of wss.clients) {
       if (client.readyState === 1) client.send(payload);

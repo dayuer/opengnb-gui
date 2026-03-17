@@ -9,6 +9,7 @@ let nodesData = [];
 let pendingNodes = [];
 let selectedNodeId = null;
 let ws = null;
+let opsLogsCache = {}; // { nodeId: [...messages] }
 
 // --- WebSocket ---
 function connectWS() {
@@ -36,6 +37,16 @@ function connectWS() {
         renderPendingList();
         if (selectedNodeId) renderNodeDetail(selectedNodeId);
         $('#last-update').textContent = new Date(msg.timestamp).toLocaleTimeString();
+      }
+      if (msg.type === 'chat_history') {
+        opsLogsCache = msg.logs || {};
+        // 如果当前选中了节点，加载该节点的日志
+        if (selectedNodeId && opsLogsCache[selectedNodeId]) {
+          loadNodeOpsLog(selectedNodeId);
+        } else {
+          // 加载全局日志
+          loadNodeOpsLog('_global');
+        }
       }
       if (msg.type === 'provision_log') {
         appendAiMsg('assistant', `[${msg.nodeId}] ${msg.message}`);
@@ -125,6 +136,7 @@ function selectNode(nodeId) {
   selectedNodeId = nodeId;
   renderNodeList();
   renderNodeDetail(nodeId);
+  loadNodeOpsLog(nodeId);
 }
 
 // --- 节点详情 ---
@@ -250,12 +262,22 @@ async function confirmAiCmd(confirmId) {
   }
 }
 
-function appendAiMsg(role, content, isHtml = false) {
+function appendAiMsg(role, content, isHtml = false, skipScroll = false) {
   const container = $('#ai-messages');
   const div = document.createElement('div');
   div.className = `ai-msg ${role}`;
   if (isHtml) { div.innerHTML = content; } else { div.textContent = content; }
   container.appendChild(div);
+  if (!skipScroll) container.scrollTop = container.scrollHeight;
+}
+
+function loadNodeOpsLog(nodeId) {
+  const container = $('#ai-messages');
+  container.innerHTML = '';
+  const logs = opsLogsCache[nodeId] || [];
+  for (const m of logs) {
+    appendAiMsg(m.role, m.content, false, true);
+  }
   container.scrollTop = container.scrollHeight;
 }
 
