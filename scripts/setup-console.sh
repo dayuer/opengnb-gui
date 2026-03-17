@@ -4,8 +4,7 @@
 # 支持: Debian/Ubuntu, CentOS/RHEL/Rocky/Alma, Fedora, Alpine, openSUSE, Arch, macOS
 #
 # 用法:
-#   curl -sSL https://api.synonclaw.com/api/enroll/setup.sh | \
-#     DOMAIN=api.synonclaw.com EMAIL=admin@synonclaw.com bash
+#   curl -sSL https://api.synonclaw.com/api/enroll/setup.sh | bash
 
 set -euo pipefail
 

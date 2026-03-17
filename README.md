@@ -28,8 +28,7 @@ npm run dev
 在服务器上以 root 执行：
 
 ```bash
-curl -sSL https://api.synonclaw.com/api/enroll/setup.sh | \
-  DOMAIN=api.synonclaw.com EMAIL=admin@synonclaw.com bash
+curl -sSL https://api.synonclaw.com/api/enroll/setup.sh | bash
 ```
 
 ## 节点接入
