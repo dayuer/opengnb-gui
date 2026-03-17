@@ -1,0 +1,23 @@
+{
+  "name": "gnb-console",
+  "version": "0.1.0",
+  "description": "GNB Node Management Console — SSH-based remote monitoring via GNB TUN network",
+  "main": "src/server.js",
+  "scripts": {
+    "dev": "node --watch src/server.js",
+    "start": "node src/server.js",
+    "test": "node --test src/**/__tests__/*.test.js"
+  },
+  "keywords": ["gnb", "vpn", "management", "console"],
+  "license": "GPL-3.0",
+  "dependencies": {
+    "express": "^4.21.0",
+    "ws": "^8.18.0",
+    "ssh2": "^1.16.0",
+    "better-sqlite3": "^11.7.0"
+  },
+  "devDependencies": {},
+  "engines": {
+    "node": ">=20.0.0"
+  }
+}

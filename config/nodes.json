@@ -1,0 +1,12 @@
+[
+  {
+    "id": "1001",
+    "name": "Index Node CN",
+    "tunAddr": "10.1.0.1",
+    "sshPort": 22,
+    "sshUser": "root",
+    "sshKeyPath": "~/.ssh/id_ed25519",
+    "gnbMapPath": "/opt/gnb/conf/1001/gnb.map",
+    "gnbCtlPath": "/opt/gnb/bin/gnb_ctl"
+  }
+]
