@@ -309,15 +309,17 @@ mkdir -p data/mirror/gnb data/mirror/openclaw
 echo "[4/7] 配置系统服务..."
 setup_service
 
-# [5/7] nginx
+# [5/7] nginx — 先写 HTTP-only 配置（certbot 需要 nginx 正常运行）
 echo "[5/7] 配置 nginx..."
 install_nginx
 get_nginx_conf_dir
 
 # 检测 stream SNI
-LISTEN_PORT="443 ssl"
+HAS_STREAM_SNI=false
+LISTEN_SSL="443 ssl http2"
 if [ "$OS_ID" != "darwin" ] && grep -rq "ssl_preread" /etc/nginx/ 2>/dev/null; then
-    LISTEN_PORT="8443 ssl"
+    HAS_STREAM_SNI=true
+    LISTEN_SSL="8443 ssl http2"
     echo "      检测到 stream SNI 路由，使用 8443 端口"
     STREAM_CONF=$(grep -rl "ssl_preread" /etc/nginx/ 2>/dev/null | head -1)
     if [ -n "$STREAM_CONF" ] && ! grep -q "$DOMAIN" "$STREAM_CONF"; then
@@ -326,16 +328,15 @@ if [ "$OS_ID" != "darwin" ] && grep -rq "ssl_preread" /etc/nginx/ 2>/dev/null; t
     fi
 fi
 
+# Phase 1: HTTP-only（让 nginx 能正常运行）
 cat > "$NGINX_CONF" << NGINX_EOF
 server {
     listen 80;
     server_name $DOMAIN;
-    return 301 https://\$host\$request_uri;
-}
 
-server {
-    listen $LISTEN_PORT;
-    server_name $DOMAIN;
+    location /.well-known/acme-challenge/ {
+        root /var/www/certbot;
+    }
 
     location / {
         proxy_pass http://127.0.0.1:$PORT;
@@ -351,24 +352,94 @@ server {
 }
 NGINX_EOF
 
-# sites-enabled 软链接（Debian 系）
 if [ -n "${NGINX_LINK:-}" ]; then
     ln -sf "$NGINX_CONF" "$NGINX_LINK"
 fi
 
 nginx -t && (systemctl reload nginx 2>/dev/null || rc-service nginx reload 2>/dev/null || brew services restart nginx 2>/dev/null || nginx -s reload)
-echo "      nginx 配置完成"
+echo "      nginx HTTP 配置完成"
 
-# [6/7] SSL
+# [6/7] SSL — 获取证书后再写入 SSL 配置
 echo "[6/7] 配置 HTTPS..."
 if [ "$OS_ID" = "darwin" ]; then
     echo "      macOS: 建议使用 mkcert 生成本地开发证书"
     echo "      brew install mkcert && mkcert -install && mkcert $DOMAIN"
-elif [ ! -d "/etc/letsencrypt/live/$DOMAIN" ]; then
-    certbot --nginx -d "$DOMAIN" --non-interactive --agree-tos --email "$EMAIL" \
-        || echo "      ⚠️ 证书获取失败（检查 DNS）"
 else
-    echo "      证书已存在"
+    SSL_OK=false
+    if [ -d "/etc/letsencrypt/live/$DOMAIN" ]; then
+        echo "      证书已存在"
+        SSL_OK=true
+    else
+        # stream SNI 环境下用 webroot 模式（nginx 插件无法处理 stream）
+        mkdir -p /var/www/certbot
+        if $HAS_STREAM_SNI; then
+            certbot certonly --webroot -w /var/www/certbot -d "$DOMAIN" \
+                --non-interactive --agree-tos --email "$EMAIL" \
+                && SSL_OK=true \
+                || echo "      ⚠️ 证书获取失败（检查 DNS 是否指向此服务器）"
+        else
+            certbot --nginx -d "$DOMAIN" --non-interactive --agree-tos --email "$EMAIL" \
+                && SSL_OK=true \
+                || echo "      ⚠️ 证书获取失败（检查 DNS 是否指向此服务器）"
+        fi
+    fi
+
+    # Phase 2: 证书就绪后写入完整 SSL 配置
+    if $SSL_OK; then
+        cat > "$NGINX_CONF" << NGINX_EOF
+# HTTP → HTTPS redirect
+server {
+    listen 80;
+    server_name $DOMAIN;
+
+    location /.well-known/acme-challenge/ {
+        root /var/www/certbot;
+    }
+
+    location / {
+        return 301 https://\$host\$request_uri;
+    }
+}
+
+# HTTPS
+server {
+    listen $LISTEN_SSL;
+    listen [::]:$LISTEN_SSL;
+    server_name $DOMAIN;
+
+    ssl_certificate     /etc/letsencrypt/live/$DOMAIN/fullchain.pem;
+    ssl_certificate_key /etc/letsencrypt/live/$DOMAIN/privkey.pem;
+    ssl_protocols       TLSv1.2 TLSv1.3;
+    ssl_ciphers         ECDHE-ECDSA-AES128-GCM-SHA256:ECDHE-RSA-AES128-GCM-SHA256:ECDHE-ECDSA-AES256-GCM-SHA384:ECDHE-RSA-AES256-GCM-SHA384;
+    ssl_prefer_server_ciphers off;
+    ssl_session_cache shared:GNB_SSL:10m;
+    ssl_session_timeout 10m;
+
+    add_header Strict-Transport-Security "max-age=31536000; includeSubDomains" always;
+    add_header X-Frame-Options "SAMEORIGIN" always;
+    add_header X-Content-Type-Options "nosniff" always;
+    add_header X-XSS-Protection "1; mode=block" always;
+    add_header Referrer-Policy "strict-origin-when-cross-origin" always;
+
+    location / {
+        proxy_pass http://127.0.0.1:$PORT;
+        proxy_http_version 1.1;
+        proxy_set_header Upgrade \$http_upgrade;
+        proxy_set_header Connection "upgrade";
+        proxy_set_header Host \$host;
+        proxy_set_header X-Real-IP \$remote_addr;
+        proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto \$scheme;
+        proxy_read_timeout 86400;
+    }
+}
+NGINX_EOF
+
+        nginx -t && (systemctl reload nginx 2>/dev/null || rc-service nginx reload 2>/dev/null || nginx -s reload)
+        echo "      HTTPS 配置完成"
+    else
+        echo "      保持 HTTP 模式运行，后续可手动配置 HTTPS"
+    fi
 fi
 
 # 自动续期
