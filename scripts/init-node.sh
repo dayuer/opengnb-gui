@@ -86,11 +86,29 @@ else
         fi
     fi
 
-    cd /tmp/opengnb && make -j$(nproc)
+    cd /tmp/opengnb
+
+    # 自动选择平台 Makefile
+    case "$(uname -s)" in
+        Linux)   GNB_MAKEFILE="Makefile.linux" ;;
+        Darwin)  GNB_MAKEFILE="Makefile.Darwin" ;;
+        FreeBSD) GNB_MAKEFILE="Makefile.freebsd" ;;
+        OpenBSD) GNB_MAKEFILE="Makefile.openbsd" ;;
+        *)       GNB_MAKEFILE="Makefile.linux" ;;
+    esac
+
+    if [ ! -f "$GNB_MAKEFILE" ]; then
+        echo "      [失败] 未找到 $GNB_MAKEFILE"
+        exit 1
+    fi
+
+    echo "      编译 GNB (使用 $GNB_MAKEFILE)..."
+    make -f "$GNB_MAKEFILE" -j$(nproc 2>/dev/null || echo 2)
 
     # 安装
     mkdir -p /opt/gnb/bin
-    cp /tmp/opengnb/bin/* /opt/gnb/bin/
+    find /tmp/opengnb/bin -type f -executable -exec cp {} /opt/gnb/bin/ \; 2>/dev/null \
+        || cp /tmp/opengnb/bin/* /opt/gnb/bin/ 2>/dev/null || true
     ln -sf /opt/gnb/bin/gnb /usr/local/bin/gnb
     ln -sf /opt/gnb/bin/gnb_ctl /usr/local/bin/gnb_ctl
 
