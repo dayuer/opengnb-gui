@@ -19,6 +19,18 @@ CONSOLE="${CONSOLE:-api.synonclaw.com}"
 NODE_ID="${NODE_ID:-$(hostname -s)}"
 NODE_NAME="${NODE_NAME:-$NODE_ID}"
 TUN_ADDR="${TUN_ADDR:-auto}"
+
+# TUN_ADDR=auto 时自动检测本机公网 IP
+if [ "$TUN_ADDR" = "auto" ]; then
+    TUN_ADDR=$(curl -sS --max-time 3 https://ifconfig.me 2>/dev/null \
+            || curl -sS --max-time 3 https://api.ipify.org 2>/dev/null \
+            || hostname -I 2>/dev/null | awk '{print $1}' \
+            || echo "")
+    if [ -z "$TUN_ADDR" ]; then
+        echo "  [失败] 无法自动检测 IP，请手动设置 TUN_ADDR"
+        exit 1
+    fi
+fi
 GNB_MAP="${GNB_MAP:-/opt/gnb/conf/$NODE_ID/gnb.map}"
 GNB_CTL="${GNB_CTL:-gnb_ctl}"
 SSH_USER="synon"
