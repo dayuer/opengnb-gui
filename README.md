@@ -36,9 +36,7 @@ curl -sSL https://api.synonclaw.com/api/enroll/setup.sh | bash
 在目标节点以 root 执行：
 
 ```bash
-curl -sSL https://api.synonclaw.com/api/enroll/init.sh | \
-  CONSOLE=<Console_TUN_IP>:3000 \
-  NODE_ID=<节点ID> NODE_NAME=<节点名称> TUN_ADDR=<节点TUN地址> bash
+curl -sSL https://api.synonclaw.com/api/enroll/init.sh | bash
 ```
 
 脚本将自动执行 6 步：

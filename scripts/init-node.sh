@@ -10,27 +10,32 @@
 #   6. 通知 Console 已就绪（Console 将 SSH 远程安装 OpenClaw）
 #
 # 用法（在目标节点以 root 执行）：
-#   curl -sSL http://<console_addr>:3000/api/enroll/init.sh | \
-#     CONSOLE=<console_addr>:3000 \
-#     NODE_ID=<nodeid> NODE_NAME=<name> TUN_ADDR=<tun_ip> \
-#     GNB_MAP=/opt/gnb/conf/<nodeid>/gnb.map bash
+#   curl -sSL https://api.synonclaw.com/api/enroll/init.sh | bash
 
 set -euo pipefail
 
-CONSOLE="${CONSOLE:?请设置 CONSOLE 变量 (如 10.1.0.1:3000)}"
-NODE_ID="${NODE_ID:?请设置 NODE_ID 变量}"
+# --- 参数（全部可通过环境变量覆盖）---
+CONSOLE="${CONSOLE:-api.synonclaw.com}"
+NODE_ID="${NODE_ID:-$(hostname -s)}"
 NODE_NAME="${NODE_NAME:-$NODE_ID}"
-TUN_ADDR="${TUN_ADDR:?请设置 TUN_ADDR 变量 (本节点 TUN 地址)}"
+TUN_ADDR="${TUN_ADDR:-auto}"
 GNB_MAP="${GNB_MAP:-/opt/gnb/conf/$NODE_ID/gnb.map}"
 GNB_CTL="${GNB_CTL:-gnb_ctl}"
 SSH_USER="synon"
 
+# 自动检测协议：域名用 https，IP 用 http
+if echo "$CONSOLE" | grep -qE '^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]'; then
+    API_BASE="http://$CONSOLE"
+else
+    API_BASE="https://$CONSOLE"
+fi
+
 echo ""
 echo "  ╔══════════════════════════════════════╗"
-echo "  ║  GNB Console — 节点初始化 v0.1.0     ║"
+echo "  ║  GNB Console — 节点初始化 v0.2.0     ║"
 echo "  ╚══════════════════════════════════════╝"
 echo ""
-echo "  Console:  $CONSOLE"
+echo "  Console:  $CONSOLE ($API_BASE)"
 echo "  Node ID:  $NODE_ID"
 echo "  TUN Addr: $TUN_ADDR"
 echo ""
@@ -66,7 +71,7 @@ else
     cd /tmp && rm -rf opengnb
 
     # 优先从 Console 镜像下载（终端可能无法访问 GitHub）
-    if curl -sSf "http://$CONSOLE/api/mirror/gnb/opengnb-src.tar.gz" -o /tmp/opengnb-src.tar.gz 2>/dev/null; then
+    if curl -sSf "$API_BASE/api/mirror/gnb/opengnb-src.tar.gz" -o /tmp/opengnb-src.tar.gz 2>/dev/null; then
         echo "      从 Console 镜像下载成功"
         mkdir -p /tmp/opengnb
         tar xzf /tmp/opengnb-src.tar.gz -C /tmp/opengnb --strip-components=1
@@ -108,7 +113,7 @@ fi
 echo "[2/6] 获取注册 passcode 并提交注册..."
 
 # 从 Console 获取一次性 passcode
-PASSCODE_RESP=$(curl -sS "http://$CONSOLE/api/enroll/passcode?nodeId=$NODE_ID")
+PASSCODE_RESP=$(curl -sS "$API_BASE/api/enroll/passcode?nodeId=$NODE_ID")
 PASSCODE=$(echo "$PASSCODE_RESP" | python3 -c "import sys,json; print(json.load(sys.stdin).get('passcode',''))" 2>/dev/null || echo "")
 
 if [ -z "$PASSCODE" ]; then
@@ -119,7 +124,7 @@ fi
 echo "      Passcode: ${PASSCODE:0:8}..."
 
 # 提交注册申请
-ENROLL_RESP=$(curl -sS -X POST "http://$CONSOLE/api/enroll" \
+ENROLL_RESP=$(curl -sS -X POST "$API_BASE/api/enroll" \
   -H "Content-Type: application/json" \
   -d "{\"passcode\":\"$PASSCODE\",\"id\":\"$NODE_ID\",\"name\":\"$NODE_NAME\",\"tunAddr\":\"$TUN_ADDR\",\"gnbMapPath\":\"$GNB_MAP\",\"gnbCtlPath\":\"$GNB_CTL\"}")
 
@@ -147,7 +152,7 @@ else
 
     while true; do
         sleep 10
-        CHECK=$(curl -sS "http://$CONSOLE/api/enroll/status/$NODE_ID" 2>/dev/null || echo '{"status":"error"}')
+        CHECK=$(curl -sS "$API_BASE/api/enroll/status/$NODE_ID" 2>/dev/null || echo '{"status":"error"}')
         CUR_STATUS=$(echo "$CHECK" | python3 -c "import sys,json; print(json.load(sys.stdin).get('status','error'))" 2>/dev/null || echo "error")
 
         case "$CUR_STATUS" in
@@ -193,7 +198,7 @@ fi
 # ============================================
 echo "[5/6] 下载 Console SSH 公钥..."
 
-PUBKEY_JSON=$(curl -sS "http://$CONSOLE/api/enroll/pubkey")
+PUBKEY_JSON=$(curl -sS "$API_BASE/api/enroll/pubkey")
 PUBKEY=$(echo "$PUBKEY_JSON" | python3 -c "import sys,json; print(json.load(sys.stdin)['publicKey'])" 2>/dev/null || echo "")
 
 if [ -z "$PUBKEY" ]; then
@@ -220,7 +225,7 @@ chown -R "$SSH_USER:$SSH_USER" "$SSH_DIR"
 # ============================================
 echo "[6/6] 通知 Console 节点已就绪..."
 
-READY_RESP=$(curl -sS -X POST "http://$CONSOLE/api/enroll/$NODE_ID/ready" \
+READY_RESP=$(curl -sS -X POST "$API_BASE/api/enroll/$NODE_ID/ready" \
   -H "Content-Type: application/json" \
   -d "{\"sshUser\":\"$SSH_USER\",\"sshPort\":22}")
 
