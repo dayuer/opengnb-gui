@@ -65,7 +65,7 @@ fi
 
 # --- OpenClaw ---
 echo "[OpenClaw] 检查最新 release..."
-CLAW_API="https://api.github.com/repos/nicennnnnnnlee/OpenClaw/releases/latest"
+CLAW_API="https://api.github.com/repos/openclaw/openclaw/releases/latest"
 CLAW_META=$(curl -sSL "$CLAW_API" 2>/dev/null || echo '{}')
 CLAW_TAG=$(echo "$CLAW_META" | python3 -c "import sys,json;print(json.load(sys.stdin).get('tag_name',''))" 2>/dev/null || echo "")
 CLAW_VER_FILE="$MIRROR_DIR/openclaw/.version"
@@ -78,7 +78,7 @@ else
         echo "[OpenClaw] 已是最新: $CLAW_TAG"
     else
         echo "[OpenClaw] 下载 $CLAW_TAG ..."
-        curl -sSL "https://github.com/nicennnnnnnlee/OpenClaw/archive/refs/tags/${CLAW_TAG}.tar.gz" \
+        curl -sSL "https://github.com/openclaw/openclaw/archive/refs/tags/${CLAW_TAG}.tar.gz" \
             -o "$MIRROR_DIR/openclaw/openclaw-src.tar.gz"
 
         ASSETS=$(echo "$CLAW_META" | python3 -c "
