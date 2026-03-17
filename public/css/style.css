@@ -235,6 +235,7 @@ html, body {
 #ai-input-area {
   display: flex; gap: 8px; padding: 12px;
   border-top: 1px solid var(--border);
+  flex-shrink: 0;
 }
 
 #ai-input {
@@ -304,5 +305,5 @@ html, body {
 @media (max-width: 768px) {
   #main { grid-template-columns: 1fr; grid-template-rows: auto 1fr auto; }
   #node-list-panel { border-right: none; border-bottom: 1px solid var(--border); max-height: 200px; }
-  #ai-panel { border-left: none; border-top: 1px solid var(--border); max-height: 300px; }
+  #ai-panel { border-left: none; border-top: 1px solid var(--border); min-height: 0; }
 }
