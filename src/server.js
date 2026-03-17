@@ -15,6 +15,8 @@ const createNodesRouter = require('./routes/nodes');
 const createAiRouter = require('./routes/ai');
 const createEnrollRouter = require('./routes/enroll');
 const createMirrorRouter = require('./routes/mirror');
+const createClawRouter = require('./routes/claw');
+const ClawRPC = require('./services/claw-rpc');
 
 const PORT = process.env.PORT || 3000;
 const DATA_DIR = process.env.DATA_DIR || path.resolve(__dirname, '../data');
@@ -83,6 +85,8 @@ async function boot() {
     provisioner,
   });
 
+  const clawRPC = new ClawRPC(sshManager);
+
   // 审批回调：更新监控
   keyManager.onApproval = (updatedNodes) => {
     monitor.nodesConfig = updatedNodes;
@@ -113,6 +117,10 @@ async function boot() {
 
   app.use('/api/enroll', createEnrollRouter(keyManager));
   app.use('/api/mirror', createMirrorRouter(DATA_DIR));
+  app.use('/api/claw', createClawRouter({
+    clawRPC,
+    getNodesConfig: () => keyManager.getApprovedNodesConfig(),
+  }));
 
   // 配置下发 API
   app.post('/api/provision/:id', async (req, res) => {
@@ -187,6 +195,17 @@ async function boot() {
     const payload = JSON.stringify({ type: 'provision_log', nodeId, message });
     for (const client of wss.clients) {
       if (client.readyState === 1) client.send(payload);
+    }
+  });
+
+  // OpenClaw token 就绪 → 保存到节点配置
+  provisioner.on('claw_ready', ({ nodeId, token, port }) => {
+    if (token) {
+      keyManager.updateNodeClawConfig(nodeId, { token, port });
+      // 刷新 aiOps 和 monitor 的节点列表
+      const updated = keyManager.getApprovedNodesConfig();
+      aiOps.nodesConfig = updated;
+      console.log(`[ClawReady] 节点 ${nodeId} Token 已保存`);
     }
   });
 

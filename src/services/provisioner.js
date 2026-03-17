@@ -169,77 +169,137 @@ class Provisioner extends EventEmitter {
 
   /**
    * 安装 OpenClaw Agent
+   * 流程: 升级 Node 到 v22 → npm install -g openclaw@latest → onboard → 提取 token
    * @private
    */
   async _installClaw(nodeConfig, log) {
-    // Step 1: 确保 Node.js 可用
-    const nodeCheck = await this._execQuiet(nodeConfig, 'node --version 2>/dev/null || echo "NOT_FOUND"');
-    if (nodeCheck.includes('NOT_FOUND')) {
-      log('      安装 Node.js...');
-      // 尝试 nvm （以当前用户安装）
-      await this._exec(nodeConfig, 'curl -o- https://raw.githubusercontent.com/nvm-sh/nvm/v0.40.3/install.sh | bash', log);
-      await this._exec(nodeConfig, 'export NVM_DIR="$HOME/.nvm" && [ -s "$NVM_DIR/nvm.sh" ] && . "$NVM_DIR/nvm.sh" && nvm install 22', log);
-    } else {
-      log(`      Node.js 已安装: ${nodeCheck.trim()}`);
-    }
+    // Step 1: 确保 Node.js >= 22
+    const nodeVer = (await this._execQuiet(nodeConfig, 'node --version 2>/dev/null || echo "NOT_FOUND"')).trim();
+    const majorVer = nodeVer.startsWith('v') ? parseInt(nodeVer.slice(1), 10) : 0;
 
-    // 构建环境前缀：优先用 PATH 中的 node，如果不在 PATH 中则尝试加载 nvm
-    const envPrefix = 'export PATH="/usr/local/bin:/usr/bin:$HOME/.nvm/versions/node/$(ls $HOME/.nvm/versions/node/ 2>/dev/null | tail -1)/bin:$PATH" 2>/dev/null;';
+    if (majorVer < 22) {
+      log(`      Node.js ${nodeVer || '未安装'}, 需要 >= 22，升级中...`);
+      // 用 n 版本管理器升级
+      await this._exec(nodeConfig, 'sudo npm install -g n 2>/dev/null || (curl -fsSL https://raw.githubusercontent.com/tj/n/master/bin/n | sudo bash -s 22)', log);
+      await this._exec(nodeConfig, 'sudo n 22', log);
+      // 刷新 hash 表
+      await this._exec(nodeConfig, 'hash -r 2>/dev/null; node --version', log);
+    } else {
+      log(`      Node.js ${nodeVer} ✓`);
+    }
 
     // Step 2: 安装 OpenClaw
-    const clawCheck = await this._execQuiet(nodeConfig, `${envPrefix} openclaw --version 2>/dev/null || echo "NOT_FOUND"`);
-    if (clawCheck.includes('NOT_FOUND')) {
-      log('      sudo npm install -g openclaw ...');
-      await this._exec(nodeConfig, `${envPrefix} sudo npm install -g openclaw`, log);
+    const clawVer = (await this._execQuiet(nodeConfig, 'openclaw --version 2>/dev/null || echo "NOT_FOUND"')).trim();
+    if (clawVer.includes('NOT_FOUND') || clawVer === '0.0.1') {
+      log('      安装 openclaw@latest ...');
+      // 先清理可能存在的占位包
+      await this._exec(nodeConfig, 'sudo npm uninstall -g openclaw 2>/dev/null || true', log);
+      await this._exec(nodeConfig, 'sudo npm install -g openclaw@latest', log);
     } else {
-      log(`      OpenClaw 已安装: ${clawCheck.trim()}`);
+      log(`      OpenClaw ${clawVer} ✓`);
     }
 
-    // Step 3: 获取实际路径（sudo 安装到 root 前缀，需要 sudo 查找）
-    const nodePath = (await this._execQuiet(nodeConfig, 'which node || sudo which node')).trim();
-    let clawPath = (await this._execQuiet(nodeConfig, 'which openclaw || sudo which openclaw')).trim();
-    if (!clawPath) {
-      const npmRoot = (await this._execQuiet(nodeConfig, 'sudo npm root -g')).trim();
-      if (npmRoot) clawPath = npmRoot.replace('/lib/node_modules', '/bin/openclaw');
+    // 验证安装
+    const verCheck = (await this._execQuiet(nodeConfig, 'openclaw --version 2>/dev/null || echo "FAIL"')).trim();
+    if (verCheck === 'FAIL') {
+      throw new Error('openclaw 安装失败，命令不可用');
     }
-    const binDir = nodePath ? nodePath.replace(/\/node$/, '') : '/usr/bin';
+    log(`      openclaw ${verCheck} 安装成功`);
 
-    if (!nodePath || !clawPath) {
-      throw new Error(`无法定位 node(${nodePath}) 或 openclaw(${clawPath})`);
+    // Step 3: 执行 onboard（自动创建 systemd 服务 + 生成 token）
+    log('      执行 openclaw onboard ...');
+    // onboard 需要以实际运行用户身份执行（创建 ~/.openclaw 目录）
+    // 用 root 运行以便 systemd 服务以 root 身份运行
+    await this._exec(nodeConfig, 'sudo openclaw onboard --install-daemon --yes 2>&1 || sudo openclaw onboard --install-daemon 2>&1 || true', log);
+
+    // Step 4: 确保 Gateway 服务运行
+    log('      启动 Gateway ...');
+    // onboard 可能创建了 openclaw-gateway 或 openclaw 服务
+    const svcName = (await this._execQuiet(nodeConfig,
+      'systemctl list-unit-files | grep -o "openclaw[^ ]*\\.service" | head -1 || echo "openclaw-gateway.service"'
+    )).trim();
+    log(`      服务名: ${svcName}`);
+    await this._exec(nodeConfig, `sudo systemctl enable ${svcName} && sudo systemctl restart ${svcName}`, log);
+    await this._exec(nodeConfig, `sleep 5 && sudo systemctl is-active ${svcName}`, log);
+
+    // Step 5: 提取 Gateway Token
+    log('      提取 Gateway Token ...');
+    const tokenResult = await this._extractClawToken(nodeConfig, log);
+
+    // Step 6: 验证 RPC 可达
+    if (tokenResult.token) {
+      await this._verifyClawRPC(nodeConfig, tokenResult.token, log);
     }
-    log(`      node: ${nodePath}, openclaw: ${clawPath}`);
 
-    // Step 4: 创建 systemd 服务
-    log('      配置 openclaw-gateway 服务...');
-    const serviceContent = [
-      '[Unit]',
-      'Description=OpenClaw Gateway',
-      'After=network.target',
-      '',
-      '[Service]',
-      'Type=simple',
-      'User=root',
-      'WorkingDirectory=/root/.openclaw',
-      `Environment=PATH=${binDir}:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin`,
-      'Environment=HOME=/root',
-      `ExecStart=${nodePath} ${clawPath} gateway --bind loopback --port 18789`,
-      'Restart=always',
-      'RestartSec=5',
-      'StandardOutput=append:/var/log/openclaw-gateway.log',
-      'StandardError=append:/var/log/openclaw-gateway.log',
-      '',
-      '[Install]',
-      'WantedBy=multi-user.target',
-    ].join('\n');
-
-    await this._exec(nodeConfig, `sudo bash -c 'mkdir -p /root/.openclaw && cat > /etc/systemd/system/openclaw-gateway.service << SVCEOF\n${serviceContent}\nSVCEOF'`, log);
-    await this._exec(nodeConfig, 'sudo systemctl daemon-reload && sudo systemctl enable openclaw-gateway', log);
-    await this._exec(nodeConfig, 'sudo systemctl restart openclaw-gateway', log);
-
-    // Step 5: 等待启动
-    log('      等待 OpenClaw 启动...');
-    await this._exec(nodeConfig, 'sleep 3 && sudo systemctl is-active openclaw-gateway', log);
     log('      ✅ OpenClaw 安装完成');
+    return tokenResult;
+  }
+
+  /**
+   * 从终端提取 OpenClaw Gateway Token
+   * @private
+   */
+  async _extractClawToken(nodeConfig, log) {
+    // Token 可能在多个位置
+    const tokenPaths = [
+      'sudo cat /root/.openclaw/.gateway-token',
+      'sudo cat /root/.openclaw/gateway-token',
+      'sudo cat /home/synon/.openclaw/.gateway-token',
+      // 从 config 中提取
+      'sudo openclaw gateway call status --json 2>/dev/null | grep -o \'"token":"[^"]*"\' | head -1',
+    ];
+
+    let token = '';
+    for (const cmd of tokenPaths) {
+      const result = (await this._execQuiet(nodeConfig, `${cmd} 2>/dev/null || true`)).trim();
+      if (result && result.length > 10 && !result.includes('No such file')) {
+        token = result.replace(/.*"token":"/, '').replace(/".*/, '');
+        log(`      Token 获取成功 (${token.substring(0, 8)}...)`);
+        break;
+      }
+    }
+
+    if (!token) {
+      log('      ⚠️ 未找到 Token，尝试从 Gateway 日志提取...');
+      const logOutput = (await this._execQuiet(nodeConfig,
+        'sudo journalctl -u openclaw* --no-pager -n 50 2>/dev/null | grep -i token | tail -1 || true'
+      )).trim();
+      if (logOutput) log(`      日志: ${logOutput.substring(0, 100)}`);
+    }
+
+    // 获取 Gateway 端口
+    const port = 18789;
+
+    // 触发事件，让 server.js 保存到节点配置
+    this.emit('claw_ready', {
+      nodeId: nodeConfig.id,
+      token,
+      port,
+      tunAddr: nodeConfig.tunAddr,
+    });
+
+    return { token, port };
+  }
+
+  /**
+   * 通过 SSH 代理验证终端 OpenClaw RPC 可达
+   * @private
+   */
+  async _verifyClawRPC(nodeConfig, token, log) {
+    try {
+      const result = await this._execQuiet(nodeConfig,
+        `curl -s -m 5 -H "Authorization: Bearer ${token}" http://127.0.0.1:18789/status`
+      );
+      if (result.includes('ok') || result.includes('"status"')) {
+        log(`      RPC 验证通过 ✓`);
+        return true;
+      }
+      log(`      RPC 响应: ${result.substring(0, 100)}`);
+      return false;
+    } catch (err) {
+      log(`      RPC 验证失败: ${err.message}`);
+      return false;
+    }
   }
 
   /**

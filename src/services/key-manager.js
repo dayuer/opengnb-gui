@@ -364,7 +364,24 @@ class KeyManager {
         sshKeyPath: this.privateKeyPath,
         gnbMapPath: n.gnbMapPath,
         gnbCtlPath: n.gnbCtlPath,
+        clawToken: n.clawToken || '',
+        clawPort: n.clawPort || 18789,
       }));
+  }
+
+  /**
+   * 更新节点的 OpenClaw 配置（token + port）
+   * @param {string} nodeId
+   * @param {object} clawConfig - { token, port }
+   */
+  updateNodeClawConfig(nodeId, { token, port }) {
+    const node = this.nodes.find(n => n.id === nodeId);
+    if (!node) return false;
+    if (token) node.clawToken = token;
+    if (port) node.clawPort = port;
+    this._save();
+    console.log(`[KeyManager] 节点 ${nodeId} OpenClaw 配置已更新 (token: ${token ? token.substring(0, 8) + '...' : 'none'})`);
+    return true;
   }
 
   /** @private 保存并备份 */
