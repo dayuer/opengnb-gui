@@ -8,69 +8,60 @@
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
   <link rel="stylesheet" href="/css/style.css">
+  <script src="https://unpkg.com/lucide@latest/dist/umd/lucide.min.js"></script>
 </head>
 <body>
   <div id="app">
-    <header id="header">
-      <div class="header-left">
-        <div class="logo">◈ GNB Console</div>
+    <!-- 左侧：抽屉导航 -->
+    <nav id="sidebar">
+      <div class="sidebar-logo">
+        <span class="logo">◈ GNB Console</span>
         <span class="version">v0.1.0</span>
       </div>
-      <div class="header-right">
-        <span id="connection-status" class="status-badge offline">断开</span>
-        <span id="last-update" class="meta-text">—</span>
+      <ul id="nav-menu">
+        <li class="nav-item active" data-page="dashboard">
+          <span class="nav-icon"><i data-lucide="layout-dashboard"></i></span><span class="nav-label">仪表盘</span>
+        </li>
+        <li class="nav-item" data-page="monitor">
+          <span class="nav-icon"><i data-lucide="monitor"></i></span><span class="nav-label">运维监控</span>
+        </li>
+        <li class="nav-item" data-page="nodes">
+          <span class="nav-icon"><i data-lucide="globe"></i></span><span class="nav-label">节点管理</span>
+        </li>
+        <li class="nav-item" data-page="users">
+          <span class="nav-icon"><i data-lucide="users"></i></span><span class="nav-label">用户管理</span>
+        </li>
+        <li class="nav-item" data-page="groups">
+          <span class="nav-icon"><i data-lucide="folder"></i></span><span class="nav-label">分组管理</span>
+        </li>
+        <li class="nav-item" data-page="settings">
+          <span class="nav-icon"><i data-lucide="settings"></i></span><span class="nav-label">系统设置</span>
+        </li>
+      </ul>
+      <div class="sidebar-footer">
+        <div id="sidebar-status">
+          <span id="connection-status" class="status-badge offline">断开</span>
+          <span id="last-update" class="meta-text">—</span>
+        </div>
       </div>
-    </header>
+    </nav>
 
-    <main id="main">
-      <!-- 左侧：节点列表 + 待审批 -->
-      <aside id="node-list-panel">
-        <div class="panel-header">
-          <h2>已接入节点</h2>
-          <span id="node-count" class="badge">0</span>
+    <!-- 主内容区 -->
+    <div id="main-wrapper">
+      <header id="header">
+        <div class="header-left">
+          <button id="sidebar-toggle" class="sidebar-toggle-btn"><i data-lucide="menu"></i></button>
+          <h1 id="page-title">仪表盘</h1>
         </div>
-        <ul id="node-list"></ul>
+        <div class="header-right">
+          <span id="pending-badge" class="badge accent" style="display:none">待审批 <span id="pending-count">0</span></span>
+        </div>
+      </header>
 
-        <div class="panel-header" style="border-top:1px solid var(--border)">
-          <h2>待审批</h2>
-          <span id="pending-count" class="badge accent">0</span>
-        </div>
-        <div id="pending-list"></div>
-      </aside>
-
-      <!-- 中间：节点详情 -->
-      <section id="node-detail-panel">
-        <div class="panel-header">
-          <h2 id="detail-title">选择节点查看详情</h2>
-        </div>
-        <div id="detail-content" class="detail-grid">
-          <div class="detail-placeholder">
-            <span class="placeholder-icon">◇</span>
-            <p>从左侧选择一个节点</p>
-          </div>
-        </div>
-      </section>
-
-      <!-- 右侧：AI 运维 -->
-      <aside id="ai-panel">
-        <div class="panel-header">
-          <h2>运维控制台</h2>
-          <span class="badge accent">指令</span>
-        </div>
-        <div id="ai-messages"></div>
-        <div id="ai-quick-actions">
-          <button class="quick-btn" data-cmd="安装 openclaw">📦 安装 OpenClaw</button>
-          <button class="quick-btn" data-cmd="状态">📊 状态</button>
-          <button class="quick-btn" data-cmd="重启 gnb">🔄 重启 GNB</button>
-          <button class="quick-btn" data-cmd="重启 openclaw">🔄 重启 Claw</button>
-          <button class="quick-btn" data-cmd="日志">📋 日志</button>
-        </div>
-        <div id="ai-input-area">
-          <input type="text" id="ai-input" placeholder="输入运维指令..." autocomplete="off">
-          <button id="ai-send">发送</button>
-        </div>
-      </aside>
-    </main>
+      <div id="main-content">
+        <!-- 页面内容由 JS 动态渲染 -->
+      </div>
+    </div>
   </div>
 
   <script src="/js/app.js"></script>
