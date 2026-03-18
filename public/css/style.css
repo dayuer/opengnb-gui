@@ -348,3 +348,325 @@ html, body {
   #ai-quick-actions { padding: 6px 10px 0; }
   .quick-btn { font-size: 10px; padding: 3px 8px; }
 }
+
+/* ═══════════════════════════════════════════════════
+   监控仪表盘 — 仿运维面板风格
+   ═══════════════════════════════════════════════════ */
+
+.monitor-dashboard {
+  padding: 20px;
+  display: flex; flex-direction: column; gap: 16px;
+  overflow-y: auto; height: 100%;
+}
+
+/* --- 顶栏 --- */
+.monitor-topbar {
+  display: flex; justify-content: space-between; align-items: center;
+}
+
+.monitor-title-area {
+  display: flex; align-items: center; gap: 12px;
+}
+
+.monitor-title-area h3 {
+  font-size: 16px; font-weight: 600; color: var(--text-primary);
+}
+
+.monitor-time {
+  font-size: 12px; color: var(--text-secondary); font-family: var(--font-mono);
+}
+
+.monitor-actions {
+  display: flex; gap: 8px;
+}
+
+.monitor-actions button {
+  padding: 6px 14px; font-size: 12px; font-weight: 500;
+  background: var(--bg-tertiary); color: var(--text-secondary);
+  border: 1px solid var(--border); border-radius: var(--radius-sm);
+  cursor: pointer; transition: all var(--transition);
+}
+
+.monitor-actions button:hover {
+  background: var(--accent-glow); color: var(--text-primary);
+  border-color: var(--accent);
+}
+
+/* --- 主仪表区（健康圆环 + 实时指标 + 指标卡片）--- */
+.monitor-hero {
+  display: grid;
+  grid-template-columns: 220px 1fr;
+  gap: 16px;
+}
+
+/* --- 健康圆环 --- */
+.health-ring-box {
+  background: var(--bg-secondary);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 24px 16px;
+  display: flex; flex-direction: column; align-items: center; justify-content: center;
+  gap: 12px;
+  position: relative;
+}
+
+.health-ring-container {
+  position: relative; width: 120px; height: 120px;
+}
+
+.health-ring-svg {
+  width: 120px; height: 120px;
+  transform: rotate(-90deg);
+}
+
+.health-ring-bg {
+  fill: none; stroke: var(--bg-tertiary); stroke-width: 8;
+}
+
+.health-ring-fg {
+  fill: none; stroke-width: 8; stroke-linecap: round;
+  transition: stroke-dashoffset 0.8s ease, stroke 0.3s ease;
+}
+
+.health-ring-fg.online { stroke: var(--green); filter: drop-shadow(0 0 6px var(--green)); }
+.health-ring-fg.offline { stroke: var(--red); filter: drop-shadow(0 0 6px var(--red)); }
+
+.health-ring-label {
+  position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%);
+  text-align: center;
+}
+
+.health-ring-status {
+  font-size: 18px; font-weight: 700;
+}
+
+.health-ring-status.online { color: var(--green); }
+.health-ring-status.offline { color: var(--red); }
+
+.health-ring-sub {
+  font-size: 11px; color: var(--text-muted); margin-top: 2px;
+}
+
+.health-meta {
+  font-size: 11px; color: var(--text-secondary); display: flex; align-items: center; gap: 4px;
+}
+
+.health-meta .dot {
+  width: 6px; height: 6px; border-radius: 50%;
+}
+
+.health-meta .dot.online { background: var(--green); box-shadow: 0 0 6px var(--green); }
+.health-meta .dot.offline { background: var(--red); }
+
+/* --- 右侧实时统计 + 指标卡片 --- */
+.monitor-realtime-area {
+  display: flex; flex-direction: column; gap: 12px;
+}
+
+/* --- 实时数据条 --- */
+.realtime-bar {
+  background: var(--bg-secondary);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 16px 20px;
+  display: flex; align-items: center; gap: 32px;
+}
+
+.realtime-item {
+  display: flex; flex-direction: column; gap: 2px;
+}
+
+.realtime-item .ri-label {
+  font-size: 11px; color: var(--text-muted); text-transform: uppercase; letter-spacing: .5px;
+}
+
+.realtime-item .ri-value {
+  font-size: 20px; font-weight: 700; font-family: var(--font-mono);
+  color: var(--text-primary);
+}
+
+.realtime-item .ri-value.green { color: var(--green); }
+.realtime-item .ri-value.red { color: var(--red); }
+.realtime-item .ri-value.yellow { color: var(--yellow); }
+.realtime-item .ri-value.accent { color: var(--accent); }
+
+/* --- 指标卡片网格 --- */
+.metric-grid {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 12px;
+  flex: 1;
+}
+
+.metric-card {
+  background: var(--bg-secondary);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 16px;
+  display: flex; flex-direction: column; gap: 6px;
+  transition: border-color var(--transition), background var(--transition);
+  position: relative; overflow: hidden;
+}
+
+.metric-card::before {
+  content: '';
+  position: absolute; top: 0; left: 0; right: 0; height: 2px;
+  background: transparent;
+  transition: background var(--transition);
+}
+
+.metric-card:hover {
+  border-color: var(--accent);
+  background: linear-gradient(180deg, rgba(56,139,253,0.04) 0%, var(--bg-secondary) 100%);
+}
+
+.metric-card:hover::before {
+  background: var(--accent);
+}
+
+.mc-header {
+  display: flex; justify-content: space-between; align-items: center;
+}
+
+.mc-title {
+  font-size: 12px; color: var(--text-secondary); font-weight: 500;
+  display: flex; align-items: center; gap: 4px;
+}
+
+.mc-title .mc-icon {
+  font-size: 14px; opacity: .7;
+}
+
+.mc-badge {
+  font-size: 10px; padding: 1px 6px;
+  border-radius: 8px; font-weight: 600;
+}
+
+.mc-badge.green { background: var(--green-bg); color: var(--green); }
+.mc-badge.red { background: var(--red-bg); color: var(--red); }
+.mc-badge.yellow { background: var(--yellow-bg); color: var(--yellow); }
+.mc-badge.accent { background: var(--accent-glow); color: var(--accent); }
+
+.mc-value {
+  font-size: 28px; font-weight: 700; font-family: var(--font-mono);
+  line-height: 1.1;
+}
+
+.mc-value.green { color: var(--green); }
+.mc-value.red { color: var(--red); }
+.mc-value.yellow { color: var(--yellow); }
+.mc-value.accent { color: var(--accent); }
+
+.mc-detail {
+  font-size: 11px; color: var(--text-muted); font-family: var(--font-mono);
+}
+
+.mc-detail-row {
+  display: flex; justify-content: space-between; padding: 2px 0;
+}
+
+/* --- 底部系统资源行 --- */
+.sys-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+  gap: 12px;
+}
+
+.sys-card {
+  background: var(--bg-secondary);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 14px 16px;
+  transition: border-color var(--transition);
+}
+
+.sys-card:hover { border-color: var(--accent); }
+
+.sys-header {
+  display: flex; justify-content: space-between; align-items: center;
+  margin-bottom: 8px;
+}
+
+.sys-title {
+  font-size: 11px; color: var(--text-secondary); font-weight: 600;
+  text-transform: uppercase; letter-spacing: .5px;
+  display: flex; align-items: center; gap: 4px;
+}
+
+.sys-value {
+  font-size: 22px; font-weight: 700; font-family: var(--font-mono);
+  line-height: 1.1; margin-bottom: 4px;
+}
+
+.sys-value.green { color: var(--green); }
+.sys-value.red { color: var(--red); }
+.sys-value.yellow { color: var(--yellow); }
+.sys-value.accent { color: var(--accent); }
+
+.sys-sub {
+  font-size: 11px; color: var(--text-muted); font-family: var(--font-mono);
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+
+/* --- 系统资源进度条 --- */
+.sys-bar {
+  height: 4px; background: var(--bg-tertiary); border-radius: 2px;
+  margin-top: 8px; overflow: hidden;
+}
+
+.sys-bar-fill {
+  height: 100%; border-radius: 2px; transition: width 0.6s ease;
+}
+
+.sys-bar-fill.green { background: var(--green); }
+.sys-bar-fill.yellow { background: var(--yellow); }
+.sys-bar-fill.red { background: var(--red); }
+
+/* --- GNB 子节点表格（仪表盘内） --- */
+.monitor-section-title {
+  font-size: 12px; font-weight: 600; color: var(--text-secondary);
+  padding: 4px 0; display: flex; align-items: center; gap: 8px;
+}
+
+.monitor-section-title::after {
+  content: ''; flex: 1; height: 1px; background: var(--border);
+}
+
+/* --- 离线占位 --- */
+.offline-placeholder {
+  display: flex; flex-direction: column; align-items: center; justify-content: center;
+  padding: 60px 20px; text-align: center; gap: 16px;
+}
+
+.offline-icon {
+  font-size: 56px; opacity: .4;
+  animation: offline-pulse 2s ease-in-out infinite;
+}
+
+@keyframes offline-pulse {
+  0%, 100% { opacity: .3; transform: scale(1); }
+  50% { opacity: .6; transform: scale(1.05); }
+}
+
+.offline-title {
+  font-size: 18px; font-weight: 600; color: var(--red);
+}
+
+.offline-detail {
+  font-size: 13px; color: var(--text-muted); max-width: 300px;
+}
+
+/* --- 仪表盘响应式 --- */
+@media (max-width: 1200px) {
+  .monitor-hero { grid-template-columns: 1fr; }
+  .metric-grid { grid-template-columns: repeat(2, 1fr); }
+}
+
+@media (max-width: 768px) {
+  .monitor-dashboard { padding: 12px; gap: 10px; }
+  .realtime-bar { flex-wrap: wrap; gap: 16px; padding: 12px; }
+  .metric-grid { grid-template-columns: 1fr; }
+  .sys-grid { grid-template-columns: repeat(2, 1fr); }
+  .mc-value { font-size: 22px; }
+  .sys-value { font-size: 18px; }
+}
