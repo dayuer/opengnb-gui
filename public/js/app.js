@@ -4,6 +4,35 @@
 
 const $ = (sel) => document.querySelector(sel);
 
+// --- 认证 ---
+function getToken() {
+  return localStorage.getItem('gnb_admin_token') || '';
+}
+
+function setToken(token) {
+  localStorage.setItem('gnb_admin_token', token);
+}
+
+function promptToken() {
+  const token = prompt('请输入管理员 Token (ADMIN_TOKEN):');
+  if (token) { setToken(token.trim()); location.reload(); }
+}
+
+/** 带认证的 fetch 包装 */
+async function authFetch(url, options = {}) {
+  const token = getToken();
+  options.headers = {
+    ...options.headers,
+    ...(token ? { 'Authorization': `Bearer ${token}` } : {}),
+  };
+  const res = await fetch(url, options);
+  if (res.status === 401) {
+    promptToken();
+    throw new Error('认证失败');
+  }
+  return res;
+}
+
 // --- 状态 ---
 let nodesData = [];
 let pendingNodes = [];
@@ -14,7 +43,8 @@ let opsLogsCache = {}; // { nodeId: [...messages] }
 // --- WebSocket ---
 function connectWS() {
   const proto = location.protocol === 'https:' ? 'wss:' : 'ws:';
-  ws = new WebSocket(`${proto}//${location.host}/ws`);
+  const token = getToken();
+  ws = new WebSocket(`${proto}//${location.host}/ws${token ? '?token=' + encodeURIComponent(token) : ''}`);
 
   ws.onopen = () => {
     $('#connection-status').className = 'status-badge online';
@@ -102,7 +132,7 @@ function renderPendingList() {
 }
 
 async function approveNode(nodeId) {
-  const res = await fetch(`/api/enroll/${nodeId}/approve`, { method: 'POST' });
+  const res = await authFetch(`/api/enroll/${nodeId}/approve`, { method: 'POST' });
   const data = await res.json();
   appendAiMsg('assistant', `审批: ${data.message}`);
 
@@ -116,13 +146,13 @@ async function approveNode(nodeId) {
 }
 
 async function rejectNode(nodeId) {
-  await fetch(`/api/enroll/${nodeId}/reject`, { method: 'POST' });
+  await authFetch(`/api/enroll/${nodeId}/reject`, { method: 'POST' });
   appendAiMsg('assistant', `节点 ${nodeId} 已拒绝`);
 }
 
 async function provisionNode(nodeId) {
   appendAiMsg('user', `开始配置下发: ${nodeId}`);
-  const res = await fetch(`/api/provision/${nodeId}`, { method: 'POST' });
+  const res = await authFetch(`/api/provision/${nodeId}`, { method: 'POST' });
   const data = await res.json();
   appendAiMsg('assistant', data.message || '配置下发已启动，日志将实时推送');
 }
@@ -238,7 +268,7 @@ async function fetchClawStatus(nodeId) {
   const el = document.getElementById('claw-status-val');
   if (el) el.textContent = '查询中...';
   try {
-    const res = await fetch(`/api/claw/${nodeId}/status`);
+    const res = await authFetch(`/api/claw/${nodeId}/status`);
     const data = await res.json();
     if (data.runtimeVersion) {
       const info = [
@@ -266,7 +296,7 @@ async function sendAiMessage() {
   appendAiMsg('user', message);
 
   try {
-    const res = await fetch('/api/ai/chat', {
+    const res = await authFetch('/api/ai/chat', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ message }),
@@ -286,7 +316,7 @@ async function sendAiMessage() {
 async function confirmAiCmd(confirmId) {
   appendAiMsg('user', '✅ 确认执行');
   try {
-    const res = await fetch('/api/ai/confirm', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ confirmId }) });
+    const res = await authFetch('/api/ai/confirm', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ confirmId }) });
     const data = await res.json();
     appendAiMsg('assistant', `<pre>${JSON.stringify(data.results, null, 2)}</pre>`, true);
   } catch (err) {
@@ -342,4 +372,8 @@ document.querySelectorAll('.quick-btn').forEach(btn => {
 });
 
 // --- 启动 ---
-connectWS();
+if (!getToken()) {
+  promptToken();
+} else {
+  connectWS();
+}
