@@ -40,12 +40,8 @@ function connectWS() {
       }
       if (msg.type === 'chat_history') {
         opsLogsCache = msg.logs || {};
-        // 如果当前选中了节点，加载该节点的日志
         if (selectedNodeId && opsLogsCache[selectedNodeId]) {
           loadNodeOpsLog(selectedNodeId);
-        } else {
-          // 加载全局日志
-          loadNodeOpsLog('_global');
         }
       }
       if (msg.type === 'provision_log') {
