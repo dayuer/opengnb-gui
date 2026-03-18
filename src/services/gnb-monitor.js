@@ -23,6 +23,11 @@ class GnbMonitor extends EventEmitter {
     /** @type {Map<string, object>} 最新的节点状态快照 */
     this.latestState = new Map();
 
+    /** @type {Map<string, number>} 节点连续 SSH 失败计数 */
+    this._failCounts = new Map();
+    /** @type {number} 上次 GNB 自动重启时间戳 */
+    this._lastGnbRestart = 0;
+
     this._timer = null;
   }
 
@@ -123,6 +128,9 @@ class GnbMonitor extends EventEmitter {
       const addrData = parseGnbCtlAddressList(addrResult.stdout);
       const elapsed = Date.now() - startTime;
 
+      // 连接恢复，重置失败计数
+      this._failCounts.set(nodeConfig.id, 0);
+
       this.latestState.set(nodeConfig.id, {
         online: true,
         lastUpdate: new Date().toISOString(),
@@ -134,6 +142,10 @@ class GnbMonitor extends EventEmitter {
         error: null,
       });
     } catch (err) {
+      // 递增连续失败计数
+      const prevFails = this._failCounts.get(nodeConfig.id) || 0;
+      this._failCounts.set(nodeConfig.id, prevFails + 1);
+
       this.latestState.set(nodeConfig.id, {
         online: false,
         lastUpdate: new Date().toISOString(),
@@ -144,6 +156,35 @@ class GnbMonitor extends EventEmitter {
         sysInfo: {},
         error: err.message,
       });
+
+      // 连续失败 >= 3 次 (约 30s) → 自动重启 Console GNB 强制 P2P 重新发现
+      if (prevFails + 1 >= 3) {
+        this._tryRecoverGnb(nodeConfig.id, prevFails + 1);
+      }
+    }
+  }
+
+  /**
+   * 尝试重启本地 GNB 以恢复 P2P 隧道
+   * 根因: 终端重启/OOM 后 Console GNB 的 P2P 打洞状态失效，
+   *       需要重启才能通过 index 节点重新发现对端
+   * @private
+   */
+  async _tryRecoverGnb(nodeId, failCount) {
+    // 防止频繁重启: 每 60s 最多一次
+    const now = Date.now();
+    if (now - this._lastGnbRestart < 60000) return;
+    this._lastGnbRestart = now;
+
+    console.log(`[GnbMonitor] 节点 ${nodeId} 连续 ${failCount} 次不可达，重启 GNB 尝试恢复 P2P 隧道...`);
+    try {
+      const { execSync } = require('child_process');
+      execSync('sudo systemctl restart gnb 2>/dev/null || true', { timeout: 15000 });
+      console.log('[GnbMonitor] GNB 已重启，等待 P2P 重新发现');
+      // 重置该节点失败计数（给恢复留时间）
+      this._failCounts.set(nodeId, 0);
+    } catch (e) {
+      console.error(`[GnbMonitor] GNB 重启失败: ${e.message}`);
     }
   }
 
