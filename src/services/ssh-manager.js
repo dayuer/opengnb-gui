@@ -58,7 +58,7 @@ class SSHManager {
       const timeout = setTimeout(() => {
         client.end();
         reject(new Error(`SSH 连接超时: ${nodeConfig.tunAddr}`));
-      }, 10000);
+      }, 30000);
 
       client
         .on('ready', () => {
@@ -84,8 +84,19 @@ class SSHManager {
           port: nodeConfig.sshPort || 22,
           username: nodeConfig.sshUser,
           privateKey,
-          readyTimeout: 10000,
+          readyTimeout: 30000,
           keepaliveInterval: 15000,
+          // TOFU 模式：记录主机指纹，不阻断连接
+          hostVerifier: (key) => {
+            console.log(`[SSH] 主机密钥: ${nodeConfig.tunAddr} fingerprint=${key.toString('hex').substring(0, 16)}...`);
+            return true;
+          },
+          // 限制加密算法白名单
+          algorithms: {
+            kex: ['curve25519-sha256', 'curve25519-sha256@libssh.org', 'ecdh-sha2-nistp256'],
+            cipher: ['aes128-gcm@openssh.com', 'aes256-gcm@openssh.com', 'aes128-ctr', 'aes256-ctr'],
+            hmac: ['hmac-sha2-256', 'hmac-sha2-512'],
+          },
         });
     });
   }

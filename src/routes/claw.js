@@ -33,7 +33,8 @@ module.exports = function createClawRouter({ clawRPC, getNodesConfig }) {
       const result = await clawRPC.getStatus(req.nodeConfig);
       res.json(result);
     } catch (err) {
-      res.status(500).json({ error: err.message });
+      const msg = process.env.NODE_ENV === 'production' ? '操作失败' : err.message;
+      res.status(500).json({ error: msg });
     }
   });
 
@@ -43,7 +44,8 @@ module.exports = function createClawRouter({ clawRPC, getNodesConfig }) {
       const result = await clawRPC.getModels(req.nodeConfig);
       res.json(result);
     } catch (err) {
-      res.status(500).json({ error: err.message });
+      const msg = process.env.NODE_ENV === 'production' ? '操作失败' : err.message;
+      res.status(500).json({ error: msg });
     }
   });
 
@@ -53,7 +55,8 @@ module.exports = function createClawRouter({ clawRPC, getNodesConfig }) {
       const result = await clawRPC.getConfig(req.nodeConfig);
       res.json(result);
     } catch (err) {
-      res.status(500).json({ error: err.message });
+      const msg = process.env.NODE_ENV === 'production' ? '操作失败' : err.message;
+      res.status(500).json({ error: msg });
     }
   });
 
@@ -65,7 +68,8 @@ module.exports = function createClawRouter({ clawRPC, getNodesConfig }) {
       const result = await clawRPC.patchConfig(req.nodeConfig, patch, baseHash);
       res.json(result);
     } catch (err) {
-      res.status(500).json({ error: err.message });
+      const msg = process.env.NODE_ENV === 'production' ? '操作失败' : err.message;
+      res.status(500).json({ error: msg });
     }
   });
 
@@ -75,7 +79,8 @@ module.exports = function createClawRouter({ clawRPC, getNodesConfig }) {
       const result = await clawRPC.getSessions(req.nodeConfig);
       res.json(result);
     } catch (err) {
-      res.status(500).json({ error: err.message });
+      const msg = process.env.NODE_ENV === 'production' ? '操作失败' : err.message;
+      res.status(500).json({ error: msg });
     }
   });
 
@@ -85,7 +90,8 @@ module.exports = function createClawRouter({ clawRPC, getNodesConfig }) {
       const result = await clawRPC.getChannels(req.nodeConfig);
       res.json(result);
     } catch (err) {
-      res.status(500).json({ error: err.message });
+      const msg = process.env.NODE_ENV === 'production' ? '操作失败' : err.message;
+      res.status(500).json({ error: msg });
     }
   });
 

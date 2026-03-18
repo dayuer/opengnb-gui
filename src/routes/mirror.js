@@ -16,6 +16,7 @@ const fs = require('fs');
 function createMirrorRouter(dataDir) {
   const router = express.Router();
   const mirrorDir = path.join(dataDir, 'mirror');
+  const MAX_FILE_SIZE = 500 * 1024 * 1024; // 500MB
 
   /** 列出目录下的文件 */
   function listFiles(subDir) {
@@ -38,8 +39,15 @@ function createMirrorRouter(dataDir) {
 
   // GET /api/mirror/gnb/:file — 下载 GNB 文件
   router.get('/gnb/:file', (req, res) => {
-    const filePath = path.join(mirrorDir, 'gnb', path.basename(req.params.file));
+    const safeName = path.basename(req.params.file);
+    if (safeName !== req.params.file || safeName.includes('..')) {
+      return res.status(400).json({ error: '非法文件名' });
+    }
+    const filePath = path.join(mirrorDir, 'gnb', safeName);
+    if (!filePath.startsWith(path.join(mirrorDir, 'gnb'))) return res.status(403).json({ error: '禁止访问' });
     if (!fs.existsSync(filePath)) return res.status(404).json({ error: '文件不存在' });
+    const stat = fs.statSync(filePath);
+    if (stat.size > MAX_FILE_SIZE) return res.status(413).json({ error: '文件过大' });
     res.download(filePath);
   });
 
@@ -52,8 +60,15 @@ function createMirrorRouter(dataDir) {
 
   // GET /api/mirror/openclaw/:file — 下载 OpenClaw 文件
   router.get('/openclaw/:file', (req, res) => {
-    const filePath = path.join(mirrorDir, 'openclaw', path.basename(req.params.file));
+    const safeName = path.basename(req.params.file);
+    if (safeName !== req.params.file || safeName.includes('..')) {
+      return res.status(400).json({ error: '非法文件名' });
+    }
+    const filePath = path.join(mirrorDir, 'openclaw', safeName);
+    if (!filePath.startsWith(path.join(mirrorDir, 'openclaw'))) return res.status(403).json({ error: '禁止访问' });
     if (!fs.existsSync(filePath)) return res.status(404).json({ error: '文件不存在' });
+    const stat = fs.statSync(filePath);
+    if (stat.size > MAX_FILE_SIZE) return res.status(413).json({ error: '文件过大' });
     res.download(filePath);
   });
 

@@ -145,9 +145,12 @@ class Provisioner extends EventEmitter {
       `es-argv --upnp`,
     ].join('\n');
 
-    await this._exec(nodeConfig, `echo '${nodeConf}' | sudo tee ${confDir}/node.conf`, log);
+    // 使用 heredoc 避免 shell 注入
+    await this._exec(nodeConfig, `sudo tee ${confDir}/node.conf > /dev/null << 'NODECONF'
+${nodeConf}
+NODECONF`, log);
 
-    // systemd 服务
+    // systemd 服务 — 使用 heredoc 消除命令注入风险
     const serviceUnit = [
       '[Unit]',
       'Description=GNB P2P VPN',
@@ -161,9 +164,11 @@ class Provisioner extends EventEmitter {
       '',
       '[Install]',
       'WantedBy=multi-user.target',
-    ].join('\\n');
+    ].join('\n');
 
-    await this._exec(nodeConfig, `echo -e '${serviceUnit}' | sudo tee /etc/systemd/system/gnb.service`, log);
+    await this._exec(nodeConfig, `sudo tee /etc/systemd/system/gnb.service > /dev/null << 'SVCUNIT'
+${serviceUnit}
+SVCUNIT`, log);
     await this._exec(nodeConfig, 'sudo systemctl daemon-reload && sudo systemctl enable gnb && sudo systemctl restart gnb', log);
   }
 

@@ -11,14 +11,14 @@
 
 set -euo pipefail
 
-# --- 配置 ---
-SERVER="43.156.128.95"
-SSH_USER="root"
-DOMAIN="api.synonclaw.com"
-APP_DIR="/opt/gnb-console"
+# --- 配置（从环境变量读取，避免硬编码） ---
+SERVER="${DEPLOY_SERVER:?'请设置 DEPLOY_SERVER 环境变量（目标服务器 IP）'}"
+SSH_USER="${DEPLOY_SSH_USER:-root}"
+DOMAIN="${DEPLOY_DOMAIN:?'请设置 DEPLOY_DOMAIN 环境变量（域名）'}"
+APP_DIR="${DEPLOY_APP_DIR:-/opt/gnb-console}"
 REPO_URL="$(git -C "$(dirname "$0")/.." remote get-url origin 2>/dev/null || echo 'https://github.com/user/opengnb-gui.git')"
-BRANCH="main"
-PORT=3000
+BRANCH="${DEPLOY_BRANCH:-main}"
+PORT="${DEPLOY_PORT:-3000}"
 
 echo ""
 echo "  ╔══════════════════════════════════════╗"
@@ -69,6 +69,16 @@ fi
 cd $APP_DIR
 npm install --production
 mkdir -p data
+
+# 清理生产环境不需要的文件
+rm -rf src/__tests__ doc team
+echo "      已清理测试/文档目录"
+
+# 初始化 .env（如不存在则从 .env.example 复制）
+if [ ! -f .env ]; then
+    cp .env.example .env
+    echo "      已创建 .env (请编辑填入实际值)"
+fi
 REMOTE_DEPLOY
 
 # --- 4. 配置 systemd + nginx ---
@@ -89,6 +99,7 @@ WorkingDirectory=$APP_DIR
 ExecStart=/usr/bin/node $APP_DIR/src/server.js
 Restart=always
 RestartSec=5
+EnvironmentFile=-$APP_DIR/.env
 Environment=NODE_ENV=production
 Environment=PORT=$PORT
 Environment=DATA_DIR=$APP_DIR/data
@@ -169,7 +180,7 @@ fi
 
 # 获取证书（如已存在则跳过）
 if [ ! -d "/etc/letsencrypt/live/$DOMAIN" ]; then
-    certbot --nginx -d $DOMAIN --non-interactive --agree-tos --email admin@synonclaw.com || echo "      证书获取失败（请确保 DNS 已指向此服务器）"
+    certbot --nginx -d $DOMAIN --non-interactive --agree-tos --email "${CERTBOT_EMAIL:?'请设置 CERTBOT_EMAIL 环境变量'}" || echo "      证书获取失败（请确保 DNS 已指向此服务器）"
 else
     echo "      证书已存在"
 fi

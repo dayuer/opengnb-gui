@@ -11,12 +11,16 @@ const SSHManager = require('./services/ssh-manager');
 const GnbMonitor = require('./services/gnb-monitor');
 const AiOps = require('./services/ai-ops');
 const Provisioner = require('./services/provisioner');
+const AuditLogger = require('./services/audit-logger');
 const createNodesRouter = require('./routes/nodes');
 const createAiRouter = require('./routes/ai');
 const createEnrollRouter = require('./routes/enroll');
 const createMirrorRouter = require('./routes/mirror');
 const createClawRouter = require('./routes/claw');
 const ClawRPC = require('./services/claw-rpc');
+const { requireAuth, initToken, getAdminToken } = require('./middleware/auth');
+const { createRateLimit } = require('./middleware/rate-limit');
+const { errorHandler } = require('./middleware/error-handler');
 
 const PORT = process.env.PORT || 3000;
 const DATA_DIR = process.env.DATA_DIR || path.resolve(__dirname, '../data');
@@ -24,8 +28,11 @@ const DATA_DIR = process.env.DATA_DIR || path.resolve(__dirname, '../data');
 const app = express();
 const server = http.createServer(app);
 
-app.use(express.json());
+app.use(express.json({ limit: '1mb' }));
 app.use(express.static(path.resolve(__dirname, '../public')));
+
+// --- 全局速率限制 ---
+app.use('/api', createRateLimit({ windowMs: 60000, max: 200 }));
 
 const keyManager = new KeyManager({ dataDir: DATA_DIR });
 const sshManager = new SSHManager();
@@ -62,6 +69,12 @@ function loadAllOpsLogs() {
 }
 
 async function boot() {
+  // 初始化认证 Token
+  const adminToken = initToken();
+
+  // 初始化审计日志
+  const audit = new AuditLogger({ dataDir: DATA_DIR });
+
   await keyManager.init();
 
   // 已审批节点配置
@@ -101,11 +114,16 @@ async function boot() {
     provisioner.provision(nodeConfig, { installGnb: false, installClaw: true });
   };
 
-  // --- API 路由 ---
-  app.use('/api/nodes', createNodesRouter(monitor, sshManager, monitor.nodesConfig));
-  app.use('/api/ai', createAiRouter(aiOps, saveOpsLog));
+  // --- 敏感端点速率限制 ---
+  const strictLimit = createRateLimit({ windowMs: 60000, max: 20, message: '敏感操作请求过于频繁' });
 
-  // 初始化脚本下载（必须在 enroll 路由之前注册，否则被 /:id 参数路由吞掉）
+  // --- API 路由 ---
+
+  // 需认证 + 审计的管理路由
+  app.use('/api/nodes', requireAuth, audit.middleware('nodes'), createNodesRouter(monitor, sshManager, monitor.nodesConfig));
+  app.use('/api/ai', requireAuth, strictLimit, audit.middleware('ai_ops'), createAiRouter(aiOps, saveOpsLog));
+
+  // 初始化脚本下载（公开，必须在 enroll 路由之前注册）
   app.get('/api/enroll/init.sh', (req, res) => {
     const scriptPath = path.resolve(__dirname, '../scripts/init-node.sh');
     res.type('text/plain').sendFile(scriptPath);
@@ -115,24 +133,28 @@ async function boot() {
     res.type('text/plain').sendFile(scriptPath);
   });
 
-  app.use('/api/enroll', createEnrollRouter(keyManager));
+  // enroll 路由 — 分层认证（内部由 enrollRouter 处理公开/管理端点分离）
+  app.use('/api/enroll', createEnrollRouter(keyManager, { requireAuth, audit }));
+
+  // 镜像下载 — 公开
   app.use('/api/mirror', createMirrorRouter(DATA_DIR));
-  app.use('/api/claw', createClawRouter({
+
+  // OpenClaw 管理 — 需认证
+  app.use('/api/claw', requireAuth, audit.middleware('claw'), createClawRouter({
     clawRPC,
     getNodesConfig: () => keyManager.getApprovedNodesConfig(),
   }));
 
-  // 配置下发 API
-  app.post('/api/provision/:id', async (req, res) => {
+  // 配置下发 API — 需认证
+  app.post('/api/provision/:id', requireAuth, strictLimit, audit.middleware('provision'), async (req, res) => {
     const nodeConfig = keyManager.getApprovedNodesConfig().find(n => n.id === req.params.id);
     if (!nodeConfig) return res.status(404).json({ error: '节点未审批或不存在' });
 
-    // 异步执行，立即返回
     res.json({ status: 'started', message: `开始配置下发: ${nodeConfig.name}` });
     provisioner.provision(nodeConfig, req.body || {});
   });
 
-  app.get('/api/provision/:id/status', (req, res) => {
+  app.get('/api/provision/:id/status', requireAuth, (req, res) => {
     const task = provisioner.getTaskStatus(req.params.id);
     if (!task) return res.status(404).json({ error: '无配置下发任务' });
     res.json(task);
@@ -157,6 +179,9 @@ async function boot() {
     }
   });
 
+  // --- 统一错误处理（必须在所有路由之后） ---
+  app.use(errorHandler);
+
   // --- WebSocket ---
   // 合并监控数据 + Claw 配置
   function enrichNodesData(statusArr) {
@@ -172,9 +197,27 @@ async function boot() {
   }
 
   const wss = new WebSocketServer({ server, path: '/ws' });
+  const MAX_WS_CLIENTS = 10;
 
-  wss.on('connection', (ws) => {
+  wss.on('connection', (ws, req) => {
+    // WebSocket 认证：从 URL 参数提取 token
+    const url = new URL(req.url, 'http://localhost');
+    const wsToken = url.searchParams.get('token');
+    if (adminToken && wsToken !== adminToken) {
+      audit.log('ws_auth_fail', { reason: 'invalid_token' }, req);
+      ws.close(4001, '认证失败');
+      return;
+    }
+
+    // 连接数限制
+    if (wss.clients.size > MAX_WS_CLIENTS) {
+      ws.close(4002, '连接数超限');
+      return;
+    }
+
     console.log('[WS] 客户端连接');
+    audit.log('ws_connect', {}, req);
+
     ws.send(JSON.stringify({
       type: 'snapshot',
       data: enrichNodesData(monitor.getAllStatus()),
@@ -229,6 +272,7 @@ async function boot() {
     console.log(`  ╠══════════════════════════════════════╣`);
     console.log(`  ║  HTTP:  http://localhost:${PORT}        ║`);
     console.log(`  ║  WS:    ws://localhost:${PORT}/ws       ║`);
+    console.log(`  ║  Auth:  Bearer Token ✓                ║`);
     console.log(`  ║  Nodes: ${approvedNodes.length} approved / ${keyManager.getPendingNodes().length} pending   ║`);
     console.log(`  ╚══════════════════════════════════════╝\n`);
     console.log(`  节点初始化:`);
