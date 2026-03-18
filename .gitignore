@@ -9,6 +9,7 @@ team/
 # === 环境变量 ===
 .env
 .env.*
+!.env.example
 
 # === 日志 ===
 *.log
