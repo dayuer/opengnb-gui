@@ -110,9 +110,10 @@ echo "      GNB 编译安装完成"
 # ============================================
 echo "[2/9] 提交注册..."
 
-PASSCODE=$(curl -sS "$API_BASE/api/enroll/passcode?nodeId=$NODE_ID" | json_val passcode)
-if [ -z "$PASSCODE" ]; then
-    echo "      [失败] 无法获取 passcode"
+if [ -z "${PASSCODE:-}" ]; then
+    # 无外部传入 → 从 API 获取（需管理员提前生成并传入）
+    echo "      [失败] 未传入 PASSCODE 环境变量"
+    echo "      请在 Console 管理端获取 passcode 后通过 PASSCODE=xxx 传入"
     exit 1
 fi
 
