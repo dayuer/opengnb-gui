@@ -272,20 +272,20 @@ class Provisioner extends EventEmitter {
    * @private
    */
   async _extractClawToken(nodeConfig, log) {
-    // Token 可能在多个位置
+    // OpenClaw 2026.x 将 token 存储在 openclaw.json → gateway.auth.token
     const tokenPaths = [
-      'sudo cat /root/.openclaw/.gateway-token',
-      'sudo cat /root/.openclaw/gateway-token',
-      'sudo cat /home/synon/.openclaw/.gateway-token',
-      // 从 config 中提取
-      'sudo openclaw gateway call status --json 2>/dev/null | grep -o \'"token":"[^"]*"\' | head -1',
+      // 优先: 从 config 文件直接提取 token
+      `sudo python3 -c "import json; c=json.load(open('/root/.openclaw/openclaw.json')); print(c.get('gateway',{}).get('auth',{}).get('token',''))" 2>/dev/null`,
+      `sudo python3 -c "import json; c=json.load(open('/home/synon/.openclaw/openclaw.json')); print(c.get('gateway',{}).get('auth',{}).get('token',''))" 2>/dev/null`,
+      // 备选: 旧版 token 文件
+      'sudo cat /root/.openclaw/.gateway-token 2>/dev/null',
     ];
 
     let token = '';
     for (const cmd of tokenPaths) {
-      const result = (await this._execQuiet(nodeConfig, `${cmd} 2>/dev/null || true`)).trim();
-      if (result && result.length > 10 && !result.includes('No such file')) {
-        token = result.replace(/.*"token":"/, '').replace(/".*/, '');
+      const result = (await this._execQuiet(nodeConfig, `${cmd} || true`)).trim();
+      if (result && result.length > 10 && !result.includes('No such file') && !result.includes('Error')) {
+        token = result;
         log(`      Token 获取成功 (${token.substring(0, 8)}...)`);
         break;
       }

@@ -41,10 +41,11 @@ class ClawRPC {
     cmd += ` http://127.0.0.1:${port}${endpoint}`;
 
     const result = await this.sshManager.exec(nodeConfig, cmd, 15000);
+    const output = (result && result.stdout) ? result.stdout.trim() : (typeof result === 'string' ? result.trim() : '');
     try {
-      return JSON.parse(result.trim());
+      return JSON.parse(output);
     } catch {
-      return { raw: result.trim() };
+      return { raw: output };
     }
   }
 
@@ -56,12 +57,14 @@ class ClawRPC {
    * @returns {Promise<object>}
    */
   async rpcCall(nodeConfig, method, params = {}) {
-    const cmd = `sudo openclaw gateway call ${method} --params '${JSON.stringify(params)}' --json 2>/dev/null`;
+    const envPath = 'export PATH=/usr/local/bin:$PATH;';
+    const cmd = `${envPath} sudo openclaw gateway call ${method} --params '${JSON.stringify(params)}' --json 2>/dev/null`;
     const result = await this.sshManager.exec(nodeConfig, cmd, 30000);
+    const output = (result && result.stdout) ? result.stdout.trim() : (typeof result === 'string' ? result.trim() : '');
     try {
-      return JSON.parse(result.trim());
+      return JSON.parse(output);
     } catch {
-      return { raw: result.trim() };
+      return { raw: output };
     }
   }
 
@@ -69,7 +72,7 @@ class ClawRPC {
 
   /** 健康检查 */
   async getStatus(nodeConfig) {
-    return this.httpCall(nodeConfig, '/status');
+    return this.rpcCall(nodeConfig, 'status');
   }
 
   /** 模型列表 */
