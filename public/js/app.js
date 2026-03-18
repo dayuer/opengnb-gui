@@ -205,6 +205,18 @@ function renderNodeDetail(nodeId) {
     }
   }
 
+  // OpenClaw 信息
+  html += `<div class="section-title">OpenClaw</div>`;
+  if (node.clawToken) {
+    html += `<div class="stat-row"><span class="stat-label">Gateway</span><span class="stat-value green">端口 ${node.clawPort || 18789}</span></div>`;
+    html += `<div class="stat-row"><span class="stat-label">Token</span><span class="stat-value">${escHtml(node.clawToken)}</span></div>`;
+    html += `<div class="stat-row"><span class="stat-label">状态</span><span class="stat-value" id="claw-status-val">—</span></div>`;
+    html += `<div style="padding:8px 0"><button class="confirm-btn" onclick="fetchClawStatus('${nodeId}')">查看状态</button></div>`;
+  } else {
+    html += `<div class="stat-row"><span class="stat-label">状态</span><span class="stat-value yellow">未安装</span></div>`;
+    html += `<div style="padding:8px 0"><button class="confirm-btn" onclick="document.querySelector('#ai-input').value='安装 openclaw ${nodeId}';sendAiMessage()">安装 OpenClaw</button></div>`;
+  }
+
   if (node.core && Object.keys(node.core).length) {
     html += `<div class="section-title">GNB</div>`;
     for (const [key, val] of Object.entries(node.core)) {
@@ -223,6 +235,30 @@ function renderNodeDetail(nodeId) {
   }
 
   content.innerHTML = html;
+}
+
+// --- OpenClaw 状态查询 ---
+async function fetchClawStatus(nodeId) {
+  const el = document.getElementById('claw-status-val');
+  if (el) el.textContent = '查询中...';
+  try {
+    const res = await fetch(`/api/claw/${nodeId}/status`);
+    const data = await res.json();
+    if (data.runtimeVersion) {
+      const info = [
+        `v${data.runtimeVersion}`,
+        data.heartbeat?.defaultAgentId ? `Agent: ${data.heartbeat.defaultAgentId}` : '',
+        data.sessions?.count !== undefined ? `会话: ${data.sessions.count}` : '',
+      ].filter(Boolean).join(' · ');
+      if (el) { el.textContent = info; el.className = 'stat-value green'; }
+    } else if (data.raw) {
+      if (el) { el.textContent = data.raw.substring(0, 60); el.className = 'stat-value yellow'; }
+    } else if (data.error) {
+      if (el) { el.textContent = data.error.substring(0, 60); el.className = 'stat-value red'; }
+    }
+  } catch (e) {
+    if (el) { el.textContent = `错误: ${e.message}`; el.className = 'stat-value red'; }
+  }
 }
 
 // --- AI 对话 ---

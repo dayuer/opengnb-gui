@@ -158,13 +158,26 @@ async function boot() {
   });
 
   // --- WebSocket ---
+  // 合并监控数据 + Claw 配置
+  function enrichNodesData(statusArr) {
+    const configs = keyManager.getApprovedNodesConfig();
+    return statusArr.map(s => {
+      const cfg = configs.find(c => c.id === s.id);
+      return {
+        ...s,
+        clawToken: cfg?.clawToken ? cfg.clawToken.substring(0, 8) + '...' : '',
+        clawPort: cfg?.clawPort || 0,
+      };
+    });
+  }
+
   const wss = new WebSocketServer({ server, path: '/ws' });
 
   wss.on('connection', (ws) => {
     console.log('[WS] 客户端连接');
     ws.send(JSON.stringify({
       type: 'snapshot',
-      data: monitor.getAllStatus(),
+      data: enrichNodesData(monitor.getAllStatus()),
       pending: keyManager.getPendingNodes(),
       timestamp: new Date().toISOString(),
     }));
@@ -180,7 +193,7 @@ async function boot() {
   monitor.on('update', (allStatus) => {
     const payload = JSON.stringify({
       type: 'update',
-      data: allStatus,
+      data: enrichNodesData(allStatus),
       pending: keyManager.getPendingNodes(),
       timestamp: new Date().toISOString(),
     });
