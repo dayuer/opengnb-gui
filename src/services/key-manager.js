@@ -675,6 +675,8 @@ class KeyManager {
         sshPort: n.sshPort || 22,
         sshUser: n.sshUser || 'synon',
         sshKeyPath: this.privateKeyPath,
+        gnbNodeId: n.gnbNodeId,
+        netmask: n.netmask,
         gnbMapPath: n.gnbMapPath,
         gnbCtlPath: n.gnbCtlPath,
         clawToken: n.clawToken || '',
