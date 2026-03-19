@@ -197,7 +197,7 @@ class KeyManager {
   }
 
   /**
-   * 管理员审批通过
+   * 管理员审批通过（自动分配 IP + GNB 节点 ID）
    * @param {string} nodeId
    * @returns {{success: boolean, message: string}}
    */
@@ -206,12 +206,14 @@ class KeyManager {
     if (!node) return { success: false, message: '节点不存在' };
     if (node.status === 'approved') return { success: true, message: '已审批', tunAddr: node.tunAddr };
 
-    // 审批时分配 TUN 地址和 GNB 节点 ID
-    if (options.tunAddr) node.tunAddr = options.tunAddr;
+    // 分配 TUN 地址：优先手动指定，否则自动分配
+    node.tunAddr = options.tunAddr || node.tunAddr || this._nextAvailableIp();
+    // 分配 GNB 节点 ID
     if (options.gnbNodeId) node.gnbNodeId = options.gnbNodeId;
 
     node.status = 'approved';
     node.approvedAt = new Date().toISOString();
+    // 同步保存（Node.js 单线程，此处保证并发安全，不会重复分配）
     this._save();
 
     // 自动更新 Console 的 GNB 配置
@@ -219,7 +221,7 @@ class KeyManager {
 
     if (this.onApproval) this.onApproval(this.getApprovedNodesConfig());
 
-    return { success: true, message: `节点 ${nodeId} 已通过审批`, tunAddr: node.tunAddr };
+    return { success: true, message: `节点 ${nodeId} 已通过审批`, tunAddr: node.tunAddr, gnbNodeId: node.gnbNodeId };
   }
 
   /**
@@ -303,6 +305,33 @@ class KeyManager {
     const consoleId = parseInt(this.gnbNodeId, 10);
     usedIds.push(consoleId);
     return String(Math.max(...usedIds) + 1);
+  }
+
+  /**
+   * 自动分配下一个可用 TUN IP 地址
+   * 策略：10.{n}.0.1，其中 n 从 2 开始递增（Console 占用 10.1.0.1）
+   * 并发安全：Node.js 单线程，此方法同步执行，调用后立即 _save()
+   * @returns {string} 如 '10.2.0.1'
+   */
+  _nextAvailableIp() {
+    // 收集所有已分配的 IP（含 Console 自身 + 所有节点，不论状态）
+    const usedIps = new Set();
+    if (this.gnbTunAddr) usedIps.add(this.gnbTunAddr);
+    for (const node of this.nodes) {
+      if (node.tunAddr) usedIps.add(node.tunAddr);
+    }
+
+    // 从 10.2.0.1 开始分配（10.1.x.x 留给 Console）
+    for (let n = 2; n <= 254; n++) {
+      const candidate = `10.${n}.0.1`;
+      if (!usedIps.has(candidate)) return candidate;
+    }
+    // 回退：在 10.1.0.x 中找
+    for (let x = 2; x <= 254; x++) {
+      const candidate = `10.1.0.${x}`;
+      if (!usedIps.has(candidate)) return candidate;
+    }
+    throw new Error('IP 地址池已耗尽');
   }
 
   /**
