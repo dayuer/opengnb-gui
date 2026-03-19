@@ -42,6 +42,11 @@ class KeyManager {
     this.backupDir = path.join(this.dataDir, 'backups');
     this.maxBackups = 5;
 
+    // @alpha: 分组数据模型
+    /** @type {Array<{id: string, name: string, color: string, createdAt: string}>} */
+    this.groups = [];
+    this.groupsPath = path.join(this.dataDir, 'groups.json');
+
     /** @type {Map<string, {passcode: string, createdAt: string, used: boolean}>} */
     this.passcodes = new Map();
 
@@ -68,7 +73,10 @@ class KeyManager {
     // 加载节点注册表（主文件 → 备份恢复）
     this.nodes = this._loadWithRecovery();
 
-    console.log(`[KeyManager] ${this.nodes.filter(n => n.status === 'approved').length} 个已审批节点, ${this.nodes.filter(n => n.status === 'pending').length} 个待审批`);
+    // @alpha: 加载分组数据
+    this.groups = this._loadGroups();
+
+    console.log(`[KeyManager] ${this.nodes.filter(n => n.status === 'approved').length} 个已审批节点, ${this.nodes.filter(n => n.status === 'pending').length} 个待审批, ${this.groups.length} 个分组`);
   }
 
   /** @private */
@@ -347,6 +355,201 @@ class KeyManager {
    * 获取待审批节点
    */
   getPendingNodes() { return this.nodes.filter(n => n.status === 'pending'); }
+
+  // ═══════════════════════════════════════
+  // @alpha: 分组管理
+  // ═══════════════════════════════════════
+
+  /**
+   * 创建分组
+   * @param {{name: string, color?: string}} opts
+   * @returns {{id: string, name: string, color: string, createdAt: string}}
+   */
+  createGroup({ name, color = '#388bfd' }) {
+    const trimmed = (name || '').trim();
+    if (!trimmed) throw new Error('名称不能为空');
+    if (this.groups.some(g => g.name === trimmed)) throw new Error('同名分组已存在');
+
+    const group = {
+      id: crypto.randomBytes(8).toString('hex'),
+      name: trimmed,
+      color,
+      createdAt: new Date().toISOString(),
+    };
+    this.groups.push(group);
+    this._saveGroups();
+    return group;
+  }
+
+  /**
+   * 获取分组列表（含每组节点计数）
+   * @returns {Array<object>}
+   */
+  getGroups() {
+    return this.groups.map(g => ({
+      ...g,
+      nodeCount: this.nodes.filter(n => n.groupId === g.id).length,
+    }));
+  }
+
+  /**
+   * 更新分组
+   * @param {string} groupId
+   * @param {{name?: string, color?: string}} updates
+   */
+  updateGroup(groupId, updates) {
+    const group = this.groups.find(g => g.id === groupId);
+    if (!group) return { success: false, message: '分组不存在' };
+    if (updates.name !== undefined) group.name = updates.name;
+    if (updates.color !== undefined) group.color = updates.color;
+    this._saveGroups();
+    return { success: true };
+  }
+
+  /**
+   * 删除分组（清空关联节点的 groupId）
+   * @param {string} groupId
+   */
+  deleteGroup(groupId) {
+    this.groups = this.groups.filter(g => g.id !== groupId);
+    for (const node of this.nodes) {
+      if (node.groupId === groupId) delete node.groupId;
+    }
+    this._saveGroups();
+    this._save();
+    return { success: true };
+  }
+
+  /**
+   * 修改节点所属分组
+   * @param {string} nodeId
+   * @param {string|null} groupId
+   */
+  updateNodeGroup(nodeId, groupId) {
+    const node = this.nodes.find(n => n.id === nodeId);
+    if (!node) return { success: false, message: '节点不存在' };
+    if (groupId && !this.groups.find(g => g.id === groupId)) {
+      return { success: false, message: '分组不存在' };
+    }
+    node.groupId = groupId || undefined;
+    this._save();
+    return { success: true };
+  }
+
+  // ═══════════════════════════════════════
+  // @alpha: 过滤查询 + 分页
+  // ═══════════════════════════════════════
+
+  /**
+   * 带过滤和分页的节点查询
+   * @param {{groupId?, subnet?, keyword?, status?, page?, pageSize?}} opts
+   * @returns {{nodes: Array, total: number, page: number, pageSize: number, totalPages: number}}
+   */
+  getFilteredNodes(opts = {}) {
+    let result = [...this.nodes];
+
+    if (opts.groupId) result = result.filter(n => n.groupId === opts.groupId);
+    if (opts.status) result = result.filter(n => n.status === opts.status);
+    if (opts.keyword) {
+      const kw = opts.keyword.toLowerCase();
+      result = result.filter(n =>
+        (n.name || '').toLowerCase().includes(kw) ||
+        (n.id || '').toLowerCase().includes(kw) ||
+        (n.tunAddr || '').toLowerCase().includes(kw)
+      );
+    }
+    if (opts.subnet) result = result.filter(n => n.tunAddr && KeyManager._cidrMatch(n.tunAddr, opts.subnet));
+
+    const total = result.length;
+    const page = Math.max(1, parseInt(opts.page, 10) || 1);
+    const pageSize = Math.max(1, parseInt(opts.pageSize, 10) || 50);
+    const totalPages = Math.max(1, Math.ceil(total / pageSize));
+    const start = (page - 1) * pageSize;
+
+    return {
+      nodes: result.slice(start, start + pageSize),
+      total,
+      page,
+      pageSize,
+      totalPages,
+    };
+  }
+
+  // ═══════════════════════════════════════
+  // @alpha: 批量操作
+  // ═══════════════════════════════════════
+
+  /**
+   * 批量审批
+   * @param {string[]} ids
+   * @returns {{succeeded: string[], failed: Array<{id: string, reason: string}>}}
+   */
+  batchApprove(ids) { return this._batchAction(ids, id => this.approveNode(id)); }
+
+  /**
+   * 批量拒绝
+   * @param {string[]} ids
+   */
+  batchReject(ids) { return this._batchAction(ids, id => this.rejectNode(id)); }
+
+  /**
+   * 批量删除
+   * @param {string[]} ids
+   */
+  batchRemove(ids) { return this._batchAction(ids, id => this.removeNode(id)); }
+
+  /** @private 批量操作通用 */
+  _batchAction(ids, action) {
+    const succeeded = [];
+    const failed = [];
+    for (const id of ids) {
+      const result = action(id);
+      if (result.success) { succeeded.push(id); }
+      else { failed.push({ id, reason: result.message }); }
+    }
+    return { succeeded, failed };
+  }
+
+  // ═══════════════════════════════════════
+  // @alpha: CIDR 匹配
+  // ═══════════════════════════════════════
+
+  /**
+   * 判断 IP 是否在 CIDR 范围内
+   * @param {string} ip - 如 '10.1.0.2'
+   * @param {string} cidr - 如 '10.1.0.0/24'
+   * @returns {boolean}
+   */
+  static _cidrMatch(ip, cidr) {
+    const [range, bits] = cidr.split('/');
+    if (!range || !bits) return false;
+    const mask = ~(2 ** (32 - parseInt(bits, 10)) - 1) >>> 0;
+    return (KeyManager._ipToInt(ip) & mask) === (KeyManager._ipToInt(range) & mask);
+  }
+
+  /** @private IP 字符串转 32 位整数 */
+  static _ipToInt(ip) {
+    return ip.split('.').reduce((acc, oct) => (acc << 8) + parseInt(oct, 10), 0) >>> 0;
+  }
+
+  // ═══════════════════════════════════════
+  // @alpha: 分组持久化
+  // ═══════════════════════════════════════
+
+  /** @private 加载分组 */
+  _loadGroups() {
+    try {
+      const data = JSON.parse(fs.readFileSync(this.groupsPath, 'utf-8'));
+      return Array.isArray(data) ? data : [];
+    } catch (_) { return []; }
+  }
+
+  /** @private 保存分组 */
+  _saveGroups() {
+    const tmpPath = this.groupsPath + '.tmp';
+    fs.writeFileSync(tmpPath, JSON.stringify(this.groups, null, 2));
+    fs.renameSync(tmpPath, this.groupsPath);
+  }
 
   /**
    * 获取已审批节点的 SSH 配置（供 Monitor 使用）

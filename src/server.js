@@ -17,6 +17,7 @@ const createAiRouter = require('./routes/ai');
 const createEnrollRouter = require('./routes/enroll');
 const createMirrorRouter = require('./routes/mirror');
 const createClawRouter = require('./routes/claw');
+const createGroupsRouter = require('./routes/groups');
 const ClawRPC = require('./services/claw-rpc');
 const { requireAuth, initToken, getAdminToken } = require('./middleware/auth');
 const { createRateLimit } = require('./middleware/rate-limit');
@@ -122,6 +123,8 @@ async function boot() {
   // 需认证 + 审计的管理路由
   app.use('/api/nodes', requireAuth, audit.middleware('nodes'), createNodesRouter(monitor, sshManager, monitor.nodesConfig));
   app.use('/api/ai', requireAuth, strictLimit, audit.middleware('ai_ops'), createAiRouter(aiOps, saveOpsLog));
+  // @alpha: 分组管理路由
+  app.use('/api/groups', requireAuth, audit.middleware('groups'), createGroupsRouter(keyManager));
 
   // 初始化脚本下载（公开，必须在 enroll 路由之前注册）
   app.get('/api/enroll/init.sh', (req, res) => {
@@ -222,6 +225,8 @@ async function boot() {
       type: 'snapshot',
       data: enrichNodesData(monitor.getAllStatus()),
       pending: keyManager.getPendingNodes(),
+      groups: keyManager.getGroups(),
+      allNodes: keyManager.getAllNodes(),
       timestamp: new Date().toISOString(),
     }));
     // 发送历史日志（按终端分组）
@@ -238,6 +243,8 @@ async function boot() {
       type: 'update',
       data: enrichNodesData(allStatus),
       pending: keyManager.getPendingNodes(),
+      groups: keyManager.getGroups(),
+      allNodes: keyManager.getAllNodes(),
       timestamp: new Date().toISOString(),
     });
     for (const client of wss.clients) {

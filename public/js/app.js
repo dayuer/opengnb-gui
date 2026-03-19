@@ -37,6 +37,12 @@ let selectedNodeId = null;
 let currentPage = 'dashboard';
 let ws = null;
 let opsLogsCache = {};
+// @alpha: 节点管理新状态
+let nodeGroups = [];
+let allNodesRaw = [];  // 全量节点（含 pending/rejected）
+let nodeFilter = { groupId: null, subnet: '', keyword: '', status: '' };
+let selectedIds = new Set();
+let nodePagination = { page: 1, pageSize: 50 };
 
 // ═══════════════════════════════════════
 // 页面路由
@@ -119,33 +125,77 @@ function renderDashboardPage(container) {
     totalPeers > 0 ? `${Math.round(directPeers/totalPeers*100)}% 直连率` : '无连接');
   html += `</div>`;
 
-  // 节点概览表格
+  // 节点概览表格（手风琴展开）
   if (total > 0) {
     html += `<div class="dashboard-section-title">节点状态概览</div>`;
-    html += `<table class="node-overview-table"><thead><tr>
-      <th>节点</th><th>TUN</th><th>状态</th><th>SSH 延迟</th><th>CPU</th><th>内存</th><th>磁盘</th>
-    </tr></thead><tbody>`;
+    html += `<div class="node-accordion" id="node-accordion">`;
     for (const node of nodesData) {
       const si = node.sysInfo || {};
       const memPct = si.memTotalMB > 0 ? Math.round(si.memUsedMB / si.memTotalMB * 100) : 0;
       const diskPct = si.diskUsePct ? parseInt(si.diskUsePct) : 0;
-      html += `<tr style="cursor:pointer" onclick="switchPage('nodes');setTimeout(()=>selectNode('${safeAttr(node.id)}'),50)">`;
-      html += `
-        <td>${escHtml(node.name || node.id)}</td>
-        <td>${escHtml(node.tunAddr)}</td>
-        <td><span class="status-badge ${node.online ? 'online' : 'offline'}">${node.online ? '在线' : '离线'}</span></td>
-        <td>${node.online ? node.sshLatencyMs + 'ms' : '—'}</td>
-        <td>${si.loadAvg ? escHtml(si.loadAvg.split(' ')[0]) : '—'}</td>
-        <td class="${pctColor(memPct)}">${memPct > 0 ? memPct + '%' : '—'}</td>
-        <td class="${pctColor(diskPct)}">${diskPct > 0 ? diskPct + '%' : '—'}</td>
-      </tr>`;
+      const peers = node.nodes || [];
+      const totalP = peers.length;
+      const directP = peers.filter(p => p.status === 'Direct').length;
+      const directRate = totalP > 0 ? Math.round(directP / totalP * 100) : 0;
+      const totalIn = peers.reduce((s, n) => s + (n.inBytes || 0), 0);
+      const totalOut = peers.reduce((s, n) => s + (n.outBytes || 0), 0);
+
+      html += `<div class="accordion-item" data-node-id="${safeAttr(node.id)}">`;
+      // 行头
+      html += `<div class="accordion-header" onclick="toggleAccordion('${safeAttr(node.id)}')">
+        <div class="acc-left">
+          <span class="node-dot ${node.online ? 'online' : 'offline'}"></span>
+          <span class="acc-name">${escHtml(node.name || node.id)}</span>
+          <span class="acc-addr">${escHtml(node.tunAddr)}</span>
+        </div>
+        <div class="acc-right">
+          <span class="acc-stat">${node.online ? node.sshLatencyMs + 'ms' : '—'}</span>
+          <span class="acc-stat">${si.loadAvg ? escHtml(si.loadAvg.split(' ')[0]) : '—'}</span>
+          <span class="acc-stat ${pctColor(memPct)}">${memPct > 0 ? memPct + '%' : '—'}</span>
+          <span class="acc-stat ${pctColor(diskPct)}">${diskPct > 0 ? diskPct + '%' : '—'}</span>
+          <span class="acc-chevron">${L('chevron-down')}</span>
+        </div>
+      </div>`;
+      // 展开面板
+      html += `<div class="accordion-panel" id="acc-panel-${safeAttr(node.id)}">`;
+      if (node.online) {
+        html += `<div class="acc-grid">`;
+        html += `<div class="acc-metric">${L('activity')} <b>SSH</b> <span class="${node.sshLatencyMs > 500 ? 'red' : node.sshLatencyMs > 200 ? 'yellow' : 'green'}">${node.sshLatencyMs}ms</span></div>`;
+        html += `<div class="acc-metric">${L('link')} <b>P2P</b> <span>${directP}/${totalP} <small>(${directRate}%)</small></span></div>`;
+        html += `<div class="acc-metric">${L('download')} <b>流入</b> <span class="accent">${formatBytes(totalIn)}</span></div>`;
+        html += `<div class="acc-metric">${L('upload')} <b>流出</b> <span class="accent">${formatBytes(totalOut)}</span></div>`;
+        html += `<div class="acc-metric">${L('cpu')} <b>CPU</b> <span>${si.cpuCores || '—'}核 · ${escHtml(si.loadAvg || '—')}</span></div>`;
+        html += `<div class="acc-metric">${L('memory-stick')} <b>内存</b> <span class="${pctColor(memPct)}">${memPct}% <small>(${si.memUsedMB || 0}/${si.memTotalMB || 0}MB)</small></span></div>`;
+        html += `<div class="acc-metric">${L('hard-drive')} <b>磁盘</b> <span class="${pctColor(diskPct)}">${diskPct}% <small>(${escHtml(si.diskUsed || '—')}/${escHtml(si.diskTotal || '—')})</small></span></div>`;
+        html += `<div class="acc-metric">${L('monitor')} <b>系统</b> <span>${escHtml(si.hostname || '—')} · ${escHtml(si.os || '—')}</span></div>`;
+        html += `<div class="acc-metric">${L('wrench')} <b>内核</b> <span>${escHtml(si.kernel || '—')} ${escHtml(si.arch || '')}</span></div>`;
+        html += `<div class="acc-metric">${L('clock')} <b>运行</b> <span>${escHtml(si.uptime || '—')}</span></div>`;
+        const clawText = node.clawToken ? `已配置 (端口 ${node.clawPort || 18789})` : '未安装';
+        html += `<div class="acc-metric">${L('bot')} <b>Claw</b> <span class="${node.clawToken ? 'green' : 'yellow'}">${clawText}</span></div>`;
+        html += `</div>`;
+      } else {
+        html += `<div class="acc-offline">${L('zap')} 节点不可达 — ${escHtml(node.error || 'SSH 连接超时')}</div>`;
+      }
+      html += `</div></div>`;
     }
-    html += `</tbody></table>`;
+    html += `</div>`;
   }
 
   html += `</div>`;
   container.innerHTML = html;
   refreshIcons();
+}
+
+/** 手风琴展开/收起 */
+function toggleAccordion(nodeId) {
+  const items = document.querySelectorAll('.accordion-item');
+  for (const item of items) {
+    if (item.dataset.nodeId === nodeId) {
+      item.classList.toggle('open');
+    } else {
+      item.classList.remove('open');
+    }
+  }
 }
 
 function dashCard(icon, title, value, color, sub) {
@@ -222,103 +272,513 @@ function bindAiEvents() {
 }
 
 // ═══════════════════════════════════════
-// 节点管理页面
+// @alpha: 节点管理页面（完整重构）
 // ═══════════════════════════════════════
 
 function renderNodesPage(container) {
   container.innerHTML = `
-    <div class="page-nodes">
-      <div class="node-sidebar">
-        <div class="panel-header">
-          <h2>已接入节点</h2>
-          <span id="node-count" class="badge">${nodesData.length}</span>
-        </div>
-        <ul class="node-list-scroll" id="node-list"></ul>
-        <div class="pending-section">
-          <div class="panel-header">
-            <h2>待审批</h2>
-            <span id="pending-count-inner" class="badge accent">${pendingNodes.length}</span>
-          </div>
-          <div id="pending-list"></div>
-        </div>
+    <div class="nodes-layout">
+      <aside class="group-sidebar" id="group-sidebar"></aside>
+      <div class="nodes-main">
+        <div class="nodes-toolbar" id="nodes-toolbar"></div>
+        <div class="nodes-table-wrap" id="nodes-table-wrap"></div>
+        <div class="nodes-pagination" id="nodes-pagination"></div>
       </div>
-      <div class="node-detail-area">
-        <div class="node-detail-header">
-          <h2 id="detail-title">选择节点查看详情</h2>
-        </div>
-        <div class="node-detail-content" id="detail-content">
-          <div class="detail-placeholder">
-            <span class="placeholder-icon">◇</span>
-            <p>从左侧选择一个节点</p>
-          </div>
-        </div>
-      </div>
+    </div>
+    <div class="batch-toolbar" id="batch-toolbar" style="display:none"></div>
+    <div class="modal-overlay" id="modal-overlay" style="display:none">
+      <div class="modal" id="modal-content"></div>
     </div>
   `;
+  renderGroupSidebar();
+  renderNodesToolbar();
+  renderNodesTable();
+  renderPagination();
+  refreshIcons();
+}
 
-  renderNodeList();
-  renderPendingList();
+// --- 分组侧栏 ---
+function renderGroupSidebar() {
+  const sb = $('#group-sidebar');
+  if (!sb) return;
+  const totalAll = allNodesRaw.length;
+  const ungrouped = allNodesRaw.filter(n => !n.groupId).length;
 
-  // 如果已选中节点，渲染详情
-  if (selectedNodeId) {
-    renderNodeDetail(selectedNodeId);
+  let html = `<div class="group-sidebar-header">
+    <span class="group-sidebar-title">分组</span>
+    <button class="group-add-btn" onclick="showGroupModal()" title="新建分组">${L('plus')}</button>
+  </div>`;
+
+  html += `<ul class="group-list">`;
+  // 全部
+  html += `<li class="group-item ${!nodeFilter.groupId ? 'active' : ''}" onclick="filterByGroup(null)">
+    <span class="group-color-dot" style="background:var(--accent)"></span>
+    <span class="group-name">全部</span>
+    <span class="group-count">${totalAll}</span>
+  </li>`;
+  // 各分组
+  for (const g of nodeGroups) {
+    html += `<li class="group-item ${nodeFilter.groupId === g.id ? 'active' : ''}" onclick="filterByGroup('${safeAttr(g.id)}')">
+      <span class="group-color-dot" style="background:${escHtml(g.color)}"></span>
+      <span class="group-name">${escHtml(g.name)}</span>
+      <span class="group-count">${g.nodeCount}</span>
+      <button class="group-del-btn" onclick="event.stopPropagation();deleteGroupUI('${safeAttr(g.id)}')" title="删除">${L('trash-2')}</button>
+    </li>`;
   }
+  // 未分组
+  html += `<li class="group-item ${nodeFilter.groupId === '__none' ? 'active' : ''}" onclick="filterByGroup('__none')">
+    <span class="group-color-dot" style="background:var(--text-muted)"></span>
+    <span class="group-name">未分组</span>
+    <span class="group-count">${ungrouped}</span>
+  </li>`;
+  html += `</ul>`;
+  sb.innerHTML = html;
+  refreshIcons();
 }
 
-// --- 节点列表 ---
-function renderNodeList() {
-  const list = $('#node-list');
-  const count = $('#node-count');
-  if (!list) return;
-  if (count) count.textContent = nodesData.length;
-
-  list.innerHTML = nodesData.map(node => {
-    const dotClass = node.online ? 'online' : 'offline';
-    const activeClass = node.id === selectedNodeId ? 'active' : '';
-    const latency = node.sshLatencyMs > 0 ? `${node.sshLatencyMs}ms` : '—';
-    return `
-      <li class="node-item ${activeClass}" onclick="selectNode('${safeAttr(node.id)}')">
-        <span class="node-dot ${dotClass}"></span>
-        <div class="node-info">
-          <div class="node-name">${escHtml(node.name || node.id)}</div>
-          <div class="node-addr">${escHtml(node.tunAddr)} · ${latency}</div>
-        </div>
-      </li>
-    `;
-  }).join('');
+// --- 工具栏 ---
+function renderNodesToolbar() {
+  const tb = $('#nodes-toolbar');
+  if (!tb) return;
+  tb.innerHTML = `
+    <div class="toolbar-left">
+      <div class="toolbar-search">
+        ${L('search')}
+        <input type="text" id="node-search" placeholder="搜索节点名称/ID/IP..." value="${escHtml(nodeFilter.keyword)}" oninput="onNodeSearch(this.value)">
+      </div>
+      <div class="toolbar-search cidr-search">
+        ${L('network')}
+        <input type="text" id="cidr-input" placeholder="CIDR 如 10.1.0.0/24" value="${escHtml(nodeFilter.subnet)}" onkeydown="if(event.key==='Enter')onCidrFilter(this.value)">
+        <button class="toolbar-btn sm" onclick="onCidrFilter($('#cidr-input').value)">筛选</button>
+      </div>
+      <select id="status-filter" class="toolbar-select" onchange="onStatusFilter(this.value)">
+        <option value="">全部状态</option>
+        <option value="approved" ${nodeFilter.status==='approved'?'selected':''}>已审批</option>
+        <option value="pending" ${nodeFilter.status==='pending'?'selected':''}>待审批</option>
+        <option value="rejected" ${nodeFilter.status==='rejected'?'selected':''}>已拒绝</option>
+      </select>
+    </div>
+    <div class="toolbar-right">
+      <span class="toolbar-count" id="filtered-count"></span>
+    </div>
+  `;
+  refreshIcons();
 }
 
-// --- 待审批列表 ---
-function renderPendingList() {
-  const container = $('#pending-list');
-  const badge = $('#pending-count-inner');
-  const headerBadge = $('#pending-badge');
-  const headerCount = $('#pending-count');
-  if (!container) return;
-  if (badge) badge.textContent = pendingNodes.length;
-  if (headerCount) headerCount.textContent = pendingNodes.length;
-  if (headerBadge) headerBadge.style.display = pendingNodes.length > 0 ? '' : 'none';
+// --- 数据表格 ---
+function getFilteredNodesList() {
+  let list = [...allNodesRaw];
+  if (nodeFilter.groupId === '__none') list = list.filter(n => !n.groupId);
+  else if (nodeFilter.groupId) list = list.filter(n => n.groupId === nodeFilter.groupId);
+  if (nodeFilter.status) list = list.filter(n => n.status === nodeFilter.status);
+  if (nodeFilter.keyword) {
+    const kw = nodeFilter.keyword.toLowerCase();
+    list = list.filter(n =>
+      (n.name || '').toLowerCase().includes(kw) ||
+      (n.id || '').toLowerCase().includes(kw) ||
+      (n.tunAddr || '').toLowerCase().includes(kw)
+    );
+  }
+  if (nodeFilter.subnet && isValidCidr(nodeFilter.subnet)) {
+    list = list.filter(n => n.tunAddr && cidrMatch(n.tunAddr, nodeFilter.subnet));
+  }
+  return list;
+}
 
-  if (!pendingNodes.length) {
-    container.innerHTML = '<div class="detail-placeholder" style="padding:20px"><p>无待审批节点</p></div>';
+function renderNodesTable() {
+  const wrap = $('#nodes-table-wrap');
+  if (!wrap) return;
+  const all = getFilteredNodesList();
+  const total = all.length;
+  const { page, pageSize } = nodePagination;
+  const totalPages = Math.max(1, Math.ceil(total / pageSize));
+  nodePagination.page = Math.min(page, totalPages);
+  const start = (nodePagination.page - 1) * pageSize;
+  const pageNodes = all.slice(start, start + pageSize);
+
+  // 更新计数
+  const fc = $('#filtered-count');
+  if (fc) fc.textContent = `共 ${total} 个节点`;
+
+  const allChecked = pageNodes.length > 0 && pageNodes.every(n => selectedIds.has(n.id));
+
+  let html = `<table class="nodes-data-table">
+    <thead><tr>
+      <th class="col-check"><input type="checkbox" ${allChecked ? 'checked' : ''} onchange="toggleSelectAll(this.checked)"></th>
+      <th class="col-status">状态</th>
+      <th class="col-name">名称</th>
+      <th class="col-addr">TUN 地址</th>
+      <th class="col-group">分组</th>
+      <th class="col-latency">延迟</th>
+      <th class="col-actions">操作</th>
+    </tr></thead><tbody>`;
+
+  if (pageNodes.length === 0) {
+    html += `<tr><td colspan="7" class="table-empty">无匹配节点</td></tr>`;
+  }
+
+  for (const node of pageNodes) {
+    const checked = selectedIds.has(node.id) ? 'checked' : '';
+    const monitorNode = nodesData.find(n => n.id === node.id);
+    const online = monitorNode?.online;
+    const latency = monitorNode?.sshLatencyMs;
+    const statusIcon = node.status === 'approved'
+      ? (online ? `<span class="node-dot online"></span>` : `<span class="node-dot offline"></span>`)
+      : node.status === 'pending'
+        ? `<span class="node-dot unknown"></span>`
+        : `<span class="node-dot offline"></span>`;
+    const statusLabel = node.status === 'approved'
+      ? (online ? '在线' : '离线')
+      : node.status === 'pending' ? '待审批' : '已拒绝';
+    const group = nodeGroups.find(g => g.id === node.groupId);
+    const groupTag = group
+      ? `<span class="group-tag" style="border-color:${escHtml(group.color)};color:${escHtml(group.color)}">${escHtml(group.name)}</span>`
+      : `<span class="group-tag none">未分组</span>`;
+    const isExpanded = selectedNodeId === node.id;
+
+    html += `<tr class="node-row ${isExpanded ? 'expanded' : ''}" data-id="${safeAttr(node.id)}">
+      <td class="col-check"><input type="checkbox" ${checked} onchange="toggleSelectNode('${safeAttr(node.id)}', this.checked)"></td>
+      <td class="col-status" onclick="expandNodeRow('${safeAttr(node.id)}')">${statusIcon} <span class="status-label">${statusLabel}</span></td>
+      <td class="col-name" onclick="expandNodeRow('${safeAttr(node.id)}')">${escHtml(node.name || node.id)}</td>
+      <td class="col-addr" onclick="expandNodeRow('${safeAttr(node.id)}')">${escHtml(node.tunAddr || '—')}</td>
+      <td class="col-group">${groupTag}</td>
+      <td class="col-latency">${online && latency ? latency + 'ms' : '—'}</td>
+      <td class="col-actions">
+        ${node.status === 'pending' ? `<button class="btn-approve-sm" onclick="approveNode('${safeAttr(node.id)}')">  ✓</button><button class="btn-reject-sm" onclick="rejectNode('${safeAttr(node.id)}')">  ✗</button>` : ''}
+        <button class="btn-icon" onclick="showMoveGroupModal('${safeAttr(node.id)}')" title="移动分组">${L('folder-input')}</button>
+      </td>
+    </tr>`;
+
+    // 展开详情行
+    if (isExpanded && monitorNode) {
+      html += `<tr class="node-expand-row"><td colspan="7"><div class="node-expand-panel" id="expand-panel-${safeAttr(node.id)}"></div></td></tr>`;
+    }
+  }
+
+  html += `</tbody></table>`;
+  wrap.innerHTML = html;
+
+  // 填充展开面板
+  if (selectedNodeId) {
+    const panel = $(`#expand-panel-${CSS.escape(selectedNodeId)}`);
+    if (panel) {
+      const monitorNode = nodesData.find(n => n.id === selectedNodeId);
+      if (monitorNode) renderInlineDetail(panel, monitorNode);
+    }
+  }
+
+  updateBatchToolbar();
+  refreshIcons();
+}
+
+// --- 内联详情面板 ---
+function renderInlineDetail(panel, node) {
+  if (!node.online) {
+    panel.innerHTML = `<div class="inline-offline">${L('zap')} 节点不可达 — ${escHtml(node.error || 'SSH 连接超时')}</div>`;
+    refreshIcons();
     return;
   }
+  const si = node.sysInfo || {};
+  const memPct = si.memTotalMB > 0 ? Math.round(si.memUsedMB / si.memTotalMB * 100) : 0;
+  const diskPct = si.diskUsePct ? parseInt(si.diskUsePct) : 0;
+  const peers = node.nodes || [];
+  const directP = peers.filter(p => p.status === 'Direct').length;
+  const totalIn = peers.reduce((s, n) => s + (n.inBytes || 0), 0);
+  const totalOut = peers.reduce((s, n) => s + (n.outBytes || 0), 0);
 
-  container.innerHTML = pendingNodes.map(node => `
-    <div class="pending-item">
-      <div class="pending-info">
-        <span class="node-dot unknown"></span>
-        <div>
-          <div class="node-name">${escHtml(node.name || node.id)}</div>
-          <div class="node-addr">${escHtml(node.tunAddr)} · ${escHtml(node.sshUser || 'synon')}</div>
-        </div>
-      </div>
-      <div class="pending-actions">
-        <button class="btn-approve" onclick="approveNode('${safeAttr(node.id)}')">✓ 通过</button>
-        <button class="btn-reject" onclick="rejectNode('${safeAttr(node.id)}')">✗ 拒绝</button>
+  panel.innerHTML = `<div class="inline-detail-grid">
+    <div class="id-metric">${L('activity')} SSH <b class="${node.sshLatencyMs > 500 ? 'red' : node.sshLatencyMs > 200 ? 'yellow' : 'green'}">${node.sshLatencyMs}ms</b></div>
+    <div class="id-metric">${L('link')} P2P <b>${directP}/${peers.length}</b></div>
+    <div class="id-metric">${L('download')} 流入 <b class="accent">${formatBytes(totalIn)}</b></div>
+    <div class="id-metric">${L('upload')} 流出 <b class="accent">${formatBytes(totalOut)}</b></div>
+    <div class="id-metric">${L('cpu')} CPU <b>${si.cpuCores || '—'}核</b> · ${escHtml(si.loadAvg || '—')}</div>
+    <div class="id-metric">${L('memory-stick')} 内存 <b class="${pctColor(memPct)}">${memPct}%</b> (${si.memUsedMB||0}/${si.memTotalMB||0}MB)</div>
+    <div class="id-metric">${L('hard-drive')} 磁盘 <b class="${pctColor(diskPct)}">${diskPct}%</b> (${escHtml(si.diskUsed||'—')}/${escHtml(si.diskTotal||'—')})</div>
+    <div class="id-metric">${L('monitor')} ${escHtml(si.hostname || '—')} · ${escHtml(si.os || '—')}</div>
+  </div>`;
+  refreshIcons();
+}
+
+// --- 分页 ---
+function renderPagination() {
+  const pg = $('#nodes-pagination');
+  if (!pg) return;
+  const all = getFilteredNodesList();
+  const total = all.length;
+  const { page, pageSize } = nodePagination;
+  const totalPages = Math.max(1, Math.ceil(total / pageSize));
+
+  if (totalPages <= 1) { pg.innerHTML = ''; return; }
+
+  let html = `<div class="pg-info">第 ${page}/${totalPages} 页 · 共 ${total} 条</div><div class="pg-btns">`;
+  html += `<button class="pg-btn" ${page <= 1 ? 'disabled' : ''} onclick="goPage(${page - 1})">${L('chevron-left')}</button>`;
+  const maxVisible = 7;
+  let startP = Math.max(1, page - Math.floor(maxVisible / 2));
+  let endP = Math.min(totalPages, startP + maxVisible - 1);
+  if (endP - startP < maxVisible - 1) startP = Math.max(1, endP - maxVisible + 1);
+  for (let p = startP; p <= endP; p++) {
+    html += `<button class="pg-btn ${p === page ? 'active' : ''}" onclick="goPage(${p})">${p}</button>`;
+  }
+  html += `<button class="pg-btn" ${page >= totalPages ? 'disabled' : ''} onclick="goPage(${page + 1})">${L('chevron-right')}</button>`;
+  html += `</div>`;
+  pg.innerHTML = html;
+  refreshIcons();
+}
+
+// --- 批量操作工具栏 ---
+function updateBatchToolbar() {
+  const bar = $('#batch-toolbar');
+  if (!bar) return;
+  if (selectedIds.size === 0) { bar.style.display = 'none'; return; }
+  bar.style.display = 'flex';
+  bar.innerHTML = `
+    <span class="batch-count">已选 ${selectedIds.size} 个节点</span>
+    <button class="batch-btn approve" onclick="batchAction('approve')">${L('check')} 批量审批</button>
+    <button class="batch-btn reject" onclick="batchAction('reject')">${L('x')} 批量拒绝</button>
+    <button class="batch-btn danger" onclick="batchAction('remove')">${L('trash-2')} 批量删除</button>
+    <button class="batch-btn move" onclick="showBatchMoveModal()">${L('folder-input')} 移动分组</button>
+    <button class="batch-btn cancel" onclick="clearSelection()">取消</button>
+  `;
+  refreshIcons();
+}
+
+// --- 交互函数 ---
+function filterByGroup(groupId) {
+  nodeFilter.groupId = groupId;
+  nodePagination.page = 1;
+  selectedIds.clear();
+  renderGroupSidebar();
+  renderNodesTable();
+  renderPagination();
+}
+
+function onNodeSearch(value) {
+  nodeFilter.keyword = value;
+  nodePagination.page = 1;
+  renderNodesTable();
+  renderPagination();
+}
+
+function onCidrFilter(value) {
+  if (value && !isValidCidr(value)) {
+    alert('无效的 CIDR 格式，例: 10.1.0.0/24');
+    return;
+  }
+  nodeFilter.subnet = value;
+  nodePagination.page = 1;
+  renderNodesTable();
+  renderPagination();
+}
+
+function onStatusFilter(value) {
+  nodeFilter.status = value;
+  nodePagination.page = 1;
+  renderNodesTable();
+  renderPagination();
+}
+
+function goPage(p) {
+  nodePagination.page = p;
+  selectedIds.clear();
+  renderNodesTable();
+  renderPagination();
+}
+
+function toggleSelectAll(checked) {
+  const all = getFilteredNodesList();
+  const { page, pageSize } = nodePagination;
+  const start = (page - 1) * pageSize;
+  const pageNodes = all.slice(start, start + pageSize);
+  for (const n of pageNodes) {
+    if (checked) selectedIds.add(n.id); else selectedIds.delete(n.id);
+  }
+  renderNodesTable();
+}
+
+function toggleSelectNode(nodeId, checked) {
+  if (checked) selectedIds.add(nodeId); else selectedIds.delete(nodeId);
+  updateBatchToolbar();
+  // 更新全选 checkbox
+  const thCheck = $('.nodes-data-table thead input[type=checkbox]');
+  if (thCheck) {
+    const all = getFilteredNodesList();
+    const { page, pageSize } = nodePagination;
+    const start = (page - 1) * pageSize;
+    const pageNodes = all.slice(start, start + pageSize);
+    thCheck.checked = pageNodes.length > 0 && pageNodes.every(n => selectedIds.has(n.id));
+  }
+}
+
+function clearSelection() {
+  selectedIds.clear();
+  renderNodesTable();
+}
+
+function expandNodeRow(nodeId) {
+  selectedNodeId = selectedNodeId === nodeId ? null : nodeId;
+  renderNodesTable();
+}
+
+// --- 批量操作 ---
+async function batchAction(action) {
+  const ids = [...selectedIds];
+  const labels = { approve: '审批', reject: '拒绝', remove: '删除' };
+  if (!confirm(`确认${labels[action]} ${ids.length} 个节点？`)) return;
+  try {
+    const res = await authFetch('/api/enroll/batch', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ action, ids }),
+    });
+    const data = await res.json();
+    const msg = `${labels[action]}完成: ${data.succeeded?.length || 0} 成功, ${data.failed?.length || 0} 失败`;
+    alert(msg);
+    selectedIds.clear();
+  } catch (e) { alert(`操作失败: ${e.message}`); }
+}
+
+// --- 分组弹窗 ---
+function showGroupModal() {
+  const overlay = $('#modal-overlay');
+  const content = $('#modal-content');
+  overlay.style.display = 'flex';
+  content.innerHTML = `
+    <div class="modal-header">新建分组</div>
+    <div class="modal-body">
+      <label>分组名称</label>
+      <input type="text" id="group-name-input" placeholder="输入分组名称..." autofocus>
+      <label>颜色</label>
+      <div class="color-picker" id="color-picker">
+        ${['#388bfd','#3fb950','#f85149','#d29922','#a371f7','#f778ba','#79c0ff','#56d4dd'].map(c => `<span class="color-opt ${c === '#388bfd' ? 'active' : ''}" style="background:${c}" onclick="pickColor(this,'${c}')"></span>`).join('')}
       </div>
     </div>
-  `).join('');
+    <div class="modal-footer">
+      <button class="modal-btn cancel" onclick="closeModal()">取消</button>
+      <button class="modal-btn primary" onclick="createGroupUI()">创建</button>
+    </div>
+  `;
+}
+
+let pickedColor = '#388bfd';
+function pickColor(el, color) {
+  pickedColor = color;
+  $$('.color-opt').forEach(e => e.classList.remove('active'));
+  el.classList.add('active');
+}
+
+async function createGroupUI() {
+  const name = $('#group-name-input')?.value?.trim();
+  if (!name) { alert('名称不能为空'); return; }
+  try {
+    const res = await authFetch('/api/groups', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ name, color: pickedColor }),
+    });
+    if (res.status === 409) { alert('同名分组已存在'); return; }
+    if (!res.ok) { alert('创建失败'); return; }
+    closeModal();
+    // 强制刷新分组列表
+    await refreshGroups();
+    renderGroupSidebar();
+  } catch (e) { alert(`创建失败: ${e.message}`); }
+}
+
+async function deleteGroupUI(groupId) {
+  if (!confirm('确认删除此分组？节点将回归未分组')) return;
+  try {
+    await authFetch(`/api/groups/${encodeURIComponent(groupId)}`, { method: 'DELETE' });
+    if (nodeFilter.groupId === groupId) nodeFilter.groupId = null;
+    await refreshGroups();
+    renderGroupSidebar();
+    renderNodesTable();
+  } catch (e) { alert(`删除失败: ${e.message}`); }
+}
+
+function showMoveGroupModal(nodeId) {
+  const overlay = $('#modal-overlay');
+  const content = $('#modal-content');
+  overlay.style.display = 'flex';
+  let html = `<div class="modal-header">移动到分组</div><div class="modal-body"><ul class="move-group-list">`;
+  html += `<li class="move-group-item" onclick="moveToGroup('${safeAttr(nodeId)}', null)">取消分组</li>`;
+  for (const g of nodeGroups) {
+    html += `<li class="move-group-item" onclick="moveToGroup('${safeAttr(nodeId)}', '${safeAttr(g.id)}')">
+      <span class="group-color-dot" style="background:${escHtml(g.color)}"></span>${escHtml(g.name)}
+    </li>`;
+  }
+  html += `</ul></div><div class="modal-footer"><button class="modal-btn cancel" onclick="closeModal()">取消</button></div>`;
+  content.innerHTML = html;
+}
+
+function showBatchMoveModal() {
+  const ids = [...selectedIds];
+  const overlay = $('#modal-overlay');
+  const content = $('#modal-content');
+  overlay.style.display = 'flex';
+  let html = `<div class="modal-header">批量移动到分组 (${ids.length} 个节点)</div><div class="modal-body"><ul class="move-group-list">`;
+  html += `<li class="move-group-item" onclick="batchMoveToGroup(null)">取消分组</li>`;
+  for (const g of nodeGroups) {
+    html += `<li class="move-group-item" onclick="batchMoveToGroup('${safeAttr(g.id)}')">
+      <span class="group-color-dot" style="background:${escHtml(g.color)}"></span>${escHtml(g.name)}
+    </li>`;
+  }
+  html += `</ul></div><div class="modal-footer"><button class="modal-btn cancel" onclick="closeModal()">取消</button></div>`;
+  content.innerHTML = html;
+}
+
+async function moveToGroup(nodeId, groupId) {
+  try {
+    await authFetch(`/api/enroll/${encodeURIComponent(nodeId)}/group`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ groupId }),
+    });
+    closeModal();
+  } catch (e) { alert(`移动失败: ${e.message}`); }
+}
+
+async function batchMoveToGroup(groupId) {
+  const ids = [...selectedIds];
+  try {
+    for (const id of ids) {
+      await authFetch(`/api/enroll/${encodeURIComponent(id)}/group`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ groupId }),
+      });
+    }
+    closeModal();
+    selectedIds.clear();
+  } catch (e) { alert(`批量移动失败: ${e.message}`); }
+}
+
+function closeModal() {
+  const overlay = $('#modal-overlay');
+  if (overlay) overlay.style.display = 'none';
+}
+
+async function refreshGroups() {
+  try {
+    const res = await authFetch('/api/groups');
+    const data = await res.json();
+    nodeGroups = data.groups || [];
+  } catch (_) {}
+}
+
+// --- CIDR 工具 ---
+function cidrMatch(ip, cidr) {
+  const [range, bits] = cidr.split('/');
+  if (!range || !bits) return false;
+  const mask = ~(2 ** (32 - parseInt(bits, 10)) - 1) >>> 0;
+  return (ipToInt(ip) & mask) === (ipToInt(range) & mask);
+}
+
+function ipToInt(ip) {
+  return ip.split('.').reduce((acc, oct) => (acc << 8) + parseInt(oct, 10), 0) >>> 0;
+}
+
+function isValidCidr(cidr) {
+  return /^\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}\/\d{1,2}$/.test(cidr);
 }
 
 function selectNode(nodeId) {
@@ -685,6 +1145,8 @@ function connectWS() {
       if (msg.type === 'snapshot' || msg.type === 'update') {
         nodesData = msg.data || [];
         pendingNodes = msg.pending || [];
+        nodeGroups = msg.groups || nodeGroups;
+        allNodesRaw = msg.allNodes || allNodesRaw;
         $('#last-update').textContent = new Date(msg.timestamp).toLocaleTimeString();
         // 更新待审批 badge
         const hCount = $('#pending-count');
@@ -695,9 +1157,9 @@ function connectWS() {
         // 刷新当前页面
         if (currentPage === 'dashboard') renderDashboardPage($('#main-content'));
         if (currentPage === 'nodes') {
-          renderNodeList();
-          renderPendingList();
-          if (selectedNodeId) renderNodeDetail(selectedNodeId);
+          renderGroupSidebar();
+          renderNodesTable();
+          renderPagination();
         }
         if (currentPage === 'monitor' && selectedNodeId) renderNodeDetail(selectedNodeId);
       }

@@ -102,6 +102,28 @@ function createEnrollRouter(keyManager, security = {}) {
     res.status(result.success ? 200 : 404).json(result);
   });
 
+  // @alpha: 批量操作
+  // POST /api/enroll/batch — 批量审批/拒绝/删除
+  router.post('/batch', ...adminMiddleware, (req, res) => {
+    const { action, ids } = req.body;
+    if (!ids || !Array.isArray(ids)) return res.status(400).json({ error: '缺少 ids 数组' });
+
+    const actions = { approve: 'batchApprove', reject: 'batchReject', remove: 'batchRemove' };
+    const method = actions[action];
+    if (!method) return res.status(400).json({ error: `无效 action: ${action}，允许: approve/reject/remove` });
+
+    const result = keyManager[method](ids);
+    res.json(result);
+  });
+
+  // @alpha: 修改节点分组
+  // PATCH /api/enroll/:id/group
+  router.patch('/:id/group', ...adminMiddleware, (req, res) => {
+    const { groupId } = req.body;
+    const result = keyManager.updateNodeGroup(req.params.id, groupId);
+    res.status(result.success ? 200 : 404).json(result);
+  });
+
   return router;
 }
 
