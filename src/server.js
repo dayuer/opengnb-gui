@@ -131,11 +131,13 @@ async function boot() {
       if (node && node.gnbNodeId) {
         try {
           // 复用旧池化连接(旧 IP) — 必须在 disconnect 之前执行
+          // 策略: sed → sync(确保落盘) → nohup 异步重启 GNB(避免 SSH 断连导致 sed 未生效)
           const sedCmd = `sudo sed -i 's/^${node.gnbNodeId}|.*/${node.gnbNodeId}|${node.tunAddr}|255.255.255.0/' /opt/gnb/conf/${node.gnbNodeId}/address.conf`;
-          const restartCmd = 'sudo systemctl restart gnb';
-          const { stdout, stderr, code } = await sshManager.exec(node, `${sedCmd} && ${restartCmd}`, 20000);
+          const syncCmd = 'sync';
+          const restartCmd = 'nohup bash -c "sleep 1 && sudo systemctl restart gnb" >/dev/null 2>&1 &';
+          const { stdout, stderr, code } = await sshManager.exec(node, `${sedCmd} && ${syncCmd} && ${restartCmd}`, 15000);
           if (code === 0) {
-            console.log(`[NodeUpdate] 远程 GNB 同步完成: ${nodeId} → ${node.tunAddr}`);
+            console.log(`[NodeUpdate] 远程 GNB 同步已提交: ${nodeId} → ${node.tunAddr}`);
           } else {
             console.error(`[NodeUpdate] 远程 GNB 同步异常 (exit ${code}): ${stderr || stdout}`);
           }
