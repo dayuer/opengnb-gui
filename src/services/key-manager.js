@@ -443,8 +443,9 @@ class KeyManager {
     try {
       if (!fs.existsSync(addressConf)) return;
       let content = fs.readFileSync(addressConf, 'utf8');
+      const netmask = node.netmask || '255.255.255.0';
       const regex = new RegExp(`^${node.gnbNodeId}\\|.*$`, 'm');
-      const newEntry = `${node.gnbNodeId}|${node.tunAddr}|255.255.255.0`;
+      const newEntry = `${node.gnbNodeId}|${node.tunAddr}|${netmask}`;
       content = regex.test(content)
         ? content.replace(regex, newEntry)
         : content.trimEnd() + '\n' + newEntry;

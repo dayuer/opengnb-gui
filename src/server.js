@@ -123,30 +123,8 @@ async function boot() {
     provisioner.provision(nodeConfig, { installGnb: false, installClaw: true });
   };
 
-  // @alpha: 编辑回调：同步运行时配置 + 远程 GNB 热重载
-  keyManager.onNodeUpdate = async (nodeId, changedFields) => {
-    // tunAddr 变更: 通过旧 SSH 连接远程同步节点的 GNB 配置
-    if (changedFields.includes('tunAddr')) {
-      const node = keyManager.getApprovedNodesConfig().find(n => n.id === nodeId);
-      if (node && node.gnbNodeId) {
-        try {
-          // 复用旧池化连接(旧 IP) — 必须在 disconnect 之前执行
-          // 策略: sed → sync(确保落盘) → nohup 异步重启 GNB(避免 SSH 断连导致 sed 未生效)
-          const sedCmd = `sudo sed -i 's/^${node.gnbNodeId}|.*/${node.gnbNodeId}|${node.tunAddr}|255.255.255.0/' /opt/gnb/conf/${node.gnbNodeId}/address.conf`;
-          const syncCmd = 'sync';
-          const restartCmd = 'nohup bash -c "sleep 1 && sudo systemctl restart gnb" >/dev/null 2>&1 &';
-          const { stdout, stderr, code } = await sshManager.exec(node, `${sedCmd} && ${syncCmd} && ${restartCmd}`, 15000);
-          if (code === 0) {
-            console.log(`[NodeUpdate] 远程 GNB 同步已提交: ${nodeId} → ${node.tunAddr}`);
-          } else {
-            console.error(`[NodeUpdate] 远程 GNB 同步异常 (exit ${code}): ${stderr || stdout}`);
-          }
-        } catch (err) {
-          console.error(`[NodeUpdate] 远程同步失败 (非阻塞): ${err.message}`);
-        }
-      }
-    }
-
+  // @alpha: 编辑回调：同步运行时配置（远程 GNB 同步已移至 PUT 路由）
+  keyManager.onNodeUpdate = (nodeId, changedFields) => {
     const updated = keyManager.getApprovedNodesConfig();
     monitor.nodesConfig = updated;
     aiOps.nodesConfig = updated;

@@ -159,4 +159,93 @@ describe('services/key-manager', () => {
     // 备份中至少应有第一次 submitEnrollment 的数据
     assert.ok(km2.getAllNodes().length > 0, '应从备份恢复出节点数据');
   });
+
+  // ═══════════════════════════════════════
+  // @alpha: updateNode 编辑节点信息测试
+  // ═══════════════════════════════════════
+
+  /** 辅助：创建一个已审批节点 */
+  function createApprovedNode(km, id, overrides = {}) {
+    const pc = km.generatePasscode();
+    km.submitEnrollment({ passcode: pc, id, name: overrides.name || id });
+    km.approveNode(id, { tunAddr: overrides.tunAddr || '10.1.0.10', gnbNodeId: overrides.gnbNodeId || '1002' });
+    return km.getAllNodes().find(n => n.id === id);
+  }
+
+  describe('updateNode', () => {
+    it('should update tunAddr', () => {
+      createApprovedNode(km, 'u1');
+      const result = km.updateNode('u1', { tunAddr: '10.2.0.2' });
+      assert.ok(result.success);
+      assert.deepStrictEqual(result.changedFields, ['tunAddr']);
+      assert.equal(km.getAllNodes().find(n => n.id === 'u1').tunAddr, '10.2.0.2');
+    });
+
+    it('should update name', () => {
+      createApprovedNode(km, 'u2');
+      const result = km.updateNode('u2', { name: '新名称' });
+      assert.ok(result.success);
+      assert.deepStrictEqual(result.changedFields, ['name']);
+    });
+
+    it('should update sshPort', () => {
+      createApprovedNode(km, 'u3');
+      const result = km.updateNode('u3', { sshPort: 2222 });
+      assert.ok(result.success);
+      assert.equal(km.getAllNodes().find(n => n.id === 'u3').sshPort, 2222);
+    });
+
+    it('should update sshUser', () => {
+      createApprovedNode(km, 'u4');
+      const result = km.updateNode('u4', { sshUser: 'admin' });
+      assert.ok(result.success);
+      assert.equal(km.getAllNodes().find(n => n.id === 'u4').sshUser, 'admin');
+    });
+
+    it('should update multiple fields at once', () => {
+      createApprovedNode(km, 'u5');
+      const result = km.updateNode('u5', { tunAddr: '10.3.0.1', sshPort: 8022 });
+      assert.ok(result.success);
+      assert.deepStrictEqual(result.changedFields.sort(), ['sshPort', 'tunAddr']);
+    });
+
+    it('should reject invalid IPv4 (5 octets)', () => {
+      createApprovedNode(km, 'u6');
+      const result = km.updateNode('u6', { tunAddr: '10.2.0.0.2' });
+      assert.ok(!result.success);
+      assert.ok(result.message.includes('IP 格式错误'));
+    });
+
+    it('should reject duplicate tunAddr (CONFLICT)', () => {
+      createApprovedNode(km, 'u7a', { tunAddr: '10.1.0.20' });
+      createApprovedNode(km, 'u7b', { tunAddr: '10.1.0.21' });
+      const result = km.updateNode('u7b', { tunAddr: '10.1.0.20' });
+      assert.ok(!result.success);
+      assert.equal(result.code, 'CONFLICT');
+    });
+
+    it('should reject port out of range', () => {
+      createApprovedNode(km, 'u8');
+      const r1 = km.updateNode('u8', { sshPort: 0 });
+      assert.ok(!r1.success);
+      const r2 = km.updateNode('u8', { sshPort: 99999 });
+      assert.ok(!r2.success);
+    });
+
+    it('should reject non-approved node', () => {
+      const pc = km.generatePasscode();
+      km.submitEnrollment({ passcode: pc, id: 'u9', name: 'Pending' });
+      const result = km.updateNode('u9', { name: 'Updated' });
+      assert.ok(!result.success);
+      assert.ok(result.message.includes('仅已审批'));
+    });
+
+    it('should return no changes when same values', () => {
+      createApprovedNode(km, 'u10', { tunAddr: '10.1.0.50' });
+      const result = km.updateNode('u10', { tunAddr: '10.1.0.50' });
+      assert.ok(result.success);
+      assert.deepStrictEqual(result.changedFields, []);
+      assert.ok(result.message.includes('无变更'));
+    });
+  });
 });
