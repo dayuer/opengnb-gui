@@ -55,12 +55,52 @@
         </div>
         <div class="header-right">
           <span id="pending-badge" class="badge accent" style="display:none">待审批 <span id="pending-count">0</span></span>
+          <!-- 用户菜单 -->
+          <div class="user-menu" id="user-menu">
+            <button class="user-menu-trigger" id="user-menu-trigger" onclick="toggleUserMenu()">
+              <span class="user-avatar">AD</span>
+              <div class="user-menu-info">
+                <span class="user-menu-name">Admin</span>
+                <span class="user-menu-role">Admin</span>
+              </div>
+              <i data-lucide="chevron-down" class="user-menu-chevron"></i>
+            </button>
+            <div class="user-dropdown" id="user-dropdown">
+              <div class="user-dropdown-header">
+                <div class="user-dropdown-name">Admin</div>
+                <div class="user-dropdown-email">GNB Console 管理员</div>
+              </div>
+              <div class="user-dropdown-divider"></div>
+              <button class="user-dropdown-item" onclick="closeUserMenu()">
+                <i data-lucide="user"></i><span>个人资料</span>
+              </button>
+              <button class="user-dropdown-item" onclick="showApiKey()">
+                <i data-lucide="key-round"></i><span>API 密钥</span>
+              </button>
+              <a class="user-dropdown-item" href="https://github.com/gnbdev/opengnb" target="_blank" rel="noopener" onclick="closeUserMenu()">
+                <i data-lucide="github"></i><span>GitHub</span>
+              </a>
+              <div class="user-dropdown-divider"></div>
+              <button class="user-dropdown-item" onclick="closeUserMenu()">
+                <i data-lucide="help-circle"></i><span>重新查看新手引导</span>
+              </button>
+              <div class="user-dropdown-divider"></div>
+              <button class="user-dropdown-item danger" onclick="logout()">
+                <i data-lucide="log-out"></i><span>退出登录</span>
+              </button>
+            </div>
+          </div>
         </div>
       </header>
 
       <div id="main-content">
         <!-- 页面内容由 JS 动态渲染 -->
       </div>
+    </div>
+
+    <!-- 全局弹窗 -->
+    <div class="modal-overlay" id="modal-overlay" style="display:none">
+      <div class="modal" id="modal-content"></div>
     </div>
   </div>
 

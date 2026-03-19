@@ -252,9 +252,6 @@ function renderNodesPage(container) {
       </div>
     </div>
     <div class="batch-toolbar" id="batch-toolbar" style="display:none"></div>
-    <div class="modal-overlay" id="modal-overlay" style="display:none">
-      <div class="modal" id="modal-content"></div>
-    </div>
   `;
   renderGroupSidebar();
   renderNodesToolbar();
@@ -1174,6 +1171,77 @@ $('#sidebar-toggle').addEventListener('click', () => {
   } else {
     sidebar.classList.toggle('collapsed');
   }
+});
+
+// ═══════════════════════════════════════
+// 用户菜单
+// ═══════════════════════════════════════
+
+function toggleUserMenu() {
+  const menu = $('#user-menu');
+  if (menu) {
+    menu.classList.toggle('open');
+    if (menu.classList.contains('open')) refreshIcons();
+  }
+}
+
+function closeUserMenu() {
+  const menu = $('#user-menu');
+  if (menu) menu.classList.remove('open');
+}
+
+function logout() {
+  closeUserMenu();
+  localStorage.removeItem('gnb_admin_token');
+  location.reload();
+}
+
+function showApiKey() {
+  closeUserMenu();
+  const token = getToken();
+  if (!token) { alert('未设置 Token'); return; }
+  const masked = token.length > 8
+    ? token.slice(0, 4) + '••••' + token.slice(-4)
+    : '••••••••';
+  // 复用项目已有的弹窗组件
+  const overlay = $('#modal-overlay');
+  const content = $('#modal-content');
+  if (overlay && content) {
+    overlay.style.display = 'flex';
+    content.innerHTML = `
+      <div class="modal-header">API 密钥</div>
+      <div class="modal-body">
+        <label>当前 Admin Token</label>
+        <div style="display:flex;gap:8px;align-items:center">
+          <input type="text" id="api-key-display" value="${escHtml(masked)}" readonly
+            style="flex:1;font-family:var(--font-mono);font-size:13px;letter-spacing:1px">
+          <button class="toolbar-btn" onclick="copyApiKey()">复制</button>
+        </div>
+        <div style="font-size:11px;color:var(--text-muted);margin-top:4px">
+          Token 用于所有 API 请求的 Authorization 头。请妥善保管。
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button class="modal-btn cancel" onclick="closeModal()">关闭</button>
+      </div>
+    `;
+  }
+}
+
+function copyApiKey() {
+  const token = getToken();
+  if (navigator.clipboard) {
+    navigator.clipboard.writeText(token).then(() => {
+      const btn = document.querySelector('#modal-content .toolbar-btn');
+      if (btn) { btn.textContent = '已复制'; setTimeout(() => { btn.textContent = '复制'; }, 1500); }
+    });
+  }
+}
+
+// 点击外部关闭用户菜单
+document.addEventListener('click', (e) => {
+  const menu = $('#user-menu');
+  if (menu && !menu.contains(e.target)) closeUserMenu();
 });
 
 // 启动
