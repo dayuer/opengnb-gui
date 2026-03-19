@@ -35,7 +35,7 @@ describe('routes/enroll (split auth)', () => {
     app.use('/api/enroll', createEnrollRouter(km, { requireAuth, audit }));
   });
 
-  afterEach(() => { cleanup(); });
+  afterEach(() => { if (km && km.store) km.store.close(); cleanup(); });
 
   const auth = { Authorization: 'Bearer admin-token' };
 

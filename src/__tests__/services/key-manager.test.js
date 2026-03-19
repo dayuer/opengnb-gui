@@ -1,6 +1,6 @@
 'use strict';
 
-// @alpha: KeyManager 核心逻辑测试 — 覆盖 S5.1-S5.9
+// @alpha: KeyManager 核心逻辑测试 — 覆盖 S5.1-S5.9 (V2: SQLite 适配)
 
 const { describe, it, beforeEach, afterEach } = require('node:test');
 const assert = require('node:assert/strict');
@@ -12,16 +12,18 @@ describe('services/key-manager', () => {
   let KeyManager, km, dataDir, cleanup;
 
   beforeEach(async () => {
-    // 每次用独立临时目录
     ({ dir: dataDir, cleanup } = tmpDataDir());
-    // 重新加载模块
     delete require.cache[require.resolve('../../services/key-manager')];
+    delete require.cache[require.resolve('../../services/node-store')];
     KeyManager = require('../../services/key-manager');
     km = new KeyManager({ dataDir });
     await km.init();
   });
 
-  afterEach(() => { cleanup(); });
+  afterEach(() => {
+    if (km && km.store && km.store.db) km.store.close();
+    cleanup();
+  });
 
   // S5.1: 初始化生成 ED25519 密钥对
   it('should generate ED25519 keypair on init', () => {
@@ -31,30 +33,29 @@ describe('services/key-manager', () => {
     assert.ok(pubKey.startsWith('ssh-ed25519') || pubKey.includes('BEGIN'));
   });
 
-  // S5.2: 初始化加载已有数据
-  it('should load existing nodes on init', async () => {
-    // 写入测试数据
+  // S5.2: JSON→SQLite 自动迁移
+  it('should migrate existing nodes.json to SQLite on init', async () => {
+    if (km.store && km.store.db) km.store.close();
     const nodes = [{ id: 'n1', name: 'test', status: 'pending' }];
-    fs.writeFileSync(km.nodesPath, JSON.stringify(nodes));
+    fs.writeFileSync(path.join(dataDir, 'registry', 'nodes.json'), JSON.stringify(nodes));
 
     const km2 = new KeyManager({ dataDir });
     await km2.init();
     assert.equal(km2.getAllNodes().length, 1);
     assert.equal(km2.getAllNodes()[0].id, 'n1');
+    km2.store.close();
   });
 
-  // S5.3: 注册持久化
-  it('should persist enrollment to nodes.json', () => {
+  // S5.3: 注册持久化（V2: 通过 getAllNodes 验证而非读文件）
+  it('should persist enrollment to SQLite', () => {
     const passcode = km.generatePasscode('test');
     km.submitEnrollment({ passcode, id: 'node-1', name: 'Test Node' });
 
-    // 读取文件验证
-    const saved = JSON.parse(fs.readFileSync(km.nodesPath, 'utf-8'));
-    assert.equal(saved.length, 1);
-    assert.equal(saved[0].id, 'node-1');
-    assert.equal(saved[0].status, 'pending');
-    // passcode 不应保存到节点记录
-    assert.equal(saved[0].passcode, undefined);
+    const all = km.getAllNodes();
+    assert.equal(all.length, 1);
+    assert.equal(all[0].id, 'node-1');
+    assert.equal(all[0].status, 'pending');
+    assert.equal(all[0].passcode, undefined);
   });
 
   // S5.4: 审批流转
@@ -106,12 +107,11 @@ describe('services/key-manager', () => {
     km.submitEnrollment({ passcode: pc1, id: 'a1', name: 'A1', tunAddr: '10.1.0.10' });
     km.submitEnrollment({ passcode: pc2, id: 'a2', name: 'A2', tunAddr: '10.1.0.11' });
     km.approveNode('a1');
-    // a2 remains pending
 
     const configs = km.getApprovedNodesConfig();
     assert.equal(configs.length, 1);
     assert.equal(configs[0].id, 'a1');
-    assert.ok(configs[0].sshKeyPath); // 包含 SSH 配置
+    assert.ok(configs[0].sshKeyPath);
   });
 
   // Passcode 一次性使用 (S4.7)
@@ -125,46 +125,42 @@ describe('services/key-manager', () => {
     assert.ok(r2.message.includes('已使用'));
   });
 
-  // S5.7: 备份轮转
-  it('should keep max backups', () => {
-    km.maxBackups = 3;
-    for (let i = 0; i < 10; i++) {
+  // S5.7: SQLite 持久化验证（替代旧备份轮转测试）
+  it('should persist across reinit (SQLite durability)', async () => {
+    for (let i = 0; i < 5; i++) {
       const pc = km.generatePasscode();
-      km.submitEnrollment({ passcode: pc, id: `b${i}`, name: `B${i}` });
+      km.submitEnrollment({ passcode: pc, id: `d${i}`, name: `D${i}` });
     }
-    const backups = fs.readdirSync(km.backupDir).filter(f => f.endsWith('.json'));
-    assert.ok(backups.length <= 3);
-  });
+    assert.equal(km.getAllNodes().length, 5);
+    km.store.close();
 
-  // S5.8: 损坏恢复
-  it('should recover from corrupted main file', async () => {
-    // 先写入有效数据并保存多次（确保有包含数据的备份）
-    const pc1 = km.generatePasscode();
-    km.submitEnrollment({ passcode: pc1, id: 'recover', name: 'Recover' });
-
-    // 再做一次变更，让上一次的数据存在于备份中
-    const pc2 = km.generatePasscode();
-    km.submitEnrollment({ passcode: pc2, id: 'recover2', name: 'Recover2' });
-
-    // 确认备份目录有文件
-    const backups = fs.readdirSync(km.backupDir).filter(f => f.endsWith('.json'));
-    assert.ok(backups.length > 0, '应有备份文件');
-
-    // 损坏主文件
-    fs.writeFileSync(km.nodesPath, 'CORRUPTED{{{');
-
-    // 重新加载 — 应从备份恢复
+    // 重新初始化 — 数据应保留
     const km2 = new KeyManager({ dataDir });
     await km2.init();
-    // 备份中至少应有第一次 submitEnrollment 的数据
-    assert.ok(km2.getAllNodes().length > 0, '应从备份恢复出节点数据');
+    assert.equal(km2.getAllNodes().length, 5);
+    km2.store.close();
+  });
+
+  // S5.8: SQLite 跨实例持久化
+  it('should persist approvals across reinit', async () => {
+    const pc = km.generatePasscode();
+    km.submitEnrollment({ passcode: pc, id: 'persist', name: 'Persist' });
+    km.approveNode('persist', { tunAddr: '10.5.0.1' });
+    km.store.close();
+
+    const km2 = new KeyManager({ dataDir });
+    await km2.init();
+    const node = km2.getAllNodes().find(n => n.id === 'persist');
+    assert.ok(node);
+    assert.equal(node.status, 'approved');
+    assert.equal(node.tunAddr, '10.5.0.1');
+    km2.store.close();
   });
 
   // ═══════════════════════════════════════
   // @alpha: updateNode 编辑节点信息测试
   // ═══════════════════════════════════════
 
-  /** 辅助：创建一个已审批节点 */
   function createApprovedNode(km, id, overrides = {}) {
     const pc = km.generatePasscode();
     km.submitEnrollment({ passcode: pc, id, name: overrides.name || id });

@@ -5,6 +5,7 @@ const fs = require('fs');
 const path = require('path');
 const { execSync } = require('child_process');
 const { resolvePaths, ensureDataDirs } = require('./data-paths');
+const NodeStore = require('./node-store');
 
 /**
  * SSH 密钥管理器 + 节点注册（审批制）
@@ -36,10 +37,9 @@ class KeyManager {
     this.gnbTunAddr = process.env.GNB_TUN_ADDR || '10.1.0.1';
     this.gnbIndexAddr = process.env.GNB_INDEX_ADDR || '';
 
-    this.nodes = [];
-    this.nodesPath = paths.registry.nodes;
-    this.backupDir = paths.security.backupDir;
-    this.maxBackups = 5;
+    // @alpha V2: SQLite 存储层（替代 this.nodes 数组 + nodes.json）
+    this.store = new NodeStore(paths.registry.nodesDb);
+    this.nodesPath = paths.registry.nodes; // 仅用于 JSON→SQLite 迁移
 
     // @alpha: 分组数据模型
     /** @type {Array<{id: string, name: string, color: string, createdAt: string}>} */
@@ -56,14 +56,12 @@ class KeyManager {
   }
 
   /**
-   * 初始化：确保密钥对存在，加载节点注册表（含备份恢复）
+   * 初始化：确保密钥对存在，初始化 SQLite 存储
    */
   async init() {
-    // @alpha: 确保新目录结构存在
     const paths = resolvePaths(this.dataDir);
     ensureDataDirs(paths);
     fs.mkdirSync(this.keyDir, { recursive: true });
-    fs.mkdirSync(this.backupDir, { recursive: true });
 
     if (!fs.existsSync(this.privateKeyPath)) {
       this._generateKeyPair();
@@ -72,13 +70,32 @@ class KeyManager {
       console.log('[KeyManager] 已加载现有密钥对');
     }
 
-    // 加载节点注册表（主文件 → 备份恢复）
-    this.nodes = this._loadWithRecovery();
+    // @alpha V2: 初始化 SQLite，自动从 nodes.json 迁移
+    const jsonNodes = this._loadJsonLegacy();
+    this.store.init(jsonNodes);
+    if (jsonNodes.length > 0 && this.store.count() > 0) {
+      // 迁移成功后重命名旧文件
+      const legacyPath = this.nodesPath;
+      if (fs.existsSync(legacyPath)) {
+        fs.renameSync(legacyPath, legacyPath + '.migrated');
+        console.log('[KeyManager] nodes.json 已迁移到 SQLite，旧文件已重命名为 .migrated');
+      }
+    }
 
-    // @alpha: 加载分组数据
     this.groups = this._loadGroups();
 
-    console.log(`[KeyManager] ${this.nodes.filter(n => n.status === 'approved').length} 个已审批节点, ${this.nodes.filter(n => n.status === 'pending').length} 个待审批, ${this.groups.length} 个分组`);
+    const approved = this.store.countByStatus('approved');
+    const pending = this.store.countByStatus('pending');
+    console.log(`[KeyManager] ${approved} 个已审批节点, ${pending} 个待审批, ${this.groups.length} 个分组 (SQLite)`);
+  }
+
+  /** @private 加载旧 JSON 数据（仅用于迁移） */
+  _loadJsonLegacy() {
+    if (!fs.existsSync(this.nodesPath)) return [];
+    try {
+      const data = JSON.parse(fs.readFileSync(this.nodesPath, 'utf-8'));
+      return Array.isArray(data) ? data : [];
+    } catch (_) { return []; }
   }
 
   /** @private */
@@ -138,15 +155,15 @@ class KeyManager {
     pc.used = true;
     pc.usedBy = nodeInfo.id;
 
-    const existing = this.nodes.find(n => n.id === nodeInfo.id);
+    const existing = this.store.findById(nodeInfo.id);
     if (existing) {
       if (existing.status === 'approved') {
         return { success: true, status: 'approved', message: '节点已通过审批' };
       }
       if (existing.status === 'pending') {
-        Object.assign(existing, nodeInfo, { updatedAt: new Date().toISOString() });
-        delete existing.passcode;
-        this._save();
+        const updates = { ...nodeInfo, updatedAt: new Date().toISOString() };
+        delete updates.passcode;
+        this.store.update(nodeInfo.id, updates);
         return { success: true, status: 'pending', message: '注册信息已更新，等待管理员审批' };
       }
     }
@@ -154,7 +171,7 @@ class KeyManager {
     const record = { ...nodeInfo };
     delete record.passcode;
 
-    this.nodes.push({
+    this.store.insert({
       ...record,
       tunAddr: record.tunAddr || '',
       sshUser: 'synon',
@@ -166,7 +183,6 @@ class KeyManager {
       submittedAt: new Date().toISOString(),
       approvedAt: null,
     });
-    this._save();
 
     return { success: true, status: 'pending', message: '注册申请已提交，等待管理员审批' };
   }
@@ -177,15 +193,16 @@ class KeyManager {
    * @param {object} sshInfo - {sshUser, sshPort}
    */
   markNodeReady(nodeId, sshInfo = {}) {
-    const node = this.nodes.find(n => n.id === nodeId);
+    const node = this.store.findById(nodeId);
     if (!node) return { success: false, message: '节点不存在' };
     if (node.status !== 'approved') return { success: false, message: '节点未通过审批' };
 
-    node.ready = true;
-    node.sshUser = sshInfo.sshUser || 'synon';
-    node.sshPort = sshInfo.sshPort || 22;
-    node.readyAt = new Date().toISOString();
-    this._save();
+    this.store.update(nodeId, {
+      ready: true,
+      sshUser: sshInfo.sshUser || 'synon',
+      sshPort: sshInfo.sshPort || 22,
+      readyAt: new Date().toISOString(),
+    });
 
     // 触发就绪回调（Provisioner 安装 OpenClaw）
     if (this.onNodeReady) {
@@ -202,26 +219,30 @@ class KeyManager {
    * @returns {{success: boolean, message: string}}
    */
   approveNode(nodeId, options = {}) {
-    const node = this.nodes.find(n => n.id === nodeId);
+    const node = this.store.findById(nodeId);
     if (!node) return { success: false, message: '节点不存在' };
     if (node.status === 'approved') return { success: true, message: '已审批', tunAddr: node.tunAddr };
 
     // 分配 TUN 地址：优先手动指定，否则自动分配
-    node.tunAddr = options.tunAddr || node.tunAddr || this._nextAvailableIp();
-    // 分配 GNB 节点 ID
-    if (options.gnbNodeId) node.gnbNodeId = options.gnbNodeId;
+    const tunAddr = options.tunAddr || node.tunAddr || this._nextAvailableIp();
+    const gnbNodeId = options.gnbNodeId || node.gnbNodeId;
 
-    node.status = 'approved';
-    node.approvedAt = new Date().toISOString();
-    // 同步保存（Node.js 单线程，此处保证并发安全，不会重复分配）
-    this._save();
+    this.store.update(nodeId, {
+      tunAddr,
+      gnbNodeId,
+      status: 'approved',
+      approvedAt: new Date().toISOString(),
+    });
+
+    // 重新读取更新后的节点
+    const updated = this.store.findById(nodeId);
 
     // 自动更新 Console 的 GNB 配置
-    this._updateGnbConfig(node);
+    this._updateGnbConfig(updated);
 
     if (this.onApproval) this.onApproval(this.getApprovedNodesConfig());
 
-    return { success: true, message: `节点 ${nodeId} 已通过审批`, tunAddr: node.tunAddr, gnbNodeId: node.gnbNodeId };
+    return { success: true, message: `节点 ${nodeId} 已通过审批`, tunAddr: updated.tunAddr, gnbNodeId: updated.gnbNodeId };
   }
 
   /**
@@ -243,9 +264,9 @@ class KeyManager {
     const lines = [indexLine];
     // Console 自身
     lines.push(`${this.gnbNodeId}|${this.gnbTunAddr}|255.0.0.0`);
-    // 所有已审批节点
-    for (const node of this.nodes) {
-      if (node.status === 'approved' && node.gnbNodeId && node.tunAddr) {
+    // 所有已审批节点（从 SQLite 查询）
+    for (const node of this.store.approvedWithGnb()) {
+      if (node.tunAddr) {
         lines.push(`${node.gnbNodeId}|${node.tunAddr}|${node.netmask || '255.0.0.0'}`);
       }
     }
@@ -259,9 +280,11 @@ class KeyManager {
   _updateGnbConfig(node) {
     if (!node.tunAddr) return;
 
-    const gnbNodeId = node.gnbNodeId || this._nextGnbNodeId();
-    node.gnbNodeId = gnbNodeId;
-    this._save();
+    if (!node.gnbNodeId) {
+      const gnbNodeId = this._nextGnbNodeId();
+      this.store.update(node.id, { gnbNodeId });
+      node.gnbNodeId = gnbNodeId;
+    }
 
     this._writeFullGnbConf();
   }
@@ -299,7 +322,8 @@ class KeyManager {
    * 自动分配下一个 GNB 节点 ID（从 1002 开始，Console 自身是 1001）
    */
   _nextGnbNodeId() {
-    const usedIds = this.nodes
+    const allNodes = this.store.all();
+    const usedIds = allNodes
       .filter(n => n.gnbNodeId)
       .map(n => parseInt(n.gnbNodeId, 10));
     const consoleId = parseInt(this.gnbNodeId, 10);
@@ -314,11 +338,8 @@ class KeyManager {
    * @returns {string} 如 '10.0.0.2'
    */
   _nextAvailableIp() {
-    const usedIps = new Set();
+    const usedIps = this.store.allTunAddrs();
     if (this.gnbTunAddr) usedIps.add(this.gnbTunAddr);
-    for (const node of this.nodes) {
-      if (node.tunAddr) usedIps.add(node.tunAddr);
-    }
 
     // 遍历 10.0.0.x → 10.0.1.x → ... → 10.255.255.x
     for (let b = 0; b <= 255; b++) {
@@ -351,7 +372,7 @@ class KeyManager {
    * @param {string} pubKey - hex 编码的 Ed25519 公钥
    */
   saveNodeGnbPubkey(nodeId, pubKey) {
-    const node = this.nodes.find(n => n.id === nodeId);
+    const node = this.store.findById(nodeId);
     if (!node || !node.gnbNodeId) {
       return { success: false, message: '节点不存在或未分配 GNB ID' };
     }
@@ -376,10 +397,9 @@ class KeyManager {
    * @param {string} nodeId
    */
   rejectNode(nodeId) {
-    const node = this.nodes.find(n => n.id === nodeId);
+    const node = this.store.findById(nodeId);
     if (!node) return { success: false, message: '节点不存在' };
-    node.status = 'rejected';
-    this._save();
+    this.store.update(nodeId, { status: 'rejected' });
     return { success: true, message: `节点 ${nodeId} 已拒绝` };
   }
 
@@ -388,8 +408,7 @@ class KeyManager {
    * @param {string} nodeId
    */
   removeNode(nodeId) {
-    this.nodes = this.nodes.filter(n => n.id !== nodeId);
-    this._save();
+    this.store.remove(nodeId);
     return { success: true, message: `节点 ${nodeId} 已删除` };
   }
 
@@ -414,7 +433,7 @@ class KeyManager {
    * @returns {{success: boolean, message: string, changedFields?: string[]}}
    */
   updateNode(nodeId, fields = {}) {
-    const node = this.nodes.find(n => n.id === nodeId);
+    const node = this.store.findById(nodeId);
     if (!node) return { success: false, message: '节点不存在' };
     if (node.status !== 'approved') return { success: false, message: '仅已审批节点可编辑' };
 
@@ -426,8 +445,8 @@ class KeyManager {
       const ip = String(fields.tunAddr).trim();
       if (!ip) return { success: false, message: 'tunAddr 不能为空' };
       if (!KeyManager._isValidIPv4(ip)) return { success: false, message: `IP 格式错误: ${ip}` };
-      // 唯一性检查
-      const dup = this.nodes.find(n => n.id !== nodeId && n.status === 'approved' && n.tunAddr === ip);
+      // 唯一性检查（SQLite 查询）
+      const dup = this.store.isTunAddrTaken(ip, nodeId);
       if (dup) return { success: false, message: `IP ${ip} 已被节点 ${dup.name || dup.id} 使用`, code: 'CONFLICT' };
       fields.tunAddr = ip;
     }
@@ -454,22 +473,27 @@ class KeyManager {
       fields.sshUser = user;
     }
 
-    // 应用变更
+    // 检测变更
     for (const key of allowed) {
       if (fields[key] !== undefined && node[key] !== fields[key]) {
-        node[key] = fields[key];
         changedFields.push(key);
       }
     }
 
     if (changedFields.length === 0) return { success: true, message: '无变更', changedFields: [] };
 
-    node.updatedAt = new Date().toISOString();
-    this._save();
+    // 应用变更到 SQLite
+    const updateFields = {};
+    for (const key of allowed) {
+      if (fields[key] !== undefined) updateFields[key] = fields[key];
+    }
+    updateFields.updatedAt = new Date().toISOString();
+    this.store.update(nodeId, updateFields);
 
     // tunAddr 变更时同步 GNB 配置
-    if (changedFields.includes('tunAddr') && node.gnbNodeId) {
-      this._updateGnbAddressConf(node);
+    if (changedFields.includes('tunAddr')) {
+      const updatedNode = this.store.findById(nodeId);
+      if (updatedNode && updatedNode.gnbNodeId) this._updateGnbAddressConf(updatedNode);
     }
 
     // 触发更新回调
@@ -490,12 +514,12 @@ class KeyManager {
   /**
    * 获取全部节点（含状态）
    */
-  getAllNodes() { return this.nodes; }
+  getAllNodes() { return this.store.all(); }
 
   /**
    * 获取待审批节点
    */
-  getPendingNodes() { return this.nodes.filter(n => n.status === 'pending'); }
+  getPendingNodes() { return this.store.findByStatus('pending'); }
 
   // ═══════════════════════════════════════
   // @alpha: 分组管理
@@ -529,7 +553,7 @@ class KeyManager {
   getGroups() {
     return this.groups.map(g => ({
       ...g,
-      nodeCount: this.nodes.filter(n => n.groupId === g.id).length,
+      nodeCount: this.store.filter({ groupId: g.id }).length,
     }));
   }
 
@@ -553,11 +577,13 @@ class KeyManager {
    */
   deleteGroup(groupId) {
     this.groups = this.groups.filter(g => g.id !== groupId);
-    for (const node of this.nodes) {
-      if (node.groupId === groupId) delete node.groupId;
+    const allNodes = this.store.all();
+    for (const node of allNodes) {
+      if (node.groupId === groupId) {
+        this.store.update(node.id, { groupId: '' });
+      }
     }
     this._saveGroups();
-    this._save();
     return { success: true };
   }
 
@@ -567,13 +593,12 @@ class KeyManager {
    * @param {string|null} groupId
    */
   updateNodeGroup(nodeId, groupId) {
-    const node = this.nodes.find(n => n.id === nodeId);
+    const node = this.store.findById(nodeId);
     if (!node) return { success: false, message: '节点不存在' };
     if (groupId && !this.groups.find(g => g.id === groupId)) {
       return { success: false, message: '分组不存在' };
     }
-    node.groupId = groupId || undefined;
-    this._save();
+    this.store.update(nodeId, { groupId: groupId || '' });
     return { success: true };
   }
 
@@ -587,7 +612,7 @@ class KeyManager {
    * @returns {{nodes: Array, total: number, page: number, pageSize: number, totalPages: number}}
    */
   getFilteredNodes(opts = {}) {
-    let result = [...this.nodes];
+    let result = this.store.all();
 
     if (opts.groupId) result = result.filter(n => n.groupId === opts.groupId);
     if (opts.status) result = result.filter(n => n.status === opts.status);
@@ -697,8 +722,8 @@ class KeyManager {
    * @returns {Array<object>}
    */
   getApprovedNodesConfig() {
-    return this.nodes
-      .filter(n => n.status === 'approved')
+    return this.store.findByStatus('approved')
+      .filter(n => n.tunAddr)
       .map(n => ({
         id: n.id,
         name: n.name || n.id,
@@ -721,88 +746,17 @@ class KeyManager {
    * @param {object} clawConfig - { token, port }
    */
   updateNodeClawConfig(nodeId, { token, port }) {
-    const node = this.nodes.find(n => n.id === nodeId);
+    const node = this.store.findById(nodeId);
     if (!node) return false;
-    if (token) node.clawToken = token;
-    if (port) node.clawPort = port;
-    this._save();
+    this.store.update(nodeId, {
+      clawToken: token || node.clawToken,
+      clawPort: port || node.clawPort,
+    });
     console.log(`[KeyManager] 节点 ${nodeId} OpenClaw 配置已更新 (token: ${token ? token.substring(0, 8) + '...' : 'none'})`);
     return true;
   }
 
-  /** @private 保存并备份 */
-  _save() {
-    this._backup();
-    const tmpPath = this.nodesPath + '.tmp';
-    fs.writeFileSync(tmpPath, JSON.stringify(this.nodes, null, 2));
-    fs.renameSync(tmpPath, this.nodesPath); // 原子写入
-  }
-
-  /** @private 备份当前文件（轮转保留 maxBackups 个） */
-  _backup() {
-    if (!fs.existsSync(this.nodesPath)) return;
-
-    const ts = new Date().toISOString().replace(/[:.]/g, '-');
-    const backupPath = path.join(this.backupDir, `nodes_${ts}.json`);
-
-    try {
-      fs.copyFileSync(this.nodesPath, backupPath);
-    } catch (err) {
-      console.error(`[KeyManager] 备份失败: ${err.message}`);
-      return;
-    }
-
-    // 清理过期备份
-    const backups = this._getBackupFiles();
-    while (backups.length > this.maxBackups) {
-      const oldest = backups.shift();
-      try { fs.unlinkSync(path.join(this.backupDir, oldest)); } catch (_) {}
-    }
-  }
-
-  /** @private 加载节点数据（主文件 → 自动从备份恢复） */
-  _loadWithRecovery() {
-    // 尝试主文件
-    if (fs.existsSync(this.nodesPath)) {
-      try {
-        const data = JSON.parse(fs.readFileSync(this.nodesPath, 'utf-8'));
-        if (Array.isArray(data)) return data;
-      } catch (err) {
-        console.error(`[KeyManager] 主文件损坏: ${err.message}，尝试从备份恢复`);
-      }
-    }
-
-    // 从最新备份恢复
-    const backups = this._getBackupFiles();
-    for (let i = backups.length - 1; i >= 0; i--) {
-      const bp = path.join(this.backupDir, backups[i]);
-      try {
-        const data = JSON.parse(fs.readFileSync(bp, 'utf-8'));
-        if (Array.isArray(data)) {
-          // 恢复到主文件
-          fs.writeFileSync(this.nodesPath, JSON.stringify(data, null, 2));
-          console.log(`[KeyManager] 已从备份恢复: ${backups[i]}`);
-          return data;
-        }
-      } catch (_) {
-        continue;
-      }
-    }
-
-    console.log('[KeyManager] 无可用数据，初始化为空');
-    return [];
-  }
-
-  /** @private 获取备份文件列表（按时间排序） */
-  _getBackupFiles() {
-    try {
-      return fs.readdirSync(this.backupDir)
-        .filter(f => f.startsWith('nodes_') && f.endsWith('.json'))
-        .sort();
-    } catch (_) {
-      return [];
-    }
-  }
+  // @alpha V2: _save/_backup/_loadWithRecovery 已移除，由 SQLite (NodeStore) 接管持久化
 }
 
 module.exports = KeyManager;

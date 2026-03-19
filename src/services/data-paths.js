@@ -30,6 +30,7 @@ function resolvePaths(dataDir) {
     registry: {
       dir: registryDir,
       nodes: path.join(registryDir, 'nodes.json'),
+      nodesDb: path.join(registryDir, 'nodes.db'),
       groups: path.join(registryDir, 'groups.json'),
       metrics: path.join(registryDir, 'metrics.json'),
     },

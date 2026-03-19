@@ -18,7 +18,7 @@ describe('分组 CRUD', () => {
     await km.init();
   });
 
-  afterEach(() => { cleanup(); });
+  afterEach(() => { if (km && km.store) km.store.close(); cleanup(); });
 
   // S1: 创建分组
   it('S1: 创建分组并返回 group 对象', () => {
@@ -54,7 +54,7 @@ describe('分组 CRUD', () => {
 
     km.deleteGroup(g.id);
     const node = km.getAllNodes().find(n => n.id === 'n2');
-    assert.equal(node.groupId, undefined);
+    assert.ok(!node.groupId, '节点 groupId 应被清空');
     assert.equal(km.getGroups().length, 0);
   });
 
@@ -101,7 +101,7 @@ describe('节点-分组关联', () => {
     await km.init();
   });
 
-  afterEach(() => { cleanup(); });
+  afterEach(() => { if (km && km.store) km.store.close(); cleanup(); });
 
   // S3: 关联节点到分组
   it('S3: 关联节点到分组', () => {
@@ -148,7 +148,7 @@ describe('网段过滤', () => {
     await km.init();
   });
 
-  afterEach(() => { cleanup(); });
+  afterEach(() => { if (km && km.store) km.store.close(); cleanup(); });
 
   // S5: CIDR 匹配
   it('S5: CIDR 匹配过滤', () => {
@@ -245,7 +245,7 @@ describe('批量操作', () => {
     await km.init();
   });
 
-  afterEach(() => { cleanup(); });
+  afterEach(() => { if (km && km.store) km.store.close(); cleanup(); });
 
   // S6: 批量审批
   it('S6: 批量审批', () => {
