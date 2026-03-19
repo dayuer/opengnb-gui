@@ -11,7 +11,7 @@ const { resolvePaths, ensureDataDirs } = require('./data-paths');
  *
  * 流程：
  *   1. Console 首次启动自动生成 ED25519 密钥对
- *   2. 节点运行 init-node.sh → GET /api/enroll/pubkey 下载 Console 公钥
+ *   2. 节点运行 initnode.sh → GET /api/enroll/pubkey 下载 Console 公钥
  *   3. 节点将公钥写入 authorized_keys → POST /api/enroll 提交注册（状态 pending）
  *   4. 管理员在 Web UI 审批 → POST /api/enroll/:id/approve（状态变为 approved）
  *   5. 仅 approved 的节点才会被 GnbMonitor 纳入监控

@@ -163,7 +163,7 @@ async function boot() {
 
   // 初始化脚本下载（公开，必须在 enroll 路由之前注册）
   app.get('/api/enroll/init.sh', (req, res) => {
-    const scriptPath = path.resolve(__dirname, '../scripts/init-node.sh');
+    const scriptPath = path.resolve(__dirname, '../scripts/initnode.sh');
     res.type('text/plain').sendFile(scriptPath);
   });
   app.get('/api/enroll/setup.sh', (req, res) => {

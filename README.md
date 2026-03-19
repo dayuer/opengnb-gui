@@ -48,7 +48,7 @@ opengnb-gui/
 ├── config/nodes.json              # 节点配置模板
 ├── scripts/
 │   ├── setup-console.sh           # Console 服务器一键安装
-│   ├── init-node.sh               # 节点初始化脚本
+│   ├── initnode.sh                 # 节点初始化脚本
 │   ├── deploy.sh                  # 部署脚本
 │   └── sync-mirror.sh             # GNB/OpenClaw 镜像同步
 ├── src/
