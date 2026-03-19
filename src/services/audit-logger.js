@@ -2,6 +2,7 @@
 
 const fs = require('fs');
 const path = require('path');
+const { resolvePaths } = require('./data-paths');
 
 /**
  * 审计日志服务
@@ -13,11 +14,14 @@ class AuditLogger {
   /**
    * @param {object} options
    * @param {string} options.dataDir - 数据目录
+   * @param {object} [options.paths] - data-paths 路径对象
    * @param {number} [options.maxSizeMB=10] - 单文件最大 MB
    */
-  constructor({ dataDir, maxSizeMB = 10 }) {
-    this.logPath = path.join(dataDir, 'audit.log');
-    this.archiveDir = path.join(dataDir, 'audit-archive');
+  constructor({ dataDir, paths, maxSizeMB = 10 }) {
+    // @alpha: 使用集中路径管理
+    const p = paths || resolvePaths(dataDir);
+    this.logPath = p.logs.auditLog;
+    this.archiveDir = p.logs.auditArchive;
     this.maxSize = maxSizeMB * 1024 * 1024;
 
     try { fs.mkdirSync(this.archiveDir, { recursive: true }); } catch (_) {}

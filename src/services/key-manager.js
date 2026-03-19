@@ -4,6 +4,7 @@ const crypto = require('crypto');
 const fs = require('fs');
 const path = require('path');
 const { execSync } = require('child_process');
+const { resolvePaths, ensureDataDirs } = require('./data-paths');
 
 /**
  * SSH 密钥管理器 + 节点注册（审批制）
@@ -22,30 +23,28 @@ class KeyManager {
    */
   constructor(options = {}) {
     this.dataDir = options.dataDir || path.resolve(__dirname, '../../data');
-    this.keyDir = path.join(this.dataDir, 'ssh');
-    this.privateKeyPath = path.join(this.keyDir, 'console_ed25519');
-    this.publicKeyPath = path.join(this.keyDir, 'console_ed25519.pub');
+
+    // @alpha: 使用集中路径管理
+    const paths = options.paths || resolvePaths(this.dataDir);
+    this.keyDir = paths.security.sshDir;
+    this.privateKeyPath = paths.security.privateKey;
+    this.publicKeyPath = paths.security.publicKey;
 
     // GNB 配置路径（Console 节点）
     this.gnbNodeId = process.env.GNB_NODE_ID || '1001';
     this.gnbConfDir = process.env.GNB_CONF_DIR || `/opt/gnb/conf/${this.gnbNodeId}`;
     this.gnbTunAddr = process.env.GNB_TUN_ADDR || '10.1.0.1';
-    this.gnbIndexAddr = process.env.GNB_INDEX_ADDR || ''; // 自动从 hostname 获取
+    this.gnbIndexAddr = process.env.GNB_INDEX_ADDR || '';
 
-    /**
-     * 节点注册表
-     * status: 'pending' | 'approved' | 'rejected'
-     * @type {Array<object>}
-     */
     this.nodes = [];
-    this.nodesPath = path.join(this.dataDir, 'nodes.json');
-    this.backupDir = path.join(this.dataDir, 'backups');
+    this.nodesPath = paths.registry.nodes;
+    this.backupDir = paths.security.backupDir;
     this.maxBackups = 5;
 
     // @alpha: 分组数据模型
     /** @type {Array<{id: string, name: string, color: string, createdAt: string}>} */
     this.groups = [];
-    this.groupsPath = path.join(this.dataDir, 'groups.json');
+    this.groupsPath = paths.registry.groups;
 
     /** @type {Map<string, {passcode: string, createdAt: string, used: boolean}>} */
     this.passcodes = new Map();
@@ -60,6 +59,9 @@ class KeyManager {
    * 初始化：确保密钥对存在，加载节点注册表（含备份恢复）
    */
   async init() {
+    // @alpha: 确保新目录结构存在
+    const paths = resolvePaths(this.dataDir);
+    ensureDataDirs(paths);
     fs.mkdirSync(this.keyDir, { recursive: true });
     fs.mkdirSync(this.backupDir, { recursive: true });
 

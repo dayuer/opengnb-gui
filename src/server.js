@@ -22,9 +22,14 @@ const ClawRPC = require('./services/claw-rpc');
 const { requireAuth, initToken, getAdminToken } = require('./middleware/auth');
 const { createRateLimit } = require('./middleware/rate-limit');
 const { errorHandler } = require('./middleware/error-handler');
+const { resolvePaths, ensureDataDirs } = require('./services/data-paths');
 
 const PORT = process.env.PORT || 3000;
 const DATA_DIR = process.env.DATA_DIR || path.resolve(__dirname, '../data');
+
+// @alpha: 集中路径管理 + 自动创建目录
+const dataPaths = resolvePaths(DATA_DIR);
+ensureDataDirs(dataPaths);
 
 const app = express();
 const server = http.createServer(app);
@@ -35,13 +40,12 @@ app.use(express.static(path.resolve(__dirname, '../public')));
 // --- 全局速率限制 ---
 app.use('/api', createRateLimit({ windowMs: 60000, max: 200 }));
 
-const keyManager = new KeyManager({ dataDir: DATA_DIR });
+const keyManager = new KeyManager({ dataDir: DATA_DIR, paths: dataPaths });
 const sshManager = new SSHManager();
 
 // --- 运维日志持久化（按终端分开存储） ---
-const OPS_LOG_DIR = path.join(DATA_DIR, 'ops-logs');
+const OPS_LOG_DIR = dataPaths.logs.opsDir;
 const MAX_OPS_LOG = 200;
-try { fs.mkdirSync(OPS_LOG_DIR, { recursive: true }); } catch (_) {}
 
 function loadOpsLog(nodeId) {
   try {
@@ -74,7 +78,7 @@ async function boot() {
   const adminToken = initToken();
 
   // 初始化审计日志
-  const audit = new AuditLogger({ dataDir: DATA_DIR });
+  const audit = new AuditLogger({ dataDir: DATA_DIR, paths: dataPaths });
 
   await keyManager.init();
 
