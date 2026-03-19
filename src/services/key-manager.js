@@ -309,27 +309,26 @@ class KeyManager {
 
   /**
    * 自动分配下一个可用 TUN IP 地址
-   * 策略：10.{n}.0.1，其中 n 从 2 开始递增（Console 占用 10.1.0.1）
+   * 策略：10.0.0.x → 10.0.1.x → ... → 10.255.255.x 顺序填充
    * 并发安全：Node.js 单线程，此方法同步执行，调用后立即 _save()
-   * @returns {string} 如 '10.2.0.1'
+   * @returns {string} 如 '10.0.0.2'
    */
   _nextAvailableIp() {
-    // 收集所有已分配的 IP（含 Console 自身 + 所有节点，不论状态）
     const usedIps = new Set();
     if (this.gnbTunAddr) usedIps.add(this.gnbTunAddr);
     for (const node of this.nodes) {
       if (node.tunAddr) usedIps.add(node.tunAddr);
     }
 
-    // 从 10.2.0.1 开始分配（10.1.x.x 留给 Console）
-    for (let n = 2; n <= 254; n++) {
-      const candidate = `10.${n}.0.1`;
-      if (!usedIps.has(candidate)) return candidate;
-    }
-    // 回退：在 10.1.0.x 中找
-    for (let x = 2; x <= 254; x++) {
-      const candidate = `10.1.0.${x}`;
-      if (!usedIps.has(candidate)) return candidate;
+    // 遍历 10.0.0.x → 10.0.1.x → ... → 10.255.255.x
+    for (let b = 0; b <= 255; b++) {
+      for (let c = 0; c <= 255; c++) {
+        const start = (b === 0 && c === 0) ? 2 : 1; // 10.0.0.0/1 跳过
+        for (let d = start; d <= 254; d++) {
+          const candidate = `10.${b}.${c}.${d}`;
+          if (!usedIps.has(candidate)) return candidate;
+        }
+      }
     }
     throw new Error('IP 地址池已耗尽');
   }
