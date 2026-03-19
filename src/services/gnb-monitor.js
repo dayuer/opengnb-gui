@@ -19,6 +19,8 @@ class GnbMonitor extends EventEmitter {
     this.nodesConfig = nodesConfig;
     this.intervalMs = options.intervalMs || 10000;
     this.sshManager = new SSHManager();
+    /** @alpha: 指标时序存储 */
+    this.metricsStore = options.metricsStore || null;
 
     /** @type {Map<string, object>} 最新的节点状态快照 */
     this.latestState = new Map();
@@ -120,6 +122,8 @@ class GnbMonitor extends EventEmitter {
         'echo "::CPU_CORES::$(nproc 2>/dev/null || sysctl -n hw.ncpu 2>/dev/null)"',
         'echo "::MEM::$(free -m 2>/dev/null | awk \'NR==2{printf "%s %s %s", $2, $3, $7}\' || echo "")"',
         'echo "::DISK::$(df -h / 2>/dev/null | awk \'NR==2{printf "%s %s %s %s", $2, $3, $4, $5}\')"',
+        // @alpha: CPU 利用率采集
+        'echo "::CPU_USAGE::$(grep \'cpu \' /proc/stat 2>/dev/null | awk \'{u=$2+$4; t=$2+$4+$5; if(t>0) printf "%d", u*100/t; else print "0"}\'  || echo "0")"',
       ].join(' && ');
       const sysResult = await this.sshManager.exec(nodeConfig, sysCmd);
       const sysInfo = this._parseSysInfo(sysResult.stdout);
@@ -141,6 +145,24 @@ class GnbMonitor extends EventEmitter {
         sysInfo,
         error: null,
       });
+
+      // @alpha: 记录指标到时序存储
+      if (this.metricsStore) {
+        const memPct = sysInfo.memTotalMB > 0 ? Math.round(sysInfo.memUsedMB / sysInfo.memTotalMB * 100) : 0;
+        const diskPct = sysInfo.diskUsePct ? parseInt(sysInfo.diskUsePct) : 0;
+        const peers = statusData.nodes || [];
+        this.metricsStore.record(nodeConfig.id, {
+          cpu: sysInfo.cpuUsage ?? 0,
+          memPct,
+          diskPct,
+          sshLatency: elapsed,
+          loadAvg: sysInfo.loadAvg || '0',
+          p2pDirect: peers.filter(p => p.status === 'Direct').length,
+          p2pTotal: peers.length,
+          memTotalMB: sysInfo.memTotalMB || 0,
+          memUsedMB: sysInfo.memUsedMB || 0,
+        });
+      }
     } catch (err) {
       // 递增连续失败计数
       const prevFails = this._failCounts.get(nodeConfig.id) || 0;
@@ -228,6 +250,8 @@ class GnbMonitor extends EventEmitter {
           }
           break;
         }
+        // @alpha: CPU 利用率
+        case 'CPU_USAGE': info.cpuUsage = parseInt(v, 10) || 0; break;
       }
     }
     return info;

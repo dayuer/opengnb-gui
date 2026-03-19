@@ -31,6 +31,7 @@ function resolvePaths(dataDir) {
       dir: registryDir,
       nodes: path.join(registryDir, 'nodes.json'),
       groups: path.join(registryDir, 'groups.json'),
+      metrics: path.join(registryDir, 'metrics.json'),
     },
 
     // 安全凭证

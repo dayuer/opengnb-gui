@@ -1211,3 +1211,69 @@ html, body {
   .batch-toolbar { bottom: 10px; padding: 8px 14px; gap: 8px; flex-wrap: wrap; }
   .toolbar-search input { width: 120px; }
 }
+
+/* ═══════════════════════════════════════
+   @alpha: 监控增强样式
+   ═══════════════════════════════════════ */
+
+/* 迷你趋势图 */
+.sparkline-row {
+  display: flex; gap: 12px; padding: 12px 16px; border-bottom: 1px solid var(--border);
+  flex-wrap: wrap;
+}
+.sparkline-card {
+  flex: 1; min-width: 180px; background: var(--bg-primary); border-radius: 8px;
+  padding: 8px 12px; border: 1px solid var(--border);
+}
+.sl-label {
+  font-size: 11px; color: var(--text-muted); margin-bottom: 4px; font-weight: 500;
+}
+.sparkline-canvas {
+  display: block; width: 100%; height: 40px;
+}
+
+/* 告警脉冲标记 */
+.alert-pulse {
+  display: inline-block; width: 8px; height: 8px; border-radius: 50%;
+  background: var(--danger); margin-right: 4px;
+  animation: pulse-glow 1.5s ease-in-out infinite;
+}
+@keyframes pulse-glow {
+  0%, 100% { opacity: 1; box-shadow: 0 0 4px var(--danger); }
+  50% { opacity: 0.4; box-shadow: 0 0 8px var(--danger); }
+}
+
+/* 告警徽章 */
+.alert-badge {
+  display: inline-block; font-size: 10px; padding: 1px 6px; border-radius: 3px;
+  background: var(--danger); color: #fff; margin-left: 6px; font-weight: 600;
+  letter-spacing: 0.5px;
+}
+
+/* 带告警的手风琴项 */
+.accordion-item.has-alert .accordion-header {
+  border-left: 3px solid var(--danger);
+}
+
+/* 告警发光卡片 */
+.dash-card.alert-glow {
+  border-color: var(--danger);
+  box-shadow: 0 0 12px rgba(248, 81, 73, 0.15);
+}
+
+/* 时段切换器 */
+.range-selector {
+  display: flex; align-items: center; gap: 6px; padding: 8px 0;
+}
+.rs-label {
+  font-size: 12px; color: var(--text-muted); margin-right: 4px;
+}
+.rs-btn {
+  background: var(--bg-tertiary); border: 1px solid var(--border); color: var(--text-secondary);
+  padding: 3px 10px; border-radius: 6px; cursor: pointer; font-size: 12px;
+  transition: all 0.15s;
+}
+.rs-btn:hover { background: var(--bg-hover); color: var(--text-primary); }
+.rs-btn.active {
+  background: var(--accent); border-color: var(--accent); color: #fff; font-weight: 600;
+}

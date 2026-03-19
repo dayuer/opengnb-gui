@@ -12,6 +12,7 @@ const GnbMonitor = require('./services/gnb-monitor');
 const AiOps = require('./services/ai-ops');
 const Provisioner = require('./services/provisioner');
 const AuditLogger = require('./services/audit-logger');
+const MetricsStore = require('./services/metrics-store');
 const createNodesRouter = require('./routes/nodes');
 const createAiRouter = require('./routes/ai');
 const createEnrollRouter = require('./routes/enroll');
@@ -84,8 +85,12 @@ async function boot() {
   // 已审批节点配置
   const approvedNodes = keyManager.getApprovedNodesConfig();
 
+  // @alpha: 初始化指标时序存储
+  const metricsStore = new MetricsStore({ metricsPath: dataPaths.registry.metrics });
+
   const monitor = new GnbMonitor(approvedNodes, {
     intervalMs: parseInt(process.env.POLL_INTERVAL_MS || '10000', 10),
+    metricsStore,
   });
 
   const provisioner = new Provisioner({
@@ -124,7 +129,7 @@ async function boot() {
   // --- API 路由 ---
 
   // 需认证 + 审计的管理路由
-  app.use('/api/nodes', requireAuth, audit.middleware('nodes'), createNodesRouter(monitor, sshManager, monitor.nodesConfig, keyManager));
+  app.use('/api/nodes', requireAuth, audit.middleware('nodes'), createNodesRouter(monitor, sshManager, monitor.nodesConfig, keyManager, metricsStore));
   app.use('/api/ai', requireAuth, strictLimit, audit.middleware('ai_ops'), createAiRouter(aiOps, saveOpsLog));
 
   // 初始化脚本下载（公开，必须在 enroll 路由之前注册）

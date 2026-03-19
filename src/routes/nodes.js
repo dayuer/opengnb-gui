@@ -3,16 +3,35 @@
 const express = require('express');
 
 /**
- * 节点管理 API 路由（含分组子路由）
+ * 节点管理 API 路由（含分组 + 指标子路由）
  * @param {import('../services/gnb-monitor')} monitor
  * @param {import('../services/ssh-manager')} sshManager
  * @param {Array} nodesConfig
- * @param {import('../services/key-manager')} [keyManager] - 分组管理
+ * @param {import('../services/key-manager')} [keyManager]
+ * @param {import('../services/metrics-store')} [metricsStore]
  */
-function createNodesRouter(monitor, sshManager, nodesConfig, keyManager) {
+function createNodesRouter(monitor, sshManager, nodesConfig, keyManager, metricsStore) {
   const router = express.Router();
 
   // ═══════════════════════════════════════
+  // @alpha: 指标时序 API — /api/nodes/metrics
+  // ═══════════════════════════════════════
+  if (metricsStore) {
+    // GET /api/nodes/metrics/summary — 全局汇总
+    router.get('/metrics/summary', (req, res) => {
+      res.json(metricsStore.summary());
+    });
+
+    // GET /api/nodes/metrics?nodeId=xxx&range=1h
+    router.get('/metrics', (req, res) => {
+      const { nodeId, range } = req.query;
+      if (!nodeId) {
+        return res.status(400).json({ error: '缺少 nodeId 参数' });
+      }
+      const data = metricsStore.query(nodeId, range || '1h');
+      res.json({ nodeId, range: range || '1h', points: data, alerts: metricsStore.getAlerts().filter(a => a.nodeId === nodeId) });
+    });
+  }  // ═══════════════════════════════════════
   // 分组管理子路由 — /api/nodes/groups
   // 必须放在 /:id 之前，避免 "groups" 被当作 nodeId
   // ═══════════════════════════════════════

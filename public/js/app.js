@@ -97,16 +97,15 @@ function renderPlaceholder(container, icon, title, desc) {
 }
 
 // ═══════════════════════════════════════
-// 仪表盘页面
+// 仪表盘页面 (@alpha: 增强版)
 // ═══════════════════════════════════════
 
-function renderDashboardPage(container) {
+async function renderDashboardPage(container) {
   const online = nodesData.filter(n => n.online).length;
   const offline = nodesData.filter(n => !n.online).length;
   const total = nodesData.length;
   const pending = pendingNodes.length;
 
-  // 汇总所有节点的 P2P 对等节点数
   let totalPeers = 0, directPeers = 0;
   for (const n of nodesData) {
     if (!n.nodes) continue;
@@ -114,69 +113,34 @@ function renderDashboardPage(container) {
     directPeers += n.nodes.filter(p => p.status === 'Direct').length;
   }
 
-  let html = `<div class="page-dashboard">`;
+  // @alpha: 全局汇总指标
+  try { const r = await authFetch('/api/nodes/metrics/summary'); metricsSummary = await r.json(); } catch (_) {}
+  const ms = metricsSummary || {};
+  const alerts = ms.alertCount || 0;
 
-  // 统计卡片
+  let html = `<div class="page-dashboard">`;
+  // 汇总卡片
   html += `<div class="dashboard-stats">`;
-  html += dashCard(L('globe'), '托管节点', `${total}`, 'accent', `在线 ${online} / 离线 ${offline}`);
-  html += dashCard(L('circle-check'), '在线节点', `${online}`, online > 0 ? 'green' : 'red', `${total > 0 ? Math.round(online/total*100) : 0}% 在线率`);
-  html += dashCard(L('clock'), '待审批', `${pending}`, pending > 0 ? 'yellow' : 'green', pending > 0 ? '需要处理' : '无待办');
-  html += dashCard(L('link'), 'P2P 连接', `${directPeers}/${totalPeers}`, directPeers > 0 ? 'green' : 'red',
-    totalPeers > 0 ? `${Math.round(directPeers/totalPeers*100)}% 直连率` : '无连接');
+  html += dashCard(L('globe'), '节点', `${total}`, 'accent', `在线 ${online} / 离线 ${offline}`);
+  html += dashCard(L('cpu'), 'CPU', ms.avgCpu != null ? `${ms.avgCpu}%` : '—', pctColor(ms.avgCpu || 0), '集群均值');
+  html += dashCard(L('memory-stick'), '内存', ms.avgMemPct != null ? `${ms.avgMemPct}%` : '—', pctColor(ms.avgMemPct || 0), '集群均值');
+  html += dashCard(L('hard-drive'), '磁盘', ms.avgDiskPct != null ? `${ms.avgDiskPct}%` : '—', pctColor(ms.avgDiskPct || 0), '集群均值');
+  html += dashCard(L('activity'), '延迟', ms.avgLatency != null ? `${ms.avgLatency}ms` : '—', ms.avgLatency > 500 ? 'red' : ms.avgLatency > 200 ? 'yellow' : 'green', 'SSH 均值');
+  html += dashCard(L('link'), 'P2P', `${directPeers}/${totalPeers}`, directPeers > 0 ? 'green' : 'red', totalPeers > 0 ? `${Math.round(directPeers/totalPeers*100)}% 直连` : '无连接');
+  html += dashCardAlert(alerts, pending);
   html += `</div>`;
 
-  // 节点概览表格（手风琴展开）
+  // @alpha: 时段切换器
+  html += `<div class="range-selector"><span class="rs-label">趋势:</span>`;
+  for (const r of ['1h','6h','24h']) html += `<button class="rs-btn ${metricsRange===r?'active':''}" onclick="switchMetricsRange('${r}')">${r}</button>`;
+  html += `</div>`;
+
+  // 节点概览 (@alpha: 含迷你趋势图 + 告警标记)
   if (total > 0) {
     html += `<div class="dashboard-section-title">节点状态概览</div>`;
     html += `<div class="node-accordion" id="node-accordion">`;
     for (const node of nodesData) {
-      const si = node.sysInfo || {};
-      const memPct = si.memTotalMB > 0 ? Math.round(si.memUsedMB / si.memTotalMB * 100) : 0;
-      const diskPct = si.diskUsePct ? parseInt(si.diskUsePct) : 0;
-      const peers = node.nodes || [];
-      const totalP = peers.length;
-      const directP = peers.filter(p => p.status === 'Direct').length;
-      const directRate = totalP > 0 ? Math.round(directP / totalP * 100) : 0;
-      const totalIn = peers.reduce((s, n) => s + (n.inBytes || 0), 0);
-      const totalOut = peers.reduce((s, n) => s + (n.outBytes || 0), 0);
-
-      html += `<div class="accordion-item" data-node-id="${safeAttr(node.id)}">`;
-      // 行头
-      html += `<div class="accordion-header" onclick="toggleAccordion('${safeAttr(node.id)}')">
-        <div class="acc-left">
-          <span class="node-dot ${node.online ? 'online' : 'offline'}"></span>
-          <span class="acc-name">${escHtml(node.name || node.id)}</span>
-          <span class="acc-addr">${escHtml(node.tunAddr)}</span>
-        </div>
-        <div class="acc-right">
-          <span class="acc-stat">${node.online ? node.sshLatencyMs + 'ms' : '—'}</span>
-          <span class="acc-stat">${si.loadAvg ? escHtml(si.loadAvg.split(' ')[0]) : '—'}</span>
-          <span class="acc-stat ${pctColor(memPct)}">${memPct > 0 ? memPct + '%' : '—'}</span>
-          <span class="acc-stat ${pctColor(diskPct)}">${diskPct > 0 ? diskPct + '%' : '—'}</span>
-          <span class="acc-chevron">${L('chevron-down')}</span>
-        </div>
-      </div>`;
-      // 展开面板
-      html += `<div class="accordion-panel" id="acc-panel-${safeAttr(node.id)}">`;
-      if (node.online) {
-        html += `<div class="acc-grid">`;
-        html += `<div class="acc-metric">${L('activity')} <b>SSH</b> <span class="${node.sshLatencyMs > 500 ? 'red' : node.sshLatencyMs > 200 ? 'yellow' : 'green'}">${node.sshLatencyMs}ms</span></div>`;
-        html += `<div class="acc-metric">${L('link')} <b>P2P</b> <span>${directP}/${totalP} <small>(${directRate}%)</small></span></div>`;
-        html += `<div class="acc-metric">${L('download')} <b>流入</b> <span class="accent">${formatBytes(totalIn)}</span></div>`;
-        html += `<div class="acc-metric">${L('upload')} <b>流出</b> <span class="accent">${formatBytes(totalOut)}</span></div>`;
-        html += `<div class="acc-metric">${L('cpu')} <b>CPU</b> <span>${si.cpuCores || '—'}核 · ${escHtml(si.loadAvg || '—')}</span></div>`;
-        html += `<div class="acc-metric">${L('memory-stick')} <b>内存</b> <span class="${pctColor(memPct)}">${memPct}% <small>(${si.memUsedMB || 0}/${si.memTotalMB || 0}MB)</small></span></div>`;
-        html += `<div class="acc-metric">${L('hard-drive')} <b>磁盘</b> <span class="${pctColor(diskPct)}">${diskPct}% <small>(${escHtml(si.diskUsed || '—')}/${escHtml(si.diskTotal || '—')})</small></span></div>`;
-        html += `<div class="acc-metric">${L('monitor')} <b>系统</b> <span>${escHtml(si.hostname || '—')} · ${escHtml(si.os || '—')}</span></div>`;
-        html += `<div class="acc-metric">${L('wrench')} <b>内核</b> <span>${escHtml(si.kernel || '—')} ${escHtml(si.arch || '')}</span></div>`;
-        html += `<div class="acc-metric">${L('clock')} <b>运行</b> <span>${escHtml(si.uptime || '—')}</span></div>`;
-        const clawText = node.clawToken ? `已配置 (端口 ${node.clawPort || 18789})` : '未安装';
-        html += `<div class="acc-metric">${L('bot')} <b>Claw</b> <span class="${node.clawToken ? 'green' : 'yellow'}">${clawText}</span></div>`;
-        html += `</div>`;
-      } else {
-        html += `<div class="acc-offline">${L('zap')} 节点不可达 — ${escHtml(node.error || 'SSH 连接超时')}</div>`;
-      }
-      html += `</div></div>`;
+      html += renderNodeAccordionPanel(node);
     }
     html += `</div>`;
   }
@@ -184,6 +148,8 @@ function renderDashboardPage(container) {
   html += `</div>`;
   container.innerHTML = html;
   refreshIcons();
+  // @alpha: 绘制趋势图
+  for (const node of nodesData) { if (node.online) loadAndDrawSparklines(node.id); }
 }
 
 /** 手风琴展开/收起 */
