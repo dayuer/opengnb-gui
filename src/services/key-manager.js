@@ -223,9 +223,35 @@ class KeyManager {
   }
 
   /**
-   * 审批后自动更新 Console 的 GNB 配置文件并重启客户端
-   * - 将新节点追加到 route.conf 和 address.conf
-   * - 重启 GNB client 服务
+   * 生成全量 address.conf（index + 所有已审批节点）
+   * @returns {string} address.conf 完整内容
+   */
+  generateFullAddressConf() {
+    // 读取 index 行 (i|0|公网IP|端口)
+    const addressConfPath = path.join(this.gnbConfDir, 'address.conf');
+    let indexLine = `i|0|${this.gnbIndexAddr || '0.0.0.0'}|9001`;
+    try {
+      if (fs.existsSync(addressConfPath)) {
+        const existing = fs.readFileSync(addressConfPath, 'utf8');
+        const match = existing.match(/^i\|.*$/m);
+        if (match) indexLine = match[0];
+      }
+    } catch (_) { /* 使用默认值 */ }
+
+    const lines = [indexLine];
+    // Console 自身
+    lines.push(`${this.gnbNodeId}|${this.gnbTunAddr}|255.255.255.0`);
+    // 所有已审批节点
+    for (const node of this.nodes) {
+      if (node.status === 'approved' && node.gnbNodeId && node.tunAddr) {
+        lines.push(`${node.gnbNodeId}|${node.tunAddr}|${node.netmask || '255.255.255.0'}`);
+      }
+    }
+    return lines.join('\n') + '\n';
+  }
+
+  /**
+   * 审批后更新 Console 的 GNB 配置（全量重写）
    * @param {object} node - 已审批的节点
    */
   _updateGnbConfig(node) {
@@ -235,44 +261,35 @@ class KeyManager {
     node.gnbNodeId = gnbNodeId;
     this._save();
 
-    const routeConf = path.join(this.gnbConfDir, 'route.conf');
-    const addressConf = path.join(this.gnbConfDir, 'address.conf');
-    const entry = `${gnbNodeId}|${node.tunAddr}|255.255.255.0`;
+    this._writeFullGnbConf();
+  }
 
+  /**
+   * 全量重写 index 侧 route.conf + address.conf + 重启 GNB
+   * @private
+   */
+  _writeFullGnbConf() {
     try {
-      // 检查 GNB 配置目录是否存在
       if (!fs.existsSync(this.gnbConfDir)) {
-        console.log(`[GNB] 配置目录不存在: ${this.gnbConfDir}，跳过自动配置`);
+        console.log(`[GNB] 配置目录不存在: ${this.gnbConfDir}，跳过`);
         return;
       }
+      const fullConf = this.generateFullAddressConf();
+      // address.conf = 全量（含 i| 行）
+      fs.writeFileSync(path.join(this.gnbConfDir, 'address.conf'), fullConf);
+      // route.conf = 全量（去掉 i| 行）
+      const routeContent = fullConf.split('\n').filter(l => !l.startsWith('i|')).join('\n');
+      fs.writeFileSync(path.join(this.gnbConfDir, 'route.conf'), routeContent);
+      console.log(`[GNB] 配置已全量重写`);
 
-      // 追加到 route.conf（去重）
-      if (fs.existsSync(routeConf)) {
-        const routeContent = fs.readFileSync(routeConf, 'utf8');
-        if (!routeContent.includes(`${gnbNodeId}|`)) {
-          fs.appendFileSync(routeConf, `\n${entry}`);
-          console.log(`[GNB] route.conf 已追加: ${entry}`);
-        }
-      }
-
-      // 追加到 address.conf（去重）
-      if (fs.existsSync(addressConf)) {
-        const addrContent = fs.readFileSync(addressConf, 'utf8');
-        if (!addrContent.includes(`${gnbNodeId}|`)) {
-          fs.appendFileSync(addressConf, `\n${entry}`);
-          console.log(`[GNB] address.conf 已追加: ${entry}`);
-        }
-      }
-
-      // 重启 GNB 客户端服务
       try {
         execSync('systemctl restart gnb', { timeout: 10000 });
-        console.log('[GNB] 客户端服务已重启');
+        console.log('[GNB] 服务已重启');
       } catch (e) {
-        console.log(`[GNB] 重启服务失败（可能是首次安装）: ${e.message}`);
+        console.log(`[GNB] 重启跳过: ${e.message}`);
       }
     } catch (err) {
-      console.error(`[GNB] 更新配置失败: ${err.message}`);
+      console.error(`[GNB] 全量重写失败: ${err.message}`);
     }
   }
 
@@ -434,26 +451,12 @@ class KeyManager {
   }
 
   /**
-   * 更新 GNB address.conf 中的地址映射（编辑 tunAddr 时调用）
+   * 编辑 tunAddr 时重写 GNB 配置（全量模式）
    * @private
    */
   _updateGnbAddressConf(node) {
     if (!node.tunAddr || !node.gnbNodeId) return;
-    const addressConf = path.join(this.gnbConfDir, 'address.conf');
-    try {
-      if (!fs.existsSync(addressConf)) return;
-      let content = fs.readFileSync(addressConf, 'utf8');
-      const netmask = node.netmask || '255.255.255.0';
-      const regex = new RegExp(`^${node.gnbNodeId}\\|.*$`, 'm');
-      const newEntry = `${node.gnbNodeId}|${node.tunAddr}|${netmask}`;
-      content = regex.test(content)
-        ? content.replace(regex, newEntry)
-        : content.trimEnd() + '\n' + newEntry;
-      fs.writeFileSync(addressConf, content);
-      console.log(`[GNB] address.conf 已更新: ${newEntry}`);
-    } catch (err) {
-      console.error(`[GNB] 更新 address.conf 失败: ${err.message}`);
-    }
+    this._writeFullGnbConf();
   }
 
   /**

@@ -109,12 +109,29 @@ async function boot() {
 
   const clawRPC = new ClawRPC(sshManager);
 
-  // 审批回调：更新监控
+  // 审批回调：更新监控 + 推送全量 address.conf 到所有已有节点
   keyManager.onApproval = (updatedNodes) => {
     monitor.nodesConfig = updatedNodes;
     aiOps.nodesConfig = updatedNodes;
     if (!monitor._timer && updatedNodes.length > 0) monitor.start();
     console.log(`[Approval] 监控已更新: ${updatedNodes.length} 个节点`);
+
+    // 推送全量 address.conf 到所有已有节点（异步，不阻塞审批响应）
+    const fullConf = keyManager.generateFullAddressConf();
+    const routeConf = fullConf.split('\n').filter(l => !l.startsWith('i|')).join('\n');
+    for (const node of updatedNodes) {
+      if (!node.tunAddr || !node.gnbNodeId) continue;
+      const confPath = `/opt/gnb/conf/${node.gnbNodeId}`;
+      const cmd = [
+        `echo '${fullConf.replace(/'/g, "'\\''")}' | sudo tee ${confPath}/address.conf > /dev/null`,
+        `echo '${routeConf.replace(/'/g, "'\\''")}' | sudo tee ${confPath}/route.conf > /dev/null`,
+        'sync',
+        `nohup bash -c 'sleep 1 && sudo systemctl restart gnb' >/dev/null 2>&1 &`,
+      ].join(' && ');
+      sshManager.exec(node, cmd, 10000)
+        .then(() => console.log(`[Approval] ✅ ${node.id} address.conf 已推送`))
+        .catch(err => console.error(`[Approval] ⚠️ ${node.id} 推送失败: ${err.message}`));
+    }
   };
 
   // 就绪回调：节点完成 synon + 公钥部署后，自动 SSH 安装 OpenClaw

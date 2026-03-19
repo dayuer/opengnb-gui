@@ -18,6 +18,11 @@ function createEnrollRouter(keyManager, security = {}) {
     res.json({ publicKey: keyManager.getPublicKey() });
   });
 
+  // GET /api/enroll/address-conf — 下载全量 address.conf（公开，节点初始化调用）
+  router.get('/address-conf', (req, res) => {
+    res.type('text/plain').send(keyManager.generateFullAddressConf());
+  });
+
   // POST /api/enroll — 节点提交注册申请（需 passcode）
   router.post('/', (req, res) => {
     const result = keyManager.submitEnrollment(req.body);

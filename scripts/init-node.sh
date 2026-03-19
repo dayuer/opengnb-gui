@@ -226,16 +226,20 @@ multi-socket on
 unified-forwarding auto
 GNBEOF
 
-cat > "$GNB_CONF/route.conf" << GNBEOF
-${CONSOLE_GNB_NODE_ID}|${CONSOLE_GNB_TUN_ADDR}|255.255.255.0
-${GNB_NODE_ID}|${TUN_ADDR}|255.255.255.0
-GNBEOF
-
-cat > "$GNB_CONF/address.conf" << GNBEOF
+# address.conf — 从 Console API 拉取全量（包含所有已审批节点）
+if curl -sSf "$API_BASE/api/enroll/address-conf" -o "$GNB_CONF/address.conf" 2>/dev/null; then
+    echo "      address.conf 已从 Console 拉取（含全部节点）"
+else
+    echo "      API 不可用，使用最小配置（仅 Console + 自身）"
+    cat > "$GNB_CONF/address.conf" << GNBEOF
 i|0|${CONSOLE_IP}|9001
 ${CONSOLE_GNB_NODE_ID}|${CONSOLE_GNB_TUN_ADDR}|255.255.255.0
 ${GNB_NODE_ID}|${TUN_ADDR}|255.255.255.0
 GNBEOF
+fi
+
+# route.conf — 从 address.conf 生成（去掉 i| 行）
+grep -v '^i|' "$GNB_CONF/address.conf" > "$GNB_CONF/route.conf"
 
 echo "      GNB 配置文件已写入"
 
