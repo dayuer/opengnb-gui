@@ -1244,7 +1244,36 @@ document.addEventListener('click', (e) => {
   if (menu && !menu.contains(e.target)) closeUserMenu();
 });
 
+// ═══════════════════════════════════════
+// @alpha: 主题切换
+// ═══════════════════════════════════════
+
+function getTheme() {
+  return localStorage.getItem('gnb_theme') || 'dark';
+}
+
+function applyTheme(theme) {
+  document.documentElement.setAttribute('data-theme', theme === 'light' ? 'light' : '');
+  // 同步按钮 UI
+  const icon = $('#theme-icon');
+  const label = $('#theme-label');
+  if (icon) icon.setAttribute('data-lucide', theme === 'light' ? 'moon' : 'sun');
+  if (label) label.textContent = theme === 'light' ? '深色模式' : '亮色模式';
+  refreshIcons();
+}
+
+function toggleTheme() {
+  const next = getTheme() === 'dark' ? 'light' : 'dark';
+  localStorage.setItem('gnb_theme', next);
+  applyTheme(next);
+}
+
+function initTheme() {
+  applyTheme(getTheme());
+}
+
 // 启动
+initTheme();
 if (!getToken()) {
   promptToken();
 } else {

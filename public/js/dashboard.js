@@ -85,9 +85,9 @@ function drawSparkline(id, vals, opts = {}) {
     ctx.setLineDash([]);
   }
 
-  // 最新值标签
+  // @beta: 从 CSS 变量读取文字色，适配亮色/暗色主题
   ctx.font = '9px sans-serif';
-  ctx.fillStyle = '#fff';
+  ctx.fillStyle = getComputedStyle(document.documentElement).getPropertyValue('--text-primary').trim() || '#fff';
   ctx.textAlign = 'right';
   ctx.fillText(String(vals[vals.length - 1]), w - pad, 10);
 }

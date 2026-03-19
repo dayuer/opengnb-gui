@@ -1,5 +1,6 @@
-/* GNB Console — 暗色主题 Dashboard */
+/* GNB Console — 主题系统 (暗色 + 亮色) */
 
+/* @alpha: 暗色主题（默认） */
 :root {
   --bg-primary: #0d1117;
   --bg-secondary: #161b22;
@@ -29,6 +30,28 @@
   --header-height: 48px;
 }
 
+/* @alpha: 亮色主题 — 参照 Sub2API 风格 */
+[data-theme="light"] {
+  --bg-primary: #f5f5f5;
+  --bg-secondary: #ffffff;
+  --bg-tertiary: #f0f0f0;
+  --bg-hover: #e8e8e8;
+  --border: #e0e0e0;
+  --border-accent: #388bfd40;
+  --text-primary: #1a1a2e;
+  --text-secondary: #555770;
+  --text-muted: #9e9eb8;
+  --accent: #4f46e5;
+  --accent-glow: #4f46e520;
+  --green: #16a34a;
+  --green-bg: #16a34a15;
+  --red: #dc2626;
+  --red-bg: #dc262615;
+  --yellow: #ca8a04;
+  --yellow-bg: #ca8a0415;
+  --shadow: 0 2px 12px rgba(0,0,0,.08);
+}
+
 *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
 
 html, body {
@@ -38,6 +61,7 @@ html, body {
   color: var(--text-primary);
   background: var(--bg-primary);
   -webkit-font-smoothing: antialiased;
+  transition: background 0.3s ease, color 0.3s ease;
 }
 
 /* ═══════════════════════════════════════
