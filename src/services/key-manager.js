@@ -348,6 +348,113 @@ class KeyManager {
     return { success: true, message: `节点 ${nodeId} 已删除` };
   }
 
+  // ═══════════════════════════════════════
+  // @alpha: 节点信息编辑
+  // ═══════════════════════════════════════
+
+  /** @private IPv4 格式校验 */
+  static _isValidIPv4(ip) {
+    const parts = ip.split('.');
+    if (parts.length !== 4) return false;
+    return parts.every(p => {
+      const n = parseInt(p, 10);
+      return String(n) === p && n >= 0 && n <= 255;
+    });
+  }
+
+  /**
+   * 编辑已审批节点的可变字段
+   * @param {string} nodeId
+   * @param {object} fields - { name?, tunAddr?, sshPort?, sshUser? }
+   * @returns {{success: boolean, message: string, changedFields?: string[]}}
+   */
+  updateNode(nodeId, fields = {}) {
+    const node = this.nodes.find(n => n.id === nodeId);
+    if (!node) return { success: false, message: '节点不存在' };
+    if (node.status !== 'approved') return { success: false, message: '仅已审批节点可编辑' };
+
+    const allowed = ['name', 'tunAddr', 'sshPort', 'sshUser'];
+    const changedFields = [];
+
+    // 校验 tunAddr
+    if (fields.tunAddr !== undefined) {
+      const ip = String(fields.tunAddr).trim();
+      if (!ip) return { success: false, message: 'tunAddr 不能为空' };
+      if (!KeyManager._isValidIPv4(ip)) return { success: false, message: `IP 格式错误: ${ip}` };
+      // 唯一性检查
+      const dup = this.nodes.find(n => n.id !== nodeId && n.status === 'approved' && n.tunAddr === ip);
+      if (dup) return { success: false, message: `IP ${ip} 已被节点 ${dup.name || dup.id} 使用`, code: 'CONFLICT' };
+      fields.tunAddr = ip;
+    }
+
+    // 校验 sshPort
+    if (fields.sshPort !== undefined) {
+      const port = parseInt(fields.sshPort, 10);
+      if (isNaN(port) || port < 1 || port > 65535) return { success: false, message: '端口范围 1-65535' };
+      fields.sshPort = port;
+    }
+
+    // 校验 name
+    if (fields.name !== undefined) {
+      const name = String(fields.name).trim();
+      if (!name) return { success: false, message: 'name 不能为空' };
+      if (name.length > 64) return { success: false, message: 'name 最长 64 字符' };
+      fields.name = name;
+    }
+
+    // 校验 sshUser
+    if (fields.sshUser !== undefined) {
+      const user = String(fields.sshUser).trim();
+      if (!user) return { success: false, message: 'sshUser 不能为空' };
+      fields.sshUser = user;
+    }
+
+    // 应用变更
+    for (const key of allowed) {
+      if (fields[key] !== undefined && node[key] !== fields[key]) {
+        node[key] = fields[key];
+        changedFields.push(key);
+      }
+    }
+
+    if (changedFields.length === 0) return { success: true, message: '无变更', changedFields: [] };
+
+    node.updatedAt = new Date().toISOString();
+    this._save();
+
+    // tunAddr 变更时同步 GNB 配置
+    if (changedFields.includes('tunAddr') && node.gnbNodeId) {
+      this._updateGnbAddressConf(node);
+    }
+
+    // 触发更新回调
+    if (this.onNodeUpdate) this.onNodeUpdate(nodeId, changedFields);
+
+    return { success: true, message: `节点 ${nodeId} 已更新`, changedFields };
+  }
+
+  /**
+   * 更新 GNB address.conf 中的地址映射（编辑 tunAddr 时调用）
+   * @private
+   */
+  _updateGnbAddressConf(node) {
+    if (!node.tunAddr || !node.gnbNodeId) return;
+    const addressConf = path.join(this.gnbConfDir, 'address.conf');
+    try {
+      if (!fs.existsSync(addressConf)) return;
+      let content = fs.readFileSync(addressConf, 'utf8');
+      const regex = new RegExp(`^${node.gnbNodeId}\\|.*$`, 'm');
+      const newEntry = `${node.gnbNodeId}|${node.tunAddr}|255.255.255.0`;
+      content = regex.test(content)
+        ? content.replace(regex, newEntry)
+        : content.trimEnd() + '\n' + newEntry;
+      fs.writeFileSync(addressConf, content);
+      console.log(`[GNB] address.conf 已更新: ${newEntry}`);
+    } catch (err) {
+      console.error(`[GNB] 更新 address.conf 失败: ${err.message}`);
+    }
+  }
+
   /**
    * 获取全部节点（含状态）
    */

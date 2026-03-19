@@ -408,6 +408,7 @@ function renderNodesTable() {
       <td class="col-latency">${online && latency ? latency + 'ms' : '—'}</td>
       <td class="col-actions">
         ${node.status === 'pending' ? `<button class="btn-approve-sm" onclick="approveNode('${safeAttr(node.id)}')">  ✓</button><button class="btn-reject-sm" onclick="rejectNode('${safeAttr(node.id)}')">  ✗</button>` : ''}
+        ${node.status === 'approved' ? `<button class="btn-icon" onclick="showEditNodeModal('${safeAttr(node.id)}')" title="编辑节点">${L('pencil')}</button>` : ''}
         <button class="btn-icon" onclick="showMoveGroupModal('${safeAttr(node.id)}')" title="移动分组">${L('folder-input')}</button>
       </td>
     </tr>`;
@@ -1235,6 +1236,82 @@ function copyApiKey() {
       const btn = document.querySelector('#modal-content .toolbar-btn');
       if (btn) { btn.textContent = '已复制'; setTimeout(() => { btn.textContent = '复制'; }, 1500); }
     });
+  }
+}
+
+// ═══════════════════════════════════════
+// @alpha: 节点编辑弹窗
+// ═══════════════════════════════════════
+
+function showEditNodeModal(nodeId) {
+  const node = allNodesRaw.find(n => n.id === nodeId);
+  if (!node) return;
+  const overlay = $('#modal-overlay');
+  const content = $('#modal-content');
+  if (!overlay || !content) return;
+  overlay.style.display = 'flex';
+  content.innerHTML = `
+    <h3 style="margin:0 0 16px;font-size:16px">编辑节点</h3>
+    <form id="edit-node-form" onsubmit="saveNodeEdit(event,'${safeAttr(nodeId)}')">
+      <label class="form-label">名称</label>
+      <input class="form-input" name="name" value="${escHtml(node.name || '')}" required maxlength="64">
+      <label class="form-label" style="margin-top:12px">TUN 地址</label>
+      <input class="form-input" name="tunAddr" value="${escHtml(node.tunAddr || '')}" required
+        pattern="^((25[0-5]|2[0-4]\\d|[01]?\\d\\d?)\\.){3}(25[0-5]|2[0-4]\\d|[01]?\\d\\d?)$"
+        title="请输入合法的 IPv4 地址">
+      <label class="form-label" style="margin-top:12px">SSH 端口</label>
+      <input class="form-input" name="sshPort" type="number" value="${node.sshPort || 22}" min="1" max="65535" required>
+      <label class="form-label" style="margin-top:12px">SSH 用户名</label>
+      <input class="form-input" name="sshUser" value="${escHtml(node.sshUser || 'synon')}" required>
+      <div style="display:flex;gap:8px;margin-top:16px;justify-content:flex-end">
+        <button type="button" class="toolbar-btn" onclick="$('#modal-overlay').style.display='none'">取消</button>
+        <button type="submit" class="toolbar-btn primary" id="edit-node-save-btn">保存</button>
+      </div>
+      <div id="edit-node-error" style="color:var(--red);font-size:12px;margin-top:8px;display:none"></div>
+    </form>
+  `;
+}
+
+async function saveNodeEdit(e, nodeId) {
+  e.preventDefault();
+  const form = $('#edit-node-form');
+  if (!form.checkValidity()) { form.reportValidity(); return; }
+  const btn = $('#edit-node-save-btn');
+  btn.disabled = true; btn.textContent = '保存中…';
+  const errEl = $('#edit-node-error');
+  errEl.style.display = 'none';
+
+  const body = {
+    name: form.name.value.trim(),
+    tunAddr: form.tunAddr.value.trim(),
+    sshPort: parseInt(form.sshPort.value, 10),
+    sshUser: form.sshUser.value.trim(),
+  };
+
+  try {
+    const res = await fetch(`/api/nodes/${encodeURIComponent(nodeId)}`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + getToken() },
+      body: JSON.stringify(body),
+    });
+    const data = await res.json();
+    if (!res.ok) {
+      errEl.textContent = data.error || '保存失败';
+      errEl.style.display = 'block';
+      btn.disabled = false; btn.textContent = '保存';
+      return;
+    }
+    // 更新本地数据并关闭弹窗
+    const node = allNodesRaw.find(n => n.id === nodeId);
+    if (node) Object.assign(node, body);
+    $('#modal-overlay').style.display = 'none';
+    renderNodesTable();
+    renderPagination();
+    refreshIcons();
+  } catch (err) {
+    errEl.textContent = '网络错误: ' + err.message;
+    errEl.style.display = 'block';
+    btn.disabled = false; btn.textContent = '保存';
   }
 }
 

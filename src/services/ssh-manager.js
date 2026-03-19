@@ -138,6 +138,19 @@ class SSHManager {
   }
 
   /**
+   * @alpha: 断开指定节点的 SSH 连接（编辑后重连用）
+   * @param {string} nodeId
+   */
+  disconnect(nodeId) {
+    const entry = this.pool.get(nodeId);
+    if (entry) {
+      try { entry.client.end(); } catch (_) { /* 忽略 */ }
+      this.pool.delete(nodeId);
+      console.log(`[SSH] 已断开节点 ${nodeId} 的连接`);
+    }
+  }
+
+  /**
    * 关闭所有连接
    */
   closeAll() {

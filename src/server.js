@@ -123,6 +123,18 @@ async function boot() {
     provisioner.provision(nodeConfig, { installGnb: false, installClaw: true });
   };
 
+  // @alpha: 编辑回调：同步运行时配置，必要时断开旧 SSH 连接
+  keyManager.onNodeUpdate = (nodeId, changedFields) => {
+    const updated = keyManager.getApprovedNodesConfig();
+    monitor.nodesConfig = updated;
+    aiOps.nodesConfig = updated;
+    // tunAddr 或 sshPort 或 sshUser 变更时，旧 SSH 连接不再可用
+    if (changedFields.some(f => ['tunAddr', 'sshPort', 'sshUser'].includes(f))) {
+      sshManager.disconnect(nodeId);
+    }
+    console.log(`[NodeUpdate] 节点 ${nodeId} 已更新 [${changedFields.join(', ')}]`);
+  };
+
   // --- 敏感端点速率限制 ---
   const strictLimit = createRateLimit({ windowMs: 60000, max: 20, message: '敏感操作请求过于频繁' });
 

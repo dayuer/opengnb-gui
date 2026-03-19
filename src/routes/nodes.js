@@ -79,6 +79,20 @@ function createNodesRouter(monitor, sshManager, nodesConfig, keyManager, metrics
     res.json(status);
   });
 
+  // @alpha: PUT /api/nodes/:id — 编辑节点信息
+  if (keyManager) {
+    router.put('/:id', (req, res) => {
+      const { name, tunAddr, sshPort, sshUser } = req.body;
+      const result = keyManager.updateNode(req.params.id, { name, tunAddr, sshPort, sshUser });
+      if (!result.success) {
+        const status = result.message.includes('不存在') ? 404
+          : result.code === 'CONFLICT' ? 409 : 400;
+        return res.status(status).json({ error: result.message });
+      }
+      res.json(result);
+    });
+  }
+
   // POST /api/nodes/:id/exec — 执行远程命令（仅允许安全命令）
 
   // 精确命令白名单
