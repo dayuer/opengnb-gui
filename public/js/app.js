@@ -337,7 +337,7 @@ function selectNode(nodeId) {
 // ═══════════════════════════════════════
 
 function renderHealthRing(online, latencyMs) {
-  const r = 48, c = 2 * Math.PI * r;
+  const r = 32, c = 2 * Math.PI * r;
   const pct = online ? 1 : 0.2;
   const offset = c * (1 - pct);
   const cls = online ? 'online' : 'offline';
@@ -346,9 +346,9 @@ function renderHealthRing(online, latencyMs) {
   return `
     <div class="health-ring-box">
       <div class="health-ring-container">
-        <svg class="health-ring-svg" viewBox="0 0 120 120">
-          <circle class="health-ring-bg" cx="60" cy="60" r="${r}"/>
-          <circle class="health-ring-fg ${cls}" cx="60" cy="60" r="${r}"
+        <svg class="health-ring-svg" viewBox="0 0 80 80">
+          <circle class="health-ring-bg" cx="40" cy="40" r="${r}"/>
+          <circle class="health-ring-fg ${cls}" cx="40" cy="40" r="${r}"
             stroke-dasharray="${c}" stroke-dashoffset="${offset}"/>
         </svg>
         <div class="health-ring-label">

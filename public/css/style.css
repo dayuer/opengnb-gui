@@ -220,17 +220,19 @@ html, body {
    ═══════════════════════════════════════ */
 
 .page-nodes {
-  display: grid;
-  grid-template-columns: 280px 1fr;
+  display: flex;
+  flex-direction: column;
   height: 100%;
   overflow: hidden;
 }
 
-/* --- 节点列表侧栏 --- */
+/* --- 节点列表区（横向条） --- */
 .node-sidebar {
   background: var(--bg-secondary);
-  border-right: 1px solid var(--border);
-  display: flex; flex-direction: column; overflow: hidden;
+  border-bottom: 1px solid var(--border);
+  display: flex; flex-direction: column;
+  flex-shrink: 0;
+  max-height: 180px;
 }
 
 .panel-header {
@@ -242,14 +244,16 @@ html, body {
 .panel-header h2 { font-size: 13px; font-weight: 600; text-transform: uppercase; letter-spacing: .5px; color: var(--text-secondary); }
 
 .node-list-scroll {
-  flex: 1; overflow-y: auto; list-style: none; padding: 8px;
+  flex: 1; overflow-y: auto; list-style: none; padding: 6px 8px;
+  display: flex; flex-wrap: wrap; gap: 4px;
 }
 
 .node-item {
-  display: flex; align-items: center; gap: 10px;
-  padding: 10px 12px; margin-bottom: 2px;
+  display: flex; align-items: center; gap: 8px;
+  padding: 6px 12px; margin-bottom: 0;
   border-radius: var(--radius-sm);
   cursor: pointer; transition: background var(--transition);
+  flex-shrink: 0;
 }
 
 .node-item:hover { background: var(--bg-hover); }
@@ -302,6 +306,7 @@ html, body {
 /* --- 节点详情区 --- */
 .node-detail-area {
   display: flex; flex-direction: column; overflow: hidden;
+  flex: 1; min-height: 0;
 }
 
 .node-detail-header {
@@ -316,6 +321,7 @@ html, body {
 
 .node-detail-content {
   flex: 1; overflow-y: auto;
+  min-height: 0;
 }
 
 .detail-placeholder {
@@ -493,9 +499,8 @@ html, body {
    ═══════════════════════════════════════ */
 
 .monitor-dashboard {
-  padding: 20px;
-  display: flex; flex-direction: column; gap: 16px;
-  overflow-y: auto; height: 100%;
+  padding: 16px;
+  display: flex; flex-direction: column; gap: 12px;
 }
 
 .monitor-topbar {
@@ -532,29 +537,29 @@ html, body {
 
 .monitor-hero {
   display: grid;
-  grid-template-columns: 220px 1fr;
-  gap: 16px;
+  grid-template-columns: 160px 1fr;
+  gap: 12px;
 }
 
 .health-ring-box {
   background: var(--bg-secondary);
   border: 1px solid var(--border);
   border-radius: var(--radius);
-  padding: 24px 16px;
+  padding: 12px 8px;
   display: flex; flex-direction: column; align-items: center; justify-content: center;
-  gap: 12px;
+  gap: 6px;
 }
 
-.health-ring-container { position: relative; width: 120px; height: 120px; }
+.health-ring-container { position: relative; width: 80px; height: 80px; }
 
-.health-ring-svg { width: 120px; height: 120px; transform: rotate(-90deg); }
+.health-ring-svg { width: 80px; height: 80px; transform: rotate(-90deg); }
 .health-ring-bg { fill: none; stroke: var(--bg-tertiary); stroke-width: 8; }
 .health-ring-fg { fill: none; stroke-width: 8; stroke-linecap: round; transition: stroke-dashoffset 0.8s ease, stroke 0.3s ease; }
 .health-ring-fg.online { stroke: var(--green); filter: drop-shadow(0 0 6px var(--green)); }
 .health-ring-fg.offline { stroke: var(--red); filter: drop-shadow(0 0 6px var(--red)); }
 
 .health-ring-label { position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); text-align: center; }
-.health-ring-status { font-size: 18px; font-weight: 700; }
+.health-ring-status { font-size: 14px; font-weight: 700; }
 .health-ring-status.online { color: var(--green); }
 .health-ring-status.offline { color: var(--red); }
 .health-ring-sub { font-size: 11px; color: var(--text-muted); margin-top: 2px; }
@@ -569,13 +574,13 @@ html, body {
   background: var(--bg-secondary);
   border: 1px solid var(--border);
   border-radius: var(--radius);
-  padding: 16px 20px;
-  display: flex; align-items: center; gap: 32px;
+  padding: 10px 16px;
+  display: flex; align-items: center; gap: 24px;
 }
 
 .realtime-item { display: flex; flex-direction: column; gap: 2px; }
 .realtime-item .ri-label { font-size: 11px; color: var(--text-muted); text-transform: uppercase; letter-spacing: .5px; }
-.realtime-item .ri-value { font-size: 20px; font-weight: 700; font-family: var(--font-mono); color: var(--text-primary); }
+.realtime-item .ri-value { font-size: 16px; font-weight: 700; font-family: var(--font-mono); color: var(--text-primary); }
 .realtime-item .ri-value.green { color: var(--green); }
 .realtime-item .ri-value.red { color: var(--red); }
 .realtime-item .ri-value.yellow { color: var(--yellow); }
@@ -583,16 +588,16 @@ html, body {
 
 .metric-grid {
   display: grid;
-  grid-template-columns: repeat(3, 1fr);
-  gap: 12px; flex: 1;
+  grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+  gap: 10px; flex: 1;
 }
 
 .metric-card {
   background: var(--bg-secondary);
   border: 1px solid var(--border);
   border-radius: var(--radius);
-  padding: 16px;
-  display: flex; flex-direction: column; gap: 6px;
+  padding: 12px;
+  display: flex; flex-direction: column; gap: 4px;
   transition: border-color var(--transition), background var(--transition);
   position: relative; overflow: hidden;
 }
@@ -613,7 +618,7 @@ html, body {
 .mc-badge.red { background: var(--red-bg); color: var(--red); }
 .mc-badge.yellow { background: var(--yellow-bg); color: var(--yellow); }
 .mc-badge.accent { background: var(--accent-glow); color: var(--accent); }
-.mc-value { font-size: 28px; font-weight: 700; font-family: var(--font-mono); line-height: 1.1; }
+.mc-value { font-size: 22px; font-weight: 700; font-family: var(--font-mono); line-height: 1.1; }
 .mc-value.green { color: var(--green); }
 .mc-value.red { color: var(--red); }
 .mc-value.yellow { color: var(--yellow); }
@@ -623,22 +628,22 @@ html, body {
 
 .sys-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
-  gap: 12px;
+  grid-template-columns: repeat(auto-fit, minmax(120px, 1fr));
+  gap: 10px;
 }
 
 .sys-card {
   background: var(--bg-secondary);
   border: 1px solid var(--border);
   border-radius: var(--radius);
-  padding: 14px 16px;
+  padding: 10px 12px;
   transition: border-color var(--transition);
 }
 .sys-card:hover { border-color: var(--accent); }
 
 .sys-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px; }
 .sys-title { font-size: 11px; color: var(--text-secondary); font-weight: 600; text-transform: uppercase; letter-spacing: .5px; display: flex; align-items: center; gap: 4px; }
-.sys-value { font-size: 22px; font-weight: 700; font-family: var(--font-mono); line-height: 1.1; margin-bottom: 4px; }
+.sys-value { font-size: 18px; font-weight: 700; font-family: var(--font-mono); line-height: 1.1; margin-bottom: 2px; }
 .sys-value.green { color: var(--green); }
 .sys-value.red { color: var(--red); }
 .sys-value.yellow { color: var(--yellow); }
