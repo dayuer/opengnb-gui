@@ -3,13 +3,45 @@
 const express = require('express');
 
 /**
- * 节点管理 API 路由
+ * 节点管理 API 路由（含分组子路由）
  * @param {import('../services/gnb-monitor')} monitor
  * @param {import('../services/ssh-manager')} sshManager
  * @param {Array} nodesConfig
+ * @param {import('../services/key-manager')} [keyManager] - 分组管理
  */
-function createNodesRouter(monitor, sshManager, nodesConfig) {
+function createNodesRouter(monitor, sshManager, nodesConfig, keyManager) {
   const router = express.Router();
+
+  // ═══════════════════════════════════════
+  // 分组管理子路由 — /api/nodes/groups
+  // 必须放在 /:id 之前，避免 "groups" 被当作 nodeId
+  // ═══════════════════════════════════════
+  if (keyManager) {
+    router.get('/groups', (req, res) => {
+      res.json({ groups: keyManager.getGroups() });
+    });
+
+    router.post('/groups', (req, res) => {
+      const { name, color } = req.body;
+      try {
+        const group = keyManager.createGroup({ name, color });
+        res.status(201).json(group);
+      } catch (err) {
+        const status = err.message.includes('已存在') ? 409 : 400;
+        res.status(status).json({ error: err.message });
+      }
+    });
+
+    router.put('/groups/:id', (req, res) => {
+      const result = keyManager.updateGroup(req.params.id, req.body);
+      res.status(result.success ? 200 : 404).json(result);
+    });
+
+    router.delete('/groups/:id', (req, res) => {
+      const result = keyManager.deleteGroup(req.params.id);
+      res.status(result.success ? 200 : 404).json(result);
+    });
+  }
 
   // GET /api/nodes — 全部节点状态
   router.get('/', (req, res) => {
@@ -30,7 +62,7 @@ function createNodesRouter(monitor, sshManager, nodesConfig) {
 
   // POST /api/nodes/:id/exec — 执行远程命令（仅允许安全命令）
 
-  // 精确命令白名单：每个命令用正则限制允许的参数范围
+  // 精确命令白名单
   const SAFE_COMMANDS = {
     'gnb_ctl':     /^gnb_ctl(\s+[\w-]+)*$/,
     'ping':        /^ping(\s+-c\s+\d{1,3})?\s+[\w.:/-]+$/,
@@ -43,8 +75,7 @@ function createNodesRouter(monitor, sshManager, nodesConfig) {
     'df':          /^df(\s+-[a-z]+)?(\s+\/[\w/]*)?$/i,
   };
 
-  // 禁止 shell 元字符 — 阻断所有注入向量
-  const SHELL_META = /[;|&`$(){}!><\n\r\\'"]/;
+  const SHELL_META = /[;|&`$(){}!><\n\r\\\\'\"]/;
 
   router.post('/:id/exec', async (req, res) => {
     const { command } = req.body;
@@ -54,12 +85,10 @@ function createNodesRouter(monitor, sshManager, nodesConfig) {
 
     const cmd = command.trim();
 
-    // 第一道防线：禁止 shell 元字符
     if (SHELL_META.test(cmd)) {
       return res.status(403).json({ error: '命令包含禁止的特殊字符' });
     }
 
-    // 第二道防线：精确正则匹配
     const matched = Object.entries(SAFE_COMMANDS).some(([, regex]) => regex.test(cmd));
     if (!matched) {
       return res.status(403).json({

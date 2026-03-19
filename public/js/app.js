@@ -670,7 +670,7 @@ async function createGroupUI() {
   const name = $('#group-name-input')?.value?.trim();
   if (!name) { alert('名称不能为空'); return; }
   try {
-    const res = await authFetch('/api/groups', {
+    const res = await authFetch('/api/nodes/groups', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ name, color: pickedColor }),
@@ -687,7 +687,7 @@ async function createGroupUI() {
 async function deleteGroupUI(groupId) {
   if (!confirm('确认删除此分组？节点将回归未分组')) return;
   try {
-    await authFetch(`/api/groups/${encodeURIComponent(groupId)}`, { method: 'DELETE' });
+    await authFetch(`/api/nodes/groups/${encodeURIComponent(groupId)}`, { method: 'DELETE' });
     if (nodeFilter.groupId === groupId) nodeFilter.groupId = null;
     await refreshGroups();
     renderGroupSidebar();
@@ -759,7 +759,7 @@ function closeModal() {
 
 async function refreshGroups() {
   try {
-    const res = await authFetch('/api/groups');
+    const res = await authFetch('/api/nodes/groups');
     const data = await res.json();
     nodeGroups = data.groups || [];
   } catch (_) {}

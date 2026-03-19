@@ -17,7 +17,6 @@ const createAiRouter = require('./routes/ai');
 const createEnrollRouter = require('./routes/enroll');
 const createMirrorRouter = require('./routes/mirror');
 const createClawRouter = require('./routes/claw');
-const createGroupsRouter = require('./routes/groups');
 const ClawRPC = require('./services/claw-rpc');
 const { requireAuth, initToken, getAdminToken } = require('./middleware/auth');
 const { createRateLimit } = require('./middleware/rate-limit');
@@ -125,10 +124,8 @@ async function boot() {
   // --- API 路由 ---
 
   // 需认证 + 审计的管理路由
-  app.use('/api/nodes', requireAuth, audit.middleware('nodes'), createNodesRouter(monitor, sshManager, monitor.nodesConfig));
+  app.use('/api/nodes', requireAuth, audit.middleware('nodes'), createNodesRouter(monitor, sshManager, monitor.nodesConfig, keyManager));
   app.use('/api/ai', requireAuth, strictLimit, audit.middleware('ai_ops'), createAiRouter(aiOps, saveOpsLog));
-  // @alpha: 分组管理路由
-  app.use('/api/groups', requireAuth, audit.middleware('groups'), createGroupsRouter(keyManager));
 
   // 初始化脚本下载（公开，必须在 enroll 路由之前注册）
   app.get('/api/enroll/init.sh', (req, res) => {
