@@ -153,9 +153,10 @@ function createNodesRouter(monitor, sshManager, nodesConfig, keyManager, metrics
         indexOldContent = require('fs').readFileSync(indexConfPath, 'utf8');
         const regex = new RegExp(`^${gnbId}\\|.*$`, 'm');
         const newEntry = `${gnbId}|${newIp}|${netmask}`;
-        const updated = regex.test(indexOldContent)
+        let updated = regex.test(indexOldContent)
           ? indexOldContent.replace(regex, newEntry)
           : indexOldContent.trimEnd() + '\n' + newEntry;
+        if (!updated.endsWith('\n')) updated += '\n';
         require('fs').writeFileSync(indexConfPath, updated);
         console.log(`[RemoteSync] Index address.conf 已更新: ${newEntry}`);
       }
@@ -170,8 +171,8 @@ function createNodesRouter(monitor, sshManager, nodesConfig, keyManager, metrics
         console.error(`[RemoteSync] Index GNB 重启失败: ${err.message}`);
       }
 
-      // Step 4: 等待双方 P2P 重建 + ping 验证
-      await new Promise(r => setTimeout(r, 8000));
+      // Step 4: 等待双方 P2P 重建 + ping 验证（GNB P2P 发现需 ~10s）
+      await new Promise(r => setTimeout(r, 15000));
       const reachable = await pingCheck(newIp);
 
       if (reachable) {
