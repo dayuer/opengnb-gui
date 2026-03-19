@@ -83,29 +83,35 @@ function createNodesRouter(monitor, sshManager, nodesConfig, keyManager, metrics
   if (keyManager) {
     router.put('/:id', async (req, res) => {
       const { name, tunAddr, sshPort, sshUser } = req.body;
+      let remoteSync = null;
+
+      // 时序关键: 在 updateNode 之前通过旧 SSH 连接远程同步
+      // updateNode 会同步触发 onNodeUpdate → disconnect()，清除 SSH 池
+      if (tunAddr) {
+        const oldNode = keyManager.getApprovedNodesConfig().find(n => n.id === req.params.id);
+        if (oldNode && oldNode.gnbNodeId && oldNode.tunAddr && oldNode.tunAddr !== String(tunAddr).trim()) {
+          try {
+            const netmask = oldNode.netmask || '255.255.255.0';
+            const newIp = String(tunAddr).trim();
+            const sedCmd = `sudo sed -i 's/^${oldNode.gnbNodeId}|.*/${oldNode.gnbNodeId}|${newIp}|${netmask}/' /opt/gnb/conf/${oldNode.gnbNodeId}/address.conf`;
+            const { code, stderr } = await sshManager.exec(oldNode, `${sedCmd} && sync && nohup bash -c 'sleep 1 && sudo systemctl restart gnb' >/dev/null 2>&1 &`, 15000);
+            remoteSync = code === 0 ? 'ok' : `exit ${code}: ${stderr}`;
+            console.log(`[RemoteSync] ${req.params.id}: ${oldNode.tunAddr} → ${newIp} (${remoteSync})`);
+          } catch (err) {
+            remoteSync = `failed: ${err.message}`;
+            console.error(`[RemoteSync] 失败: ${err.message}`);
+          }
+        }
+      }
+
+      // 本地持久化（触发 onNodeUpdate → disconnect + 刷新 monitor/aiOps）
       const result = keyManager.updateNode(req.params.id, { name, tunAddr, sshPort, sshUser });
       if (!result.success) {
         const status = result.message.includes('不存在') ? 404
           : result.code === 'CONFLICT' ? 409 : 400;
         return res.status(status).json({ error: result.message });
       }
-
-      // tunAddr 变更时：通过旧 SSH 连接远程同步节点 GNB 配置
-      if (result.changedFields?.includes('tunAddr')) {
-        const node = keyManager.getApprovedNodesConfig().find(n => n.id === req.params.id);
-        if (node && node.gnbNodeId) {
-          try {
-            // 复用池化连接(旧 IP，尚未 disconnect)
-            const netmask = node.netmask || '255.255.255.0';
-            const sedCmd = `sudo sed -i 's/^${node.gnbNodeId}|.*/${node.gnbNodeId}|${node.tunAddr}|${netmask}/' /opt/gnb/conf/${node.gnbNodeId}/address.conf`;
-            const { code, stderr } = await sshManager.exec(node, `${sedCmd} && sync && nohup bash -c 'sleep 1 && sudo systemctl restart gnb' >/dev/null 2>&1 &`, 15000);
-            result.remoteSync = code === 0 ? 'ok' : `exit ${code}: ${stderr}`;
-          } catch (err) {
-            result.remoteSync = `failed: ${err.message}`;
-            console.error(`[NodeUpdate] 远程同步失败: ${err.message}`);
-          }
-        }
-      }
+      if (remoteSync) result.remoteSync = remoteSync;
 
       res.json(result);
     });
