@@ -1,57 +1,100 @@
 'use strict';
 
 const EventEmitter = require('events');
-const SSHManager = require('./ssh-manager');
-const { parseGnbCtlStatus, parseGnbCtlAddressList } = require('./gnb-parser');
 
 /**
- * GNB 节点监控服务
- * 定时通过 SSH 执行 gnb_ctl 采集各节点状态
+ * GNB 节点监控服务（V3 推模式）
+ *
+ * 节点通过 node-agent.sh 定时采集 GNB + OpenClaw + 系统信息，
+ * POST 到 Console /api/monitor/report。GnbMonitor 被动接收并更新状态。
+ *
+ * 不再主动 SSH 轮询节点。
  */
 class GnbMonitor extends EventEmitter {
   /**
    * @param {Array} nodesConfig - 节点配置数组
    * @param {object} [options]
-   * @param {number} [options.intervalMs=10000] - 采集间隔
+   * @param {number} [options.staleTimeoutMs=30000] - 超时判定阈值
    */
   constructor(nodesConfig, options = {}) {
     super();
     this.nodesConfig = nodesConfig;
-    this.intervalMs = options.intervalMs || 10000;
-    this.sshManager = new SSHManager();
+    this.staleTimeoutMs = options.staleTimeoutMs || 30000;
     /** @alpha: 指标时序存储 */
     this.metricsStore = options.metricsStore || null;
 
     /** @type {Map<string, object>} 最新的节点状态快照 */
     this.latestState = new Map();
 
-    /** @type {Map<string, number>} 节点连续 SSH 失败计数 */
-    this._failCounts = new Map();
-    /** @type {number} 上次 GNB 自动重启时间戳 */
-    this._lastGnbRestart = 0;
-
-    this._timer = null;
+    this._staleTimer = null;
   }
 
   /**
-   * 启动监控循环
+   * 启动超时检测循环
    */
   start() {
-    console.log(`[GnbMonitor] 启动，${this.nodesConfig.length} 个节点，间隔 ${this.intervalMs}ms`);
-    this._poll();
-    this._timer = setInterval(() => this._poll(), this.intervalMs);
+    console.log(`[GnbMonitor] 推模式已启动，超时阈值 ${this.staleTimeoutMs}ms`);
+    this._staleTimer = setInterval(() => this._checkStale(), 10000);
   }
 
   /**
    * 停止监控
    */
   stop() {
-    if (this._timer) {
-      clearInterval(this._timer);
-      this._timer = null;
+    if (this._staleTimer) {
+      clearInterval(this._staleTimer);
+      this._staleTimer = null;
     }
-    this.sshManager.closeAll();
     console.log('[GnbMonitor] 已停止');
+  }
+
+  /**
+   * 接收节点上报数据
+   * @param {string} nodeId - 节点 ID
+   * @param {object} report - 上报的 JSON 数据
+   */
+  ingest(nodeId, report) {
+    const now = new Date().toISOString();
+
+    // 解析 GNB 状态
+    const { parseGnbCtlStatus, parseGnbCtlAddressList } = require('./gnb-parser');
+    const statusData = parseGnbCtlStatus(report.gnbStatus || '');
+    const addrData = parseGnbCtlAddressList(report.gnbAddresses || '');
+    const sysInfo = this._parseSysInfo(report.sysInfo || '');
+
+    const state = {
+      online: true,
+      lastUpdate: now,
+      sshLatencyMs: report.collectMs || 0,
+      core: statusData.core,
+      nodes: statusData.nodes,
+      addresses: addrData,
+      sysInfo,
+      openclaw: report.openclaw || null,
+      error: null,
+    };
+
+    this.latestState.set(nodeId, state);
+
+    // 记录指标到时序存储
+    if (this.metricsStore) {
+      const memPct = sysInfo.memTotalMB > 0 ? Math.round(sysInfo.memUsedMB / sysInfo.memTotalMB * 100) : 0;
+      const diskPct = sysInfo.diskUsePct ? parseInt(sysInfo.diskUsePct) : 0;
+      const peers = statusData.nodes || [];
+      this.metricsStore.record(nodeId, {
+        cpu: sysInfo.cpuUsage ?? 0,
+        memPct,
+        diskPct,
+        sshLatency: report.collectMs || 0,
+        loadAvg: sysInfo.loadAvg || '0',
+        p2pDirect: peers.filter(p => p.status === 'Direct').length,
+        p2pTotal: peers.length,
+        memTotalMB: sysInfo.memTotalMB || 0,
+        memUsedMB: sysInfo.memUsedMB || 0,
+      });
+    }
+
+    this.emit('update', this.getAllStatus());
   }
 
   /**
@@ -85,128 +128,19 @@ class GnbMonitor extends EventEmitter {
   }
 
   /**
-   * 单次轮询所有节点
+   * 检查超时节点，标记为离线
    * @private
    */
-  async _poll() {
-    const promises = this.nodesConfig.map(node => this._pollNode(node));
-    await Promise.allSettled(promises);
-    this.emit('update', this.getAllStatus());
-  }
-
-  /**
-   * 采集单个节点状态
-   * @private
-   */
-  async _pollNode(nodeConfig) {
-    const startTime = Date.now();
-
-    try {
-      // 1) gnb_ctl 状态
-      const statusCmd = `${nodeConfig.gnbCtlPath || 'gnb_ctl'} -b ${nodeConfig.gnbMapPath} -s`;
-      const statusResult = await this.sshManager.exec(nodeConfig, statusCmd);
-
-      // 2) gnb_ctl 地址列表
-      const addrCmd = `${nodeConfig.gnbCtlPath || 'gnb_ctl'} -b ${nodeConfig.gnbMapPath} -a`;
-      const addrResult = await this.sshManager.exec(nodeConfig, addrCmd);
-
-      // 3) 系统信息 — 一条命令采集全部
-      const sysCmd = [
-        'echo "::HOSTNAME::$(hostname)"',
-        'echo "::OS::$(cat /etc/os-release 2>/dev/null | grep PRETTY_NAME | cut -d= -f2 | tr -d \\")"',
-        'echo "::KERNEL::$(uname -r)"',
-        'echo "::ARCH::$(uname -m)"',
-        'echo "::UPTIME::$(uptime -p 2>/dev/null || uptime)"',
-        'echo "::LOAD::$(cat /proc/loadavg 2>/dev/null | cut -d" " -f1-3 || sysctl -n vm.loadavg 2>/dev/null)"',
-        'echo "::CPU_MODEL::$(grep "model name" /proc/cpuinfo 2>/dev/null | head -1 | cut -d: -f2 | xargs || sysctl -n machdep.cpu.brand_string 2>/dev/null)"',
-        'echo "::CPU_CORES::$(nproc 2>/dev/null || sysctl -n hw.ncpu 2>/dev/null)"',
-        'echo "::MEM::$(free -m 2>/dev/null | awk \'NR==2{printf "%s %s %s", $2, $3, $7}\' || echo "")"',
-        'echo "::DISK::$(df -h / 2>/dev/null | awk \'NR==2{printf "%s %s %s %s", $2, $3, $4, $5}\')"',
-        // @alpha: CPU 利用率采集
-        'echo "::CPU_USAGE::$(grep \'cpu \' /proc/stat 2>/dev/null | awk \'{u=$2+$4; t=$2+$4+$5; if(t>0) printf "%d", u*100/t; else print "0"}\'  || echo "0")"',
-      ].join(' && ');
-      const sysResult = await this.sshManager.exec(nodeConfig, sysCmd);
-      const sysInfo = this._parseSysInfo(sysResult.stdout);
-
-      const statusData = parseGnbCtlStatus(statusResult.stdout);
-      const addrData = parseGnbCtlAddressList(addrResult.stdout);
-      const elapsed = Date.now() - startTime;
-
-      // 连接恢复，重置失败计数
-      this._failCounts.set(nodeConfig.id, 0);
-
-      this.latestState.set(nodeConfig.id, {
-        online: true,
-        lastUpdate: new Date().toISOString(),
-        sshLatencyMs: elapsed,
-        core: statusData.core,
-        nodes: statusData.nodes,
-        addresses: addrData,
-        sysInfo,
-        error: null,
-      });
-
-      // @alpha: 记录指标到时序存储
-      if (this.metricsStore) {
-        const memPct = sysInfo.memTotalMB > 0 ? Math.round(sysInfo.memUsedMB / sysInfo.memTotalMB * 100) : 0;
-        const diskPct = sysInfo.diskUsePct ? parseInt(sysInfo.diskUsePct) : 0;
-        const peers = statusData.nodes || [];
-        this.metricsStore.record(nodeConfig.id, {
-          cpu: sysInfo.cpuUsage ?? 0,
-          memPct,
-          diskPct,
-          sshLatency: elapsed,
-          loadAvg: sysInfo.loadAvg || '0',
-          p2pDirect: peers.filter(p => p.status === 'Direct').length,
-          p2pTotal: peers.length,
-          memTotalMB: sysInfo.memTotalMB || 0,
-          memUsedMB: sysInfo.memUsedMB || 0,
-        });
-      }
-    } catch (err) {
-      // 递增连续失败计数
-      const prevFails = this._failCounts.get(nodeConfig.id) || 0;
-      this._failCounts.set(nodeConfig.id, prevFails + 1);
-
-      this.latestState.set(nodeConfig.id, {
-        online: false,
-        lastUpdate: new Date().toISOString(),
-        sshLatencyMs: -1,
-        core: {},
-        nodes: [],
-        addresses: [],
-        sysInfo: {},
-        error: err.message,
-      });
-
-      // 连续失败 >= 3 次 (约 30s) → 自动重启 Console GNB 强制 P2P 重新发现
-      if (prevFails + 1 >= 3) {
-        this._tryRecoverGnb(nodeConfig.id, prevFails + 1);
-      }
-    }
-  }
-
-  /**
-   * 尝试重启本地 GNB 以恢复 P2P 隧道
-   * 根因: 终端重启/OOM 后 Console GNB 的 P2P 打洞状态失效，
-   *       需要重启才能通过 index 节点重新发现对端
-   * @private
-   */
-  async _tryRecoverGnb(nodeId, failCount) {
-    // 防止频繁重启: 每 60s 最多一次
+  _checkStale() {
     const now = Date.now();
-    if (now - this._lastGnbRestart < 60000) return;
-    this._lastGnbRestart = now;
-
-    console.log(`[GnbMonitor] 节点 ${nodeId} 连续 ${failCount} 次不可达，重启 GNB 尝试恢复 P2P 隧道...`);
-    try {
-      const { execSync } = require('child_process');
-      execSync('sudo systemctl restart gnb 2>/dev/null || true', { timeout: 15000 });
-      console.log('[GnbMonitor] GNB 已重启，等待 P2P 重新发现');
-      // 重置该节点失败计数（给恢复留时间）
-      this._failCounts.set(nodeId, 0);
-    } catch (e) {
-      console.error(`[GnbMonitor] GNB 重启失败: ${e.message}`);
+    for (const [nodeId, state] of this.latestState) {
+      if (!state.online) continue;
+      const lastMs = new Date(state.lastUpdate).getTime();
+      if (now - lastMs > this.staleTimeoutMs) {
+        state.online = false;
+        state.error = `超过 ${Math.round(this.staleTimeoutMs / 1000)}s 无上报`;
+        this.emit('stale', nodeId);
+      }
     }
   }
 
@@ -250,7 +184,6 @@ class GnbMonitor extends EventEmitter {
           }
           break;
         }
-        // @alpha: CPU 利用率
         case 'CPU_USAGE': info.cpuUsage = parseInt(v, 10) || 0; break;
       }
     }

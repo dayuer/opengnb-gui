@@ -380,10 +380,69 @@ READY_RESP=$(curl -sS -X POST "$API_BASE/api/enroll/$NODE_ID/ready" \
 
 echo "      $(echo "$READY_RESP" | json_val message)"
 
+# ============================================
+# Step 10: 安装监控 Agent（推模式）
+# ============================================
+echo "[10/10] 安装监控 Agent..."
+
+# 下载 agent 脚本
+curl -sSf "$API_BASE/api/enroll/node-agent.sh" -o /opt/gnb/bin/node-agent.sh 2>/dev/null \
+  || echo "      ⚠️ 从 Console 下载 agent 失败，跳过"
+chmod +x /opt/gnb/bin/node-agent.sh 2>/dev/null || true
+
+# 获取节点 token（OpenClaw 的 token 会在 provisioning 后分配，先用 passcode 占位）
+NODE_TOKEN="${PASSCODE}"
+
+# 创建 agent 环境配置
+cat > /opt/gnb/bin/agent.env << AGENTEOF
+CONSOLE_URL=$API_BASE
+NODE_TOKEN=$NODE_TOKEN
+GNB_NODE_ID=$GNB_NODE_ID
+GNB_MAP_PATH=/opt/gnb/conf/$GNB_NODE_ID/gnb.map
+GNB_CTL=gnb_ctl
+CLAW_PORT=18789
+AGENTEOF
+
+if command -v systemctl &>/dev/null; then
+  # systemd service
+  cat > /etc/systemd/system/gnb-agent.service << SVCEOF
+[Unit]
+Description=GNB Node Monitor Agent
+After=gnb.service
+
+[Service]
+Type=oneshot
+EnvironmentFile=/opt/gnb/bin/agent.env
+ExecStart=/opt/gnb/bin/node-agent.sh
+SVCEOF
+
+  # systemd timer（每 10s 触发）
+  cat > /etc/systemd/system/gnb-agent.timer << TMREOF
+[Unit]
+Description=GNB Agent Timer
+
+[Timer]
+OnBootSec=15
+OnUnitActiveSec=10
+
+[Install]
+WantedBy=timers.target
+TMREOF
+
+  systemctl daemon-reload
+  systemctl enable gnb-agent.timer
+  systemctl start gnb-agent.timer
+  echo "      ✅ Agent 已安装（systemd timer 每 10s）"
+else
+  # 降级：crontab
+  (crontab -l 2>/dev/null; echo "* * * * * /opt/gnb/bin/node-agent.sh") | sort -u | crontab -
+  echo "      ✅ Agent 已安装（cron 每分钟）"
+fi
+
 echo ""
 echo "  ╔══════════════════════════════════════╗"
 echo "  ║  ✅ 初始化完成                        ║"
 echo "  ║  GNB TUN: $TUN_ADDR                  ║"
-echo "  ║  Console 将通过 SSH 远程管理此节点     ║"
+echo "  ║  Agent: 推模式监控已启动              ║"
 echo "  ╚══════════════════════════════════════╝"
 echo ""

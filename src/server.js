@@ -89,7 +89,7 @@ async function boot() {
   const metricsStore = new MetricsStore({ metricsPath: dataPaths.registry.metrics });
 
   const monitor = new GnbMonitor(approvedNodes, {
-    intervalMs: parseInt(process.env.POLL_INTERVAL_MS || '10000', 10),
+    staleTimeoutMs: parseInt(process.env.STALE_TIMEOUT_MS || '30000', 10),
     metricsStore,
   });
 
@@ -113,7 +113,7 @@ async function boot() {
   keyManager.onApproval = (updatedNodes) => {
     monitor.nodesConfig = updatedNodes;
     aiOps.nodesConfig = updatedNodes;
-    if (!monitor._timer && updatedNodes.length > 0) monitor.start();
+    if (!monitor._staleTimer && updatedNodes.length > 0) monitor.start();
     console.log(`[Approval] 监控已更新: ${updatedNodes.length} 个节点`);
   };
 
@@ -140,6 +140,20 @@ async function boot() {
 
   // --- API 路由 ---
 
+  // V3 推模式：节点 agent 上报（无需 Console 认证，使用节点 token）
+  app.post('/api/monitor/report', express.json({ limit: '64kb' }), (req, res) => {
+    const token = (req.headers.authorization || '').replace('Bearer ', '').trim();
+    if (!token) return res.status(401).json({ error: '缺少认证' });
+
+    // 通过 token 查找对应节点
+    const allNodes = keyManager.getAllNodes();
+    const node = allNodes.find(n => n.status === 'approved' && n.clawToken === token);
+    if (!node) return res.status(403).json({ error: '无效 token 或节点未审批' });
+
+    monitor.ingest(node.id, req.body);
+    res.json({ success: true, nodeId: node.id });
+  });
+
   // 需认证 + 审计的管理路由
   app.use('/api/nodes', requireAuth, audit.middleware('nodes'), createNodesRouter(monitor, sshManager, monitor.nodesConfig, keyManager, metricsStore));
   app.use('/api/ai', requireAuth, strictLimit, audit.middleware('ai_ops'), createAiRouter(aiOps, saveOpsLog));
@@ -147,6 +161,10 @@ async function boot() {
   // 初始化脚本下载（公开，必须在 enroll 路由之前注册）
   app.get('/api/enroll/init.sh', (req, res) => {
     const scriptPath = path.resolve(__dirname, '../scripts/initnode.sh');
+    res.type('text/plain').sendFile(scriptPath);
+  });
+  app.get('/api/enroll/node-agent.sh', (req, res) => {
+    const scriptPath = path.resolve(__dirname, '../scripts/node-agent.sh');
     res.type('text/plain').sendFile(scriptPath);
   });
   app.get('/api/enroll/setup.sh', (req, res) => {
