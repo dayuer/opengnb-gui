@@ -79,41 +79,126 @@ function createNodesRouter(monitor, sshManager, nodesConfig, keyManager, metrics
     res.json(status);
   });
 
-  // @alpha: PUT /api/nodes/:id — 编辑节点信息 + 远程 GNB 同步
+  // @alpha: PUT /api/nodes/:id — 编辑节点信息 + 远程 GNB 同步 (verify-then-save)
   if (keyManager) {
+    const { exec: execCmd } = require('child_process');
+    const pingCheck = (ip, tries = 3) => new Promise(resolve => {
+      execCmd(`ping -c ${tries} -W 3 ${ip}`, err => resolve(!err));
+    });
+
     router.put('/:id', async (req, res) => {
       const { name, tunAddr, sshPort, sshUser } = req.body;
-      let remoteSync = null;
 
-      // 时序关键: 在 updateNode 之前通过旧 SSH 连接远程同步
-      // updateNode 会同步触发 onNodeUpdate → disconnect()，清除 SSH 池
-      if (tunAddr) {
-        const oldNode = keyManager.getApprovedNodesConfig().find(n => n.id === req.params.id);
-        if (oldNode && oldNode.gnbNodeId && oldNode.tunAddr && oldNode.tunAddr !== String(tunAddr).trim()) {
-          try {
-            const netmask = oldNode.netmask || '255.255.255.0';
-            const newIp = String(tunAddr).trim();
-            const sedCmd = `sudo sed -i 's/^${oldNode.gnbNodeId}|.*/${oldNode.gnbNodeId}|${newIp}|${netmask}/' /opt/gnb/conf/${oldNode.gnbNodeId}/address.conf`;
-            const { code, stderr } = await sshManager.exec(oldNode, `${sedCmd} && sync && nohup bash -c 'sleep 1 && sudo systemctl restart gnb' >/dev/null 2>&1 &`, 15000);
-            remoteSync = code === 0 ? 'ok' : `exit ${code}: ${stderr}`;
-            console.log(`[RemoteSync] ${req.params.id}: ${oldNode.tunAddr} → ${newIp} (${remoteSync})`);
-          } catch (err) {
-            remoteSync = `failed: ${err.message}`;
-            console.error(`[RemoteSync] 失败: ${err.message}`);
-          }
+      // 非 tunAddr 变更 → 直接保存（无需远程同步）
+      const oldNode = tunAddr ? keyManager.getApprovedNodesConfig().find(n => n.id === req.params.id) : null;
+      const needRemoteSync = oldNode && oldNode.gnbNodeId && oldNode.tunAddr
+        && oldNode.tunAddr !== String(tunAddr || '').trim();
+
+      if (!needRemoteSync) {
+        const result = keyManager.updateNode(req.params.id, { name, tunAddr, sshPort, sshUser });
+        if (!result.success) {
+          const status = result.message.includes('不存在') ? 404
+            : result.code === 'CONFLICT' ? 409 : 400;
+          return res.status(status).json({ error: result.message });
         }
+        return res.json(result);
       }
 
-      // 本地持久化（触发 onNodeUpdate → disconnect + 刷新 monitor/aiOps）
-      const result = keyManager.updateNode(req.params.id, { name, tunAddr, sshPort, sshUser });
-      if (!result.success) {
-        const status = result.message.includes('不存在') ? 404
-          : result.code === 'CONFLICT' ? 409 : 400;
-        return res.status(status).json({ error: result.message });
-      }
-      if (remoteSync) result.remoteSync = remoteSync;
+      // ═══ tunAddr 变更：verify-then-save 流程 ═══
+      const newIp = String(tunAddr).trim();
+      const netmask = oldNode.netmask || '255.255.255.0';
+      const gnbId = oldNode.gnbNodeId;
+      const confPath = `/opt/gnb/conf/${gnbId}/address.conf`;
+      const indexIp = '10.1.0.1'; // TODO: 从配置读取
 
-      res.json(result);
+      console.log(`[RemoteSync] 开始 verify-then-save: ${oldNode.tunAddr} → ${newIp}`);
+
+      // Step 1: SSH 到节点 → 备份 + sed + 部署自愈重启脚本
+      try {
+        const setupCmd = [
+          `sudo cp ${confPath} ${confPath}.bak`,
+          `sudo sed -i 's/^${gnbId}|.*/${gnbId}|${newIp}|${netmask}/' ${confPath}`,
+          'sync',
+          // 自愈脚本：重启 GNB → 等待 → ping index → 失败则回滚
+          `cat > /tmp/gnb-verify.sh << 'HEALEOF'\n` +
+          `#!/bin/bash\n` +
+          `sudo systemctl restart gnb\n` +
+          `sleep 4\n` +
+          `if ping -c 2 -W 3 ${indexIp} > /dev/null 2>&1; then\n` +
+          `  sudo rm -f ${confPath}.bak\n` +
+          `  echo SUCCESS > /tmp/gnb-verify-result\n` +
+          `else\n` +
+          `  sudo cp ${confPath}.bak ${confPath}\n` +
+          `  sudo systemctl restart gnb\n` +
+          `  echo ROLLBACK > /tmp/gnb-verify-result\n` +
+          `fi\nHEALEOF`,
+          'chmod +x /tmp/gnb-verify.sh',
+          'nohup bash /tmp/gnb-verify.sh > /dev/null 2>&1 &',
+        ].join(' && ');
+        await sshManager.exec(oldNode, setupCmd, 15000);
+        console.log(`[RemoteSync] 节点自愈脚本已部署并启动`);
+      } catch (err) {
+        console.error(`[RemoteSync] SSH 执行失败: ${err.message}`);
+        return res.status(503).json({
+          error: `远程同步失败: ${err.message}`,
+          hint: '节点不可达，IP 未变更。请检查 SSH 连接后重试。',
+        });
+      }
+
+      // Step 2: 更新 index address.conf（本地 fs）
+      const indexConfPath = keyManager.gnbConfDir
+        ? require('path').join(keyManager.gnbConfDir, 'address.conf') : null;
+      let indexOldContent = null;
+      if (indexConfPath && require('fs').existsSync(indexConfPath)) {
+        indexOldContent = require('fs').readFileSync(indexConfPath, 'utf8');
+        const regex = new RegExp(`^${gnbId}\\|.*$`, 'm');
+        const newEntry = `${gnbId}|${newIp}|${netmask}`;
+        const updated = regex.test(indexOldContent)
+          ? indexOldContent.replace(regex, newEntry)
+          : indexOldContent.trimEnd() + '\n' + newEntry;
+        require('fs').writeFileSync(indexConfPath, updated);
+        console.log(`[RemoteSync] Index address.conf 已更新: ${newEntry}`);
+      }
+
+      // Step 3: 重启 index GNB（使新路由生效）
+      try {
+        await new Promise((resolve, reject) => {
+          execCmd('systemctl restart gnb', { timeout: 10000 }, (err) => err ? reject(err) : resolve());
+        });
+        console.log(`[RemoteSync] Index GNB 已重启`);
+      } catch (err) {
+        console.error(`[RemoteSync] Index GNB 重启失败: ${err.message}`);
+      }
+
+      // Step 4: 等待双方 P2P 重建 + ping 验证
+      await new Promise(r => setTimeout(r, 8000));
+      const reachable = await pingCheck(newIp);
+
+      if (reachable) {
+        // Step 5a: 验证通过 → 保存本地
+        console.log(`[RemoteSync] ✅ ${newIp} 验证通过，保存`);
+        const result = keyManager.updateNode(req.params.id, { name, tunAddr, sshPort, sshUser });
+        if (!result.success) return res.status(400).json({ error: result.message });
+        result.remoteSync = 'verified';
+        return res.json(result);
+      }
+
+      // Step 5b: 验证失败 → 回滚 index（节点侧由自愈脚本处理）
+      console.error(`[RemoteSync] ❌ ${newIp} 不可达，回滚 index`);
+      if (indexOldContent && indexConfPath) {
+        require('fs').writeFileSync(indexConfPath, indexOldContent);
+        try {
+          await new Promise((resolve, reject) => {
+            execCmd('systemctl restart gnb', { timeout: 10000 }, (err) => err ? reject(err) : resolve());
+          });
+        } catch (_) { /* best effort */ }
+      }
+
+      return res.status(503).json({
+        error: `IP 切换验证失败`,
+        hint: `${newIp} 不可达，已回滚。节点端自愈脚本将自动恢复 ${oldNode.tunAddr}。`,
+        remoteSync: 'rollback',
+      });
     });
   }
 

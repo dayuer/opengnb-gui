@@ -1296,7 +1296,9 @@ async function saveNodeEdit(e, nodeId) {
     });
     const data = await res.json();
     if (!res.ok) {
-      errEl.textContent = data.error || '保存失败';
+      // @alpha: 503 = 远程同步失败（IP 未变更），其他错误照常显示
+      const msg = data.hint || data.error || '保存失败';
+      errEl.textContent = msg;
       errEl.style.display = 'block';
       btn.disabled = false; btn.textContent = '保存';
       return;
