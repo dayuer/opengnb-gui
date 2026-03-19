@@ -89,7 +89,7 @@ async function boot() {
   const metricsStore = new MetricsStore({ metricsPath: dataPaths.registry.metrics });
 
   const monitor = new GnbMonitor(approvedNodes, {
-    staleTimeoutMs: parseInt(process.env.STALE_TIMEOUT_MS || '30000', 10),
+    staleTimeoutMs: parseInt(process.env.STALE_TIMEOUT_MS || '60000', 10),
     metricsStore,
   });
 

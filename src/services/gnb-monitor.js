@@ -14,12 +14,12 @@ class GnbMonitor extends EventEmitter {
   /**
    * @param {Array} nodesConfig - 节点配置数组
    * @param {object} [options]
-   * @param {number} [options.staleTimeoutMs=30000] - 超时判定阈值
+   * @param {number} [options.staleTimeoutMs=60000] - 离线判定（默认 6 个上报周期）
    */
   constructor(nodesConfig, options = {}) {
     super();
     this.nodesConfig = nodesConfig;
-    this.staleTimeoutMs = options.staleTimeoutMs || 30000;
+    this.staleTimeoutMs = options.staleTimeoutMs || 60000;
     /** @alpha: 指标时序存储 */
     this.metricsStore = options.metricsStore || null;
 
@@ -33,7 +33,7 @@ class GnbMonitor extends EventEmitter {
    * 启动超时检测循环
    */
   start() {
-    console.log(`[GnbMonitor] 推模式已启动，超时阈值 ${this.staleTimeoutMs}ms`);
+    console.log(`[GnbMonitor] 推模式已启动，${this.staleTimeoutMs / 1000}s 无上报判定离线`);
     this._staleTimer = setInterval(() => this._checkStale(), 10000);
   }
 
