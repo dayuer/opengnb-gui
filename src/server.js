@@ -123,12 +123,32 @@ async function boot() {
     provisioner.provision(nodeConfig, { installGnb: false, installClaw: true });
   };
 
-  // @alpha: 编辑回调：同步运行时配置，必要时断开旧 SSH 连接
-  keyManager.onNodeUpdate = (nodeId, changedFields) => {
+  // @alpha: 编辑回调：同步运行时配置 + 远程 GNB 热重载
+  keyManager.onNodeUpdate = async (nodeId, changedFields) => {
+    // tunAddr 变更: 通过旧 SSH 连接远程同步节点的 GNB 配置
+    if (changedFields.includes('tunAddr')) {
+      const node = keyManager.getApprovedNodesConfig().find(n => n.id === nodeId);
+      if (node && node.gnbNodeId) {
+        try {
+          // 复用旧池化连接(旧 IP) — 必须在 disconnect 之前执行
+          const sedCmd = `sudo sed -i 's/^${node.gnbNodeId}|.*/${node.gnbNodeId}|${node.tunAddr}|255.255.255.0/' /opt/gnb/conf/${node.gnbNodeId}/address.conf`;
+          const restartCmd = 'sudo systemctl restart gnb';
+          const { stdout, stderr, code } = await sshManager.exec(node, `${sedCmd} && ${restartCmd}`, 20000);
+          if (code === 0) {
+            console.log(`[NodeUpdate] 远程 GNB 同步完成: ${nodeId} → ${node.tunAddr}`);
+          } else {
+            console.error(`[NodeUpdate] 远程 GNB 同步异常 (exit ${code}): ${stderr || stdout}`);
+          }
+        } catch (err) {
+          console.error(`[NodeUpdate] 远程同步失败 (非阻塞): ${err.message}`);
+        }
+      }
+    }
+
     const updated = keyManager.getApprovedNodesConfig();
     monitor.nodesConfig = updated;
     aiOps.nodesConfig = updated;
-    // tunAddr 或 sshPort 或 sshUser 变更时，旧 SSH 连接不再可用
+    // tunAddr/sshPort/sshUser 变更时，旧 SSH 连接不再可用
     if (changedFields.some(f => ['tunAddr', 'sshPort', 'sshUser'].includes(f))) {
       sshManager.disconnect(nodeId);
     }
