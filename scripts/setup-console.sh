@@ -511,7 +511,7 @@ fi
 
 if [ ! -f "$GNB_CONF/route.conf" ]; then
     cat > "$GNB_CONF/route.conf" << GNBEOF
-${GNB_NODE_ID}|${GNB_TUN_ADDR}|255.255.255.0
+${GNB_NODE_ID}|${GNB_TUN_ADDR}|255.0.0.0
 GNBEOF
 fi
 
@@ -520,7 +520,7 @@ CONSOLE_PUBLIC_IP=$(curl -sS --max-time 3 ifconfig.me 2>/dev/null || hostname -I
 if [ ! -f "$GNB_CONF/address.conf" ]; then
     cat > "$GNB_CONF/address.conf" << GNBEOF
 i|0|${CONSOLE_PUBLIC_IP}|9001
-${GNB_NODE_ID}|${GNB_TUN_ADDR}|255.255.255.0
+${GNB_NODE_ID}|${GNB_TUN_ADDR}|255.0.0.0
 GNBEOF
 fi
 

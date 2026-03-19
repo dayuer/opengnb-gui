@@ -233,8 +233,8 @@ else
     echo "      API 不可用，使用最小配置（仅 Console + 自身）"
     cat > "$GNB_CONF/address.conf" << GNBEOF
 i|0|${CONSOLE_IP}|9001
-${CONSOLE_GNB_NODE_ID}|${CONSOLE_GNB_TUN_ADDR}|255.255.255.0
-${GNB_NODE_ID}|${TUN_ADDR}|255.255.255.0
+${CONSOLE_GNB_NODE_ID}|${CONSOLE_GNB_TUN_ADDR}|255.0.0.0
+${GNB_NODE_ID}|${TUN_ADDR}|255.0.0.0
 GNBEOF
 fi
 

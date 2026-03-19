@@ -240,11 +240,11 @@ class KeyManager {
 
     const lines = [indexLine];
     // Console 自身
-    lines.push(`${this.gnbNodeId}|${this.gnbTunAddr}|255.255.255.0`);
+    lines.push(`${this.gnbNodeId}|${this.gnbTunAddr}|255.0.0.0`);
     // 所有已审批节点
     for (const node of this.nodes) {
       if (node.status === 'approved' && node.gnbNodeId && node.tunAddr) {
-        lines.push(`${node.gnbNodeId}|${node.tunAddr}|${node.netmask || '255.255.255.0'}`);
+        lines.push(`${node.gnbNodeId}|${node.tunAddr}|${node.netmask || '255.0.0.0'}`);
       }
     }
     return lines.join('\n') + '\n';

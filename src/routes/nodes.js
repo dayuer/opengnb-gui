@@ -104,7 +104,7 @@ function createNodesRouter(monitor, sshManager, nodesConfig, keyManager, metrics
 
       // ═══ tunAddr 变更：modify → verify → save → restart ═══
       const newIp = String(tunAddr).trim();
-      const netmask = oldNode.netmask || '255.255.255.0';
+      const netmask = oldNode.netmask || '255.0.0.0';
       const gnbId = oldNode.gnbNodeId;
       const confPath = `/opt/gnb/conf/${gnbId}/address.conf`;
       const expectedLine = `${gnbId}|${newIp}|${netmask}`;
