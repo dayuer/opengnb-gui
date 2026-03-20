@@ -14,6 +14,7 @@ const crypto = require('crypto');
 const JWT_EXPIRES = 24 * 60 * 60; // 24h（秒）
 let _adminToken = process.env.ADMIN_TOKEN || '';
 let _jwtSecret = '';
+let _store = null; // NodeStore 实例（用于 apiToken 查找）
 
 // --- Base64url ---
 const b64url = (buf) => Buffer.from(buf).toString('base64url');
@@ -24,6 +25,11 @@ const b64urlDecode = (str) => Buffer.from(str, 'base64url');
 /** @alpha: 设置 JWT 密钥（由 server.js 在启动时调用） */
 function setJwtSecret(secret) {
   _jwtSecret = secret;
+}
+
+/** @alpha: 注入 NodeStore（用于 apiToken 查找） */
+function setStore(store) {
+  _store = store;
 }
 
 /** 签发 JWT */
@@ -112,7 +118,16 @@ function requireAuth(req, res, next) {
     return next();
   }
 
-  // 2. 回退 ADMIN_TOKEN
+  // 2. 尝试 apiToken（10 字符短 token）
+  if (_store && token.length <= 20) {
+    const user = _store._stmts.findUserByApiToken.get(token);
+    if (user) {
+      req.user = { userId: user.id, username: user.username, role: user.role };
+      return next();
+    }
+  }
+
+  // 3. 回退 ADMIN_TOKEN
   if (_adminToken && timingSafeEqual(token, _adminToken)) {
     req.user = { userId: 'admin', username: 'admin', role: 'admin' };
     return next();
@@ -132,6 +147,6 @@ function timingSafeEqual(a, b) {
 
 module.exports = {
   requireAuth, initToken, getAdminToken,
-  setJwtSecret, signJwt, verifyJwt,
+  setJwtSecret, setStore, signJwt, verifyJwt,
   hashPassword, verifyPassword,
 };

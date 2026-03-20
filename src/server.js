@@ -21,7 +21,7 @@ const createClawRouter = require('./routes/claw');
 const createAuthRouter = require('./routes/auth');
 const createJobsRouter = require('./routes/jobs');
 const ClawRPC = require('./services/claw-rpc');
-const { requireAuth, initToken, getAdminToken, setJwtSecret, hashPassword, verifyJwt } = require('./middleware/auth');
+const { requireAuth, initToken, getAdminToken, setJwtSecret, setStore, hashPassword, verifyJwt } = require('./middleware/auth');
 const { createRateLimit } = require('./middleware/rate-limit');
 const { errorHandler } = require('./middleware/error-handler');
 const { resolvePaths, ensureDataDirs } = require('./services/data-paths');
@@ -91,6 +91,7 @@ async function boot() {
 
   // @alpha: 首次启动自动创建 admin 用户
   const store = keyManager.store;
+  setStore(store);
 
   // @alpha: 异步 Job 管理器（SQLite 持久化）
   const JobManager = require('./services/job-manager');
@@ -99,10 +100,13 @@ async function boot() {
     const crypto = require('crypto');
     const tempPwd = crypto.randomBytes(8).toString('hex');
     const id = crypto.randomBytes(8).toString('hex');
+    const apiToken = crypto.randomBytes(5).toString('hex'); // 10 char
     store.insertUser({ id, username: 'admin', passwordHash: hashPassword(tempPwd) });
+    store._stmts.updateApiToken.run(apiToken, id);
     console.log(`\n  👤 首次启动，已创建管理员账号:`);
     console.log(`     用户名: admin`);
     console.log(`     密码:   ${tempPwd}`);
+    console.log(`     API Token: ${apiToken}`);
     console.log(`     ⚠️  请登录后及时修改密码\n`);
   }
 

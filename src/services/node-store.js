@@ -108,6 +108,7 @@ class NodeStore {
         username TEXT NOT NULL UNIQUE,
         passwordHash TEXT NOT NULL,
         role TEXT DEFAULT 'admin',
+        apiToken TEXT DEFAULT '',
         createdAt TEXT
       );
 
@@ -127,6 +128,11 @@ class NodeStore {
       CREATE INDEX IF NOT EXISTS idx_jobs_status ON jobs(status);
       CREATE INDEX IF NOT EXISTS idx_jobs_created ON jobs(createdAt);
     `);
+
+    // @alpha: 向后兼容迁移 — 旧 db 的 users 表可能缺少 apiToken 列
+    try {
+      this.db.exec(`ALTER TABLE users ADD COLUMN apiToken TEXT DEFAULT ''`);
+    } catch { /* 列已存在，忽略 */ }
   }
 
   /** @private 预编译常用语句 */
@@ -198,9 +204,11 @@ class NodeStore {
       ),
       findUserByName: this.db.prepare('SELECT * FROM users WHERE username = ?'),
       findUserById: this.db.prepare('SELECT * FROM users WHERE id = ?'),
-      allUsers: this.db.prepare('SELECT id, username, role, createdAt FROM users ORDER BY createdAt'),
+      findUserByApiToken: this.db.prepare('SELECT * FROM users WHERE apiToken = ?'),
+      allUsers: this.db.prepare('SELECT id, username, role, apiToken, createdAt FROM users ORDER BY createdAt'),
       removeUser: this.db.prepare('DELETE FROM users WHERE id = ?'),
       userCount: this.db.prepare('SELECT COUNT(*) AS cnt FROM users'),
+      updateApiToken: this.db.prepare('UPDATE users SET apiToken = ? WHERE id = ?'),
       // @alpha: 异步 job
       insertJob: this.db.prepare(
         `INSERT INTO jobs (id, nodeId, command, status, createdAt)

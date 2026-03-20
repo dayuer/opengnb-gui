@@ -35,7 +35,14 @@ function createAuthRouter(store) {
       role: user.role,
     });
 
-    res.json({ token, expiresIn: '24h', username: user.username, role: user.role });
+    // @alpha: 若用户尚无 apiToken 则自动生成
+    let apiToken = user.apiToken || '';
+    if (!apiToken) {
+      apiToken = crypto.randomBytes(5).toString('hex');
+      store._stmts.updateApiToken.run(apiToken, user.id);
+    }
+
+    res.json({ token, apiToken, expiresIn: '24h', username: user.username, role: user.role });
   });
 
   // --- 需要认证的端点 ---
@@ -86,6 +93,13 @@ function createAuthRouter(store) {
     }
     store.deleteUser(id);
     res.status(204).end();
+  });
+
+  /** POST /api/auth/api-token/refresh — 重新生成 apiToken */
+  router.post('/api-token/refresh', requireAuth, (req, res) => {
+    const apiToken = crypto.randomBytes(5).toString('hex');
+    store._stmts.updateApiToken.run(apiToken, req.user.userId);
+    res.json({ apiToken, note: '旧 token 已失效' });
   });
 
   return router;
