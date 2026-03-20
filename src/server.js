@@ -208,7 +208,11 @@ async function boot() {
     const nodeId = req.query.nodeId || req.body.nodeId;
     if (isAdmin && nodeId) {
       const allNodes = keyManager.getAllNodes();
-      const node = allNodes.find(n => n.id === nodeId && n.status === 'approved');
+      // @alpha: 优先精确匹配 id，回退匹配 name（兼容旧 hostname-based agent.env）
+      let node = allNodes.find(n => n.id === nodeId && n.status === 'approved');
+      if (!node) {
+        node = allNodes.find(n => n.name === nodeId && n.status === 'approved');
+      }
       if (node) {
         monitor.ingest(node.id, req.body);
         return res.json({ success: true, nodeId: node.id });
