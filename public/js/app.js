@@ -645,7 +645,18 @@ async function batchAction(action) {
     const data = await res.json();
     const msg = `${labels[action]}完成: ${data.succeeded?.length || 0} 成功, ${data.failed?.length || 0} 失败`;
     alert(msg);
+    // @alpha: 立即刷新前端节点列表
+    const succeeded = new Set(data.succeeded || []);
+    if (action === 'remove') {
+      allNodesRaw = allNodesRaw.filter(n => !succeeded.has(n.id));
+      pendingNodes = pendingNodes.filter(n => !succeeded.has(n.id));
+    } else {
+      allNodesRaw.forEach(n => { if (succeeded.has(n.id)) n.status = action === 'approve' ? 'approved' : 'rejected'; });
+    }
     selectedIds.clear();
+    renderGroupSidebar();
+    renderNodesTable();
+    renderPagination();
   } catch (e) { alert(`操作失败: ${e.message}`); }
 }
 
