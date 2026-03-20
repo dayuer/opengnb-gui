@@ -77,7 +77,7 @@ describe('services/key-manager', () => {
     const result = km.rejectNode('n4');
     assert.ok(result.success);
     const node = km.getAllNodes().find(n => n.id === 'n4');
-    assert.equal(node.status, 'rejected');
+    assert.equal(node, undefined); // 拒绝即删除
   });
 
   // S5.6: 删除节点

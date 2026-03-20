@@ -415,9 +415,9 @@ class KeyManager {
   rejectNode(nodeId) {
     const node = this.store.findById(nodeId);
     if (!node) return { success: false, message: '节点不存在' };
-    this.store.update(nodeId, { status: 'rejected' });
+    this.store.remove(nodeId);
     if (this.onChange) this.onChange('reject', nodeId);
-    return { success: true, message: `节点 ${nodeId} 已拒绝` };
+    return { success: true, message: `节点 ${nodeId} 已拒绝并删除` };
   }
 
   /**

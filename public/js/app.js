@@ -1095,13 +1095,12 @@ async function rejectNode(nodeId) {
     const res = await authFetch(`/api/enroll/${encodeURIComponent(nodeId)}/reject`, { method: 'POST' });
     const data = await res.json();
     if (data.success) {
-      const node = allNodesRaw.find(n => n.id === nodeId);
-      if (node) node.status = 'rejected';
+      allNodesRaw = allNodesRaw.filter(n => n.id !== nodeId);
       pendingNodes = pendingNodes.filter(n => n.id !== nodeId);
       renderGroupSidebar();
       renderNodesTable();
       renderPagination();
-      showToast(`节点 ${nodeId} 已拒绝`);
+      showToast(`节点 ${nodeId} 已拒绝并删除`);
     } else {
       showToast(`❌ 拒绝失败: ${data.message}`, 'error');
     }
