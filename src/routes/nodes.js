@@ -151,7 +151,7 @@ function createNodesRouter(monitor, sshManager, nodesConfig, keyManager, metrics
         console.log(`[RemoteSync] Index address.conf 已更新: ${expectedLine}`);
       }
 
-      // Step 3: 保存 nodes.json
+      // Step 3: 保存到 SQLite
       const result = keyManager.updateNode(req.params.id, { name, tunAddr, sshPort, sshUser });
       if (!result.success) return res.status(400).json({ error: result.message });
       result.remoteSync = 'verified';

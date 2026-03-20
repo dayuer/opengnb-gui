@@ -9,9 +9,9 @@ const fs = require('fs');
  *
  * 目录结构:
  *   data/
- *   ├── registry/   — 核心业务数据 (nodes.json, groups.json)
+ *   ├── registry/   — 核心业务数据 (nodes.db)
  *   ├── security/   — 安全凭证 (ssh/, backups/)
- *   ├── logs/       — 日志 (audit/, ops/)
+ *   ├── logs/       — 日志 (ops/)
  *   └── mirror/     — 软件镜像
  *
  * @param {string} dataDir - 数据根目录（默认 `<project>/data`）
@@ -29,10 +29,7 @@ function resolvePaths(dataDir) {
     // 核心业务数据
     registry: {
       dir: registryDir,
-      nodes: path.join(registryDir, 'nodes.json'),
       nodesDb: path.join(registryDir, 'nodes.db'),
-      groups: path.join(registryDir, 'groups.json'),
-      metrics: path.join(registryDir, 'metrics.json'),
     },
 
     // 安全凭证
@@ -44,11 +41,9 @@ function resolvePaths(dataDir) {
       backupDir: path.join(securityDir, 'backups'),
     },
 
-    // 日志数据
+    // 日志数据（运维日志仍为文件型存储）
     logs: {
       dir: logsDir,
-      auditLog: path.join(logsDir, 'audit', 'audit.log'),
-      auditArchive: path.join(logsDir, 'audit', 'archive'),
       opsDir: path.join(logsDir, 'ops'),
     },
 
@@ -66,7 +61,6 @@ function ensureDataDirs(paths) {
     paths.registry.dir,
     paths.security.sshDir,
     paths.security.backupDir,
-    path.join(paths.logs.dir, 'audit', 'archive'),
     paths.logs.opsDir,
     paths.mirror,
   ];

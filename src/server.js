@@ -77,16 +77,15 @@ async function boot() {
   // 初始化认证 Token
   const adminToken = initToken();
 
-  // 初始化审计日志
-  const audit = new AuditLogger({ dataDir: DATA_DIR, paths: dataPaths });
-
+  // 初始化审计日志（共享 NodeStore SQLite 实例，需在 keyManager.init 后）
   await keyManager.init();
+  const audit = new AuditLogger({ store: keyManager.store });
 
   // 已审批节点配置
   const approvedNodes = keyManager.getApprovedNodesConfig();
 
-  // @alpha: 初始化指标时序存储
-  const metricsStore = new MetricsStore({ metricsPath: dataPaths.registry.metrics });
+  // @alpha: 初始化指标时序存储（共享 NodeStore SQLite 实例）
+  const metricsStore = new MetricsStore({ store: keyManager.store });
 
   const monitor = new GnbMonitor(approvedNodes, {
     staleTimeoutMs: parseInt(process.env.STALE_TIMEOUT_MS || '60000', 10),

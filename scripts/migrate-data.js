@@ -5,8 +5,10 @@
  * 数据目录迁移脚本
  * @alpha: 从旧扁平结构迁移到新分层结构
  *
- * 旧:  data/{nodes.json, groups.json, ssh/, backups/, ops-logs/, audit.log, audit-archive/}
+ * 旧:  data/{ssh/, backups/, ops-logs/}
  * 新:  data/{registry/, security/, logs/, mirror/}
+ *
+ * 注意: nodes/groups/metrics/audit 已全部迁入 nodes.db (SQLite)，无需文件迁移。
  *
  * 使用方式:  node scripts/migrate-data.js [data目录路径]
  */
@@ -20,16 +22,10 @@ const paths = resolvePaths(DATA_DIR);
 
 // 定义迁移映射：[旧路径, 新路径]
 const MIGRATIONS = [
-  // 业务数据 → registry/
-  ['nodes.json', paths.registry.nodes],
-  ['groups.json', paths.registry.groups],
   // SSH 密钥 → security/ssh/
   ['ssh', paths.security.sshDir],
   // 备份 → security/backups/
   ['backups', paths.security.backupDir],
-  // 审计日志 → logs/audit/
-  ['audit.log', paths.logs.auditLog],
-  ['audit-archive', paths.logs.auditArchive],
   // 运维日志 → logs/ops/
   ['ops-logs', paths.logs.opsDir],
 ];

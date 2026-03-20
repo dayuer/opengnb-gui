@@ -4,7 +4,6 @@
 
 const { describe, it, beforeEach, afterEach } = require('node:test');
 const assert = require('node:assert/strict');
-const fs = require('fs');
 const { tmpDataDir } = require('../helpers');
 
 describe('分组 CRUD', () => {
@@ -79,14 +78,18 @@ describe('分组 CRUD', () => {
     assert.throws(() => km.createGroup({ name: 'Dup' }), /同名分组已存在/);
   });
 
-  // 持久化: 分组保存到磁盘
-  it('分组持久化到 groups.json', () => {
+  // 持久化: 分组保存到 SQLite
+  it('分组持久化到 SQLite（reinit 后保留）', async () => {
     km.createGroup({ name: 'Persist' });
-    const groupsPath = km.groupsPath;
-    assert.ok(fs.existsSync(groupsPath));
-    const saved = JSON.parse(fs.readFileSync(groupsPath, 'utf-8'));
-    assert.equal(saved.length, 1);
-    assert.equal(saved[0].name, 'Persist');
+    km.store.close();
+
+    // 重新初始化 — 分组应保留在 SQLite 中
+    const km2 = new KeyManager({ dataDir });
+    await km2.init();
+    const groups = km2.getGroups();
+    assert.equal(groups.length, 1);
+    assert.equal(groups[0].name, 'Persist');
+    km2.store.close();
   });
 });
 

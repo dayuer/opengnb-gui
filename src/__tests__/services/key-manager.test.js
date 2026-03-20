@@ -33,18 +33,7 @@ describe('services/key-manager', () => {
     assert.ok(pubKey.startsWith('ssh-ed25519') || pubKey.includes('BEGIN'));
   });
 
-  // S5.2: JSON→SQLite 自动迁移
-  it('should migrate existing nodes.json to SQLite on init', async () => {
-    if (km.store && km.store.db) km.store.close();
-    const nodes = [{ id: 'n1', name: 'test', status: 'pending' }];
-    fs.writeFileSync(path.join(dataDir, 'registry', 'nodes.json'), JSON.stringify(nodes));
-
-    const km2 = new KeyManager({ dataDir });
-    await km2.init();
-    assert.equal(km2.getAllNodes().length, 1);
-    assert.equal(km2.getAllNodes()[0].id, 'n1');
-    km2.store.close();
-  });
+  // S5.2: (Removed) JSON→SQLite 迁移已完成，测试已废弃
 
   // S5.3: 注册持久化（V2: 通过 getAllNodes 验证而非读文件）
   it('should persist enrollment to SQLite', () => {

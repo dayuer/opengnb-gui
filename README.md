@@ -45,7 +45,6 @@ curl -sSL https://api.synonclaw.com/api/enroll/init.sh | bash
 
 ```
 opengnb-gui/
-├── config/nodes.json              # 节点配置模板
 ├── scripts/
 │   ├── setup-console.sh           # Console 服务器一键安装
 │   ├── initnode.sh                 # 节点初始化脚本
@@ -54,10 +53,13 @@ opengnb-gui/
 ├── src/
 │   ├── server.js                  # Express 入口
 │   ├── services/
+│   │   ├── node-store.js          # SQLite 数据层 (nodes/groups/metrics/audit)
+│   │   ├── key-manager.js         # 密钥管理 + 审批注册 + 分组
+│   │   ├── metrics-store.js       # 指标时序存储 (委托 NodeStore)
+│   │   ├── audit-logger.js        # 审计日志 (委托 NodeStore)
+│   │   ├── data-paths.js          # 集中路径管理
 │   │   ├── ssh-manager.js         # SSH 连接池
-│   │   ├── gnb-parser.js          # gnb_ctl 输出解析
-│   │   ├── gnb-monitor.js         # 定时状态采集
-│   │   ├── key-manager.js         # 密钥管理 + 审批注册 + 备份
+│   │   ├── gnb-monitor.js         # 推模式状态采集
 │   │   ├── provisioner.js         # 远程安装配置
 │   │   └── ai-ops.js              # Claude AI 运维
 │   └── routes/
@@ -65,6 +67,11 @@ opengnb-gui/
 │       ├── enroll.js              # 注册审批 API
 │       ├── mirror.js              # 软件镜像下载 API
 │       └── ai.js                  # AI 运维 API
+├── data/
+│   ├── registry/nodes.db          # SQLite (nodes, groups, metrics, audit_logs)
+│   ├── security/ssh/              # ED25519 密钥对
+│   ├── logs/ops/                  # 运维终端日志
+│   └── mirror/                    # 软件镜像
 └── public/                        # Web Dashboard
     ├── index.html
     ├── css/style.css

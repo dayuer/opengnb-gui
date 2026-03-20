@@ -6,7 +6,7 @@ const fs = require('fs');
 
 /**
  * SQLite 节点存储层
- * @alpha: V2 重构 — 替代 nodes.json 全内存数组
+ * @alpha: V2 重构 — SQLite 为唯一数据源
  *
  * 设计原则：
  *   - better-sqlite3 同步 API，与 Node.js 单线程模型天然匹配
@@ -23,8 +23,8 @@ class NodeStore {
   }
 
   /**
-   * 初始化数据库（建表 + 可选迁移）
-   * @param {Array} [existingNodes] - 从 nodes.json 迁移的数据
+   * 初始化数据库（建表）
+   * @param {Array} [existingNodes] - 可选的种子节点数据
    */
   init(existingNodes = []) {
     // 确保目录存在
@@ -71,6 +71,37 @@ class NodeStore {
         ON nodes(tunAddr) WHERE tunAddr != '';
       CREATE INDEX IF NOT EXISTS idx_status ON nodes(status);
       CREATE INDEX IF NOT EXISTS idx_groupId ON nodes(groupId);
+
+      CREATE TABLE IF NOT EXISTS groups (
+        id TEXT PRIMARY KEY,
+        name TEXT NOT NULL UNIQUE,
+        color TEXT DEFAULT '#388bfd',
+        createdAt TEXT
+      );
+
+      CREATE TABLE IF NOT EXISTS metrics (
+        nodeId TEXT NOT NULL,
+        ts INTEGER NOT NULL,
+        cpu INTEGER DEFAULT 0,
+        memPct INTEGER DEFAULT 0,
+        diskPct INTEGER DEFAULT 0,
+        sshLatency INTEGER DEFAULT 0,
+        loadAvg TEXT DEFAULT '0',
+        p2pDirect INTEGER DEFAULT 0,
+        p2pTotal INTEGER DEFAULT 0,
+        memTotalMB INTEGER DEFAULT 0,
+        memUsedMB INTEGER DEFAULT 0
+      );
+      CREATE INDEX IF NOT EXISTS idx_metrics_node_ts ON metrics(nodeId, ts);
+
+      CREATE TABLE IF NOT EXISTS audit_logs (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        ts TEXT NOT NULL,
+        action TEXT NOT NULL,
+        actor TEXT DEFAULT 'system',
+        detail_json TEXT DEFAULT '{}'
+      );
+      CREATE INDEX IF NOT EXISTS idx_audit_ts_action ON audit_logs(ts, action);
     `);
   }
 
@@ -97,6 +128,45 @@ class NodeStore {
       allTunAddrs: this.db.prepare("SELECT tunAddr FROM nodes WHERE tunAddr != ''"),
       approvedWithGnb: this.db.prepare(
         "SELECT * FROM nodes WHERE status = 'approved' AND gnbNodeId != '' AND tunAddr != ''"
+      ),
+      // 分组
+      allGroups: this.db.prepare('SELECT * FROM groups ORDER BY createdAt'),
+      findGroupById: this.db.prepare('SELECT * FROM groups WHERE id = ?'),
+      findGroupByName: this.db.prepare('SELECT * FROM groups WHERE name = ?'),
+      insertGroup: this.db.prepare(
+        'INSERT INTO groups (id, name, color, createdAt) VALUES (@id, @name, @color, @createdAt)'
+      ),
+      updateGroupStmt: this.db.prepare('UPDATE groups SET name = @name, color = @color WHERE id = @id'),
+      removeGroupStmt: this.db.prepare('DELETE FROM groups WHERE id = ?'),
+      clearGroupId: this.db.prepare("UPDATE nodes SET groupId = '' WHERE groupId = ?"),
+      countNodesByGroup: this.db.prepare('SELECT COUNT(*) AS cnt FROM nodes WHERE groupId = ?'),
+      // 指标
+      recordMetric: this.db.prepare(`
+        INSERT INTO metrics (nodeId, ts, cpu, memPct, diskPct, sshLatency, loadAvg, p2pDirect, p2pTotal, memTotalMB, memUsedMB)
+        VALUES (@nodeId, @ts, @cpu, @memPct, @diskPct, @sshLatency, @loadAvg, @p2pDirect, @p2pTotal, @memTotalMB, @memUsedMB)
+      `),
+      queryMetrics: this.db.prepare('SELECT * FROM metrics WHERE nodeId = ? AND ts >= ? ORDER BY ts'),
+      deleteMetricsBefore: this.db.prepare('DELETE FROM metrics WHERE ts < ?'),
+      deleteNodeMetricsBefore: this.db.prepare('DELETE FROM metrics WHERE nodeId = ? AND ts < ?'),
+      latestMetricPerNode: this.db.prepare(`
+        SELECT m.* FROM metrics m
+        INNER JOIN (SELECT nodeId, MAX(ts) AS maxTs FROM metrics GROUP BY nodeId) latest
+        ON m.nodeId = latest.nodeId AND m.ts = latest.maxTs
+      `),
+      metricsCount: this.db.prepare('SELECT COUNT(*) AS cnt FROM metrics'),
+      metricsCountByNode: this.db.prepare('SELECT COUNT(*) AS cnt FROM metrics WHERE nodeId = ?'),
+      oldestMetrics: this.db.prepare('SELECT MIN(ts) AS oldest FROM metrics'),
+      // 审计日志
+      insertAudit: this.db.prepare(
+        'INSERT INTO audit_logs (ts, action, actor, detail_json) VALUES (@ts, @action, @actor, @detailJson)'
+      ),
+      auditCount: this.db.prepare('SELECT COUNT(*) AS cnt FROM audit_logs'),
+      deleteAuditBefore: this.db.prepare('DELETE FROM audit_logs WHERE ts < ?'),
+      queryAudit: this.db.prepare(
+        'SELECT * FROM audit_logs ORDER BY id DESC LIMIT ? OFFSET ?'
+      ),
+      queryAuditByAction: this.db.prepare(
+        'SELECT * FROM audit_logs WHERE action = ? ORDER BY id DESC LIMIT ? OFFSET ?'
       ),
     };
   }
@@ -262,6 +332,177 @@ class NodeStore {
    */
   close() {
     if (this.db) this.db.close();
+  }
+
+  // ═══════════════════════════════════════
+  // 分组 CRUD
+  // ═══════════════════════════════════════
+
+  /** 获取所有分组 */
+  allGroups() {
+    return this._stmts.allGroups.all();
+  }
+
+  /** 按 ID 查找分组 */
+  findGroupById(id) {
+    return this._stmts.findGroupById.get(id) || null;
+  }
+
+  /** 按名称查找分组（唯一性检查） */
+  findGroupByName(name) {
+    return this._stmts.findGroupByName.get(name) || null;
+  }
+
+  /** 插入分组 */
+  insertGroup(group) {
+    this._stmts.insertGroup.run(group);
+  }
+
+  /** 更新分组 */
+  updateGroupFields(id, { name, color }) {
+    const existing = this.findGroupById(id);
+    if (!existing) return false;
+    this._stmts.updateGroupStmt.run({
+      id,
+      name: name !== undefined ? name : existing.name,
+      color: color !== undefined ? color : existing.color,
+    });
+    return true;
+  }
+
+  /**
+   * 删除分组（事务：清空关联节点 groupId + 删除分组）
+   */
+  removeGroup(id) {
+    const txn = this.db.transaction((groupId) => {
+      this._stmts.clearGroupId.run(groupId);
+      this._stmts.removeGroupStmt.run(groupId);
+    });
+    txn(id);
+  }
+
+  /** 获取分组内的节点数量 */
+  countNodesByGroup(groupId) {
+    return this._stmts.countNodesByGroup.get(groupId).cnt;
+  }
+
+  // ═══════════════════════════════════════
+  // 指标时序
+  // ═══════════════════════════════════════
+
+  /** 记录一个指标数据点 */
+  recordMetric(point) {
+    this._stmts.recordMetric.run(point);
+  }
+
+  /** 批量记录指标（事务） */
+  recordMetricsBatch(points) {
+    const txn = this.db.transaction((items) => {
+      for (const p of items) this._stmts.recordMetric.run(p);
+    });
+    txn(points);
+  }
+
+  /** 查询节点指标（ts >= sinceTs） */
+  queryMetrics(nodeId, sinceTs) {
+    return this._stmts.queryMetrics.all(nodeId, sinceTs);
+  }
+
+  /** 获取每个节点的最新数据点 */
+  latestMetricPerNode() {
+    return this._stmts.latestMetricPerNode.all();
+  }
+
+  /** 删除所有节点中早于 ts 的指标 */
+  deleteMetricsBefore(ts) {
+    return this._stmts.deleteMetricsBefore.run(ts);
+  }
+
+  /** 删除单个节点中早于 ts 的指标 */
+  deleteNodeMetricsBefore(nodeId, ts) {
+    return this._stmts.deleteNodeMetricsBefore.run(nodeId, ts);
+  }
+
+  /** 指标总数 */
+  metricsCount() {
+    return this._stmts.metricsCount.get().cnt;
+  }
+
+  /** 单节点指标数量 */
+  metricsCountByNode(nodeId) {
+    return this._stmts.metricsCountByNode.get(nodeId).cnt;
+  }
+
+  /**
+   * 降采样：将指定节点早于 cutoffTs 的数据按 windowMs 窗口聚合
+   * @returns {number} 删除的原始点数
+   */
+  downsampleNodeMetrics(nodeId, cutoffTs, windowMs) {
+    // 读取需要降采样的区间
+    const old = this.db.prepare(
+      'SELECT * FROM metrics WHERE nodeId = ? AND ts < ? ORDER BY ts'
+    ).all(nodeId, cutoffTs);
+
+    if (old.length === 0) return 0;
+
+    // 按窗口分桶聚合
+    const buckets = new Map();
+    for (const p of old) {
+      const key = Math.floor(p.ts / windowMs) * windowMs;
+      if (!buckets.has(key)) buckets.set(key, []);
+      buckets.get(key).push(p);
+    }
+
+    const txn = this.db.transaction(() => {
+      // 删除原始点
+      this._stmts.deleteNodeMetricsBefore.run(nodeId, cutoffTs);
+      // 插入聚合点
+      for (const [bucketTs, points] of buckets) {
+        const avg = (key) => Math.round(points.reduce((s, p) => s + (p[key] || 0), 0) / points.length);
+        this._stmts.recordMetric.run({
+          nodeId,
+          ts: bucketTs,
+          cpu: avg('cpu'),
+          memPct: avg('memPct'),
+          diskPct: avg('diskPct'),
+          sshLatency: avg('sshLatency'),
+          loadAvg: points[points.length - 1].loadAvg || '0',
+          p2pDirect: avg('p2pDirect'),
+          p2pTotal: avg('p2pTotal'),
+          memTotalMB: points[points.length - 1].memTotalMB || 0,
+          memUsedMB: points[points.length - 1].memUsedMB || 0,
+        });
+      }
+    });
+    txn();
+    return old.length;
+  }
+
+  // ═══════════════════════════════════════
+  // 审计日志
+  // ═══════════════════════════════════════
+
+  /** 插入审计日志 */
+  insertAudit({ ts, action, actor, detailJson }) {
+    this._stmts.insertAudit.run({ ts, action, actor, detailJson });
+  }
+
+  /** 查询审计日志（分页，可选 action 过滤） */
+  queryAuditLogs({ action, limit = 50, offset = 0 } = {}) {
+    if (action) {
+      return this._stmts.queryAuditByAction.all(action, limit, offset);
+    }
+    return this._stmts.queryAudit.all(limit, offset);
+  }
+
+  /** 审计日志总数 */
+  auditCount() {
+    return this._stmts.auditCount.get().cnt;
+  }
+
+  /** 删除早于指定时间的审计日志 */
+  deleteAuditBefore(ts) {
+    return this._stmts.deleteAuditBefore.run(ts);
   }
 }
 

@@ -1,50 +1,50 @@
 'use strict';
 
-// @beta: 审计日志测试 — 覆盖 S6.1-S6.4
+// @beta: 审计日志测试 — 覆盖 S6.1-S6.4 (SQLite 版)
 
 const { describe, it, beforeEach, afterEach } = require('node:test');
 const assert = require('node:assert/strict');
-const fs = require('fs');
 const path = require('path');
 const { tmpDataDir, mockReq } = require('../helpers');
-const AuditLogger = require('../../services/audit-logger');
 
-describe('services/audit-logger', () => {
-  let dataDir, cleanup, audit;
+describe('services/audit-logger (SQLite)', () => {
+  let AuditLogger, NodeStore, nodeStore, audit, dataDir, cleanup;
 
   beforeEach(() => {
     ({ dir: dataDir, cleanup } = tmpDataDir());
-    audit = new AuditLogger({ dataDir });
+    NodeStore = require('../../services/node-store');
+    AuditLogger = require('../../services/audit-logger');
+    nodeStore = new NodeStore(path.join(dataDir, 'nodes.db'));
+    nodeStore.init();
+    audit = new AuditLogger({ store: nodeStore });
   });
 
-  afterEach(() => { cleanup(); });
+  afterEach(() => { nodeStore.close(); cleanup(); });
 
-  // S6.1: 写入日志 — JSONL 格式
-  it('should write JSONL entries to audit.log', () => {
+  // S6.1: 写入日志
+  it('should write audit entries to SQLite', () => {
     audit.log('test_action', { target: 'node-1' });
     audit.log('test_action', { target: 'node-2' });
 
-    const content = fs.readFileSync(audit.logPath, 'utf-8');
-    const lines = content.trim().split('\n');
-    assert.equal(lines.length, 2);
-
-    const entry = JSON.parse(lines[0]);
-    assert.equal(entry.action, 'test_action');
-    assert.equal(entry.target, 'node-1');
-    assert.ok(entry.ts); // 有时间戳
-    assert.equal(entry.actor, 'system'); // 无 req 时为 system
+    assert.equal(audit.count(), 2);
+    const rows = audit.query({});
+    assert.equal(rows.length, 2);
+    // 最新的在前
+    assert.equal(rows[0].action, 'test_action');
+    assert.ok(rows[0].ts);
+    assert.equal(rows[0].actor, 'system');
   });
 
-  // S6.2: 脱敏 — token/passcode 字段替换为 ***
+  // S6.2: 脱敏
   it('should sanitize sensitive fields in body', () => {
     const req = mockReq({ method: 'POST', path: '/test', body: { token: 'secret-value', name: 'visible' } });
     const middleware = audit.middleware('test');
     middleware(req, {}, () => {});
 
-    const content = fs.readFileSync(audit.logPath, 'utf-8');
-    const entry = JSON.parse(content.trim());
-    assert.equal(entry.body.token, '***');
-    assert.equal(entry.body.name, 'visible');
+    const rows = audit.query({});
+    assert.equal(rows.length, 1);
+    assert.equal(rows[0].detail.body.token, '***');
+    assert.equal(rows[0].detail.body.name, 'visible');
   });
 
   // S6.4: 中间件记录 method/path/ip
@@ -53,23 +53,45 @@ describe('services/audit-logger', () => {
     const middleware = audit.middleware('approve');
     middleware(req, {}, () => {});
 
-    const content = fs.readFileSync(audit.logPath, 'utf-8');
-    const entry = JSON.parse(content.trim());
-    assert.equal(entry.action, 'approve');
-    assert.equal(entry.method, 'POST');
-    assert.equal(entry.path, '/api/approve');
-    assert.equal(entry.actor, '192.168.1.1');
+    const rows = audit.query({});
+    assert.equal(rows.length, 1);
+    assert.equal(rows[0].action, 'approve');
+    assert.equal(rows[0].detail.method, 'POST');
+    assert.equal(rows[0].detail.path, '/api/approve');
+    assert.equal(rows[0].actor, '192.168.1.1');
   });
 
-  // S6.3: 轮转 — 超过 maxSize 时归档
-  it('should rotate log when exceeding maxSize', () => {
-    const smallAudit = new AuditLogger({ dataDir, maxSizeMB: 0.0001 }); // ~100 bytes
-    // 写入足够多的数据触发轮转
+  // S6.3: 条数限制清理
+  it('should rotate when exceeding maxEntries', () => {
+    const smallAudit = new AuditLogger({ store: nodeStore, maxEntries: 10 });
     for (let i = 0; i < 20; i++) {
-      smallAudit.log('bulk', { data: 'x'.repeat(50) });
+      smallAudit.log('bulk', { data: `item-${i}` });
     }
+    // 应保留约 9 条（删除最旧的 10%）
+    assert.ok(smallAudit.count() <= 10, `应 <= 10 条，实际 ${smallAudit.count()}`);
+    assert.ok(smallAudit.count() > 0);
+  });
 
-    const archives = fs.readdirSync(smallAudit.archiveDir);
-    assert.ok(archives.length > 0, '应有归档文件');
+  // 按 action 查询
+  it('should filter by action', () => {
+    audit.log('auth_fail', { ip: '1.2.3.4' });
+    audit.log('approve', { node: 'n1' });
+    audit.log('auth_fail', { ip: '5.6.7.8' });
+
+    const filtered = audit.query({ action: 'auth_fail' });
+    assert.equal(filtered.length, 2);
+    assert.ok(filtered.every(r => r.action === 'auth_fail'));
+  });
+
+  // 持久化
+  it('should persist across reinit', () => {
+    audit.log('test', { val: 42 });
+    nodeStore.close();
+
+    const ns2 = new NodeStore(path.join(dataDir, 'nodes.db'));
+    ns2.init();
+    const audit2 = new AuditLogger({ store: ns2 });
+    assert.equal(audit2.count(), 1);
+    ns2.close();
   });
 });

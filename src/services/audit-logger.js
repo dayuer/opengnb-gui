@@ -1,30 +1,21 @@
 'use strict';
 
-const fs = require('fs');
-const path = require('path');
-const { resolvePaths } = require('./data-paths');
-
 /**
  * 审计日志服务
+ * @alpha: 基于 SQLite 的持久化存储 — 替代 JSONL 文件追加
  *
- * JSONL 格式追加写入，记录所有敏感操作。
- * 自动按大小轮转（超过 10MB 归档）。
+ * 委托 NodeStore 进行 INSERT/SELECT/DELETE。
+ * 自动按条数限制清理（超过 maxEntries 删除最旧记录）。
  */
 class AuditLogger {
   /**
    * @param {object} options
-   * @param {string} options.dataDir - 数据目录
-   * @param {object} [options.paths] - data-paths 路径对象
-   * @param {number} [options.maxSizeMB=10] - 单文件最大 MB
+   * @param {import('./node-store')} options.store - NodeStore 实例
+   * @param {number} [options.maxEntries=100000] - 最大保留条数
    */
-  constructor({ dataDir, paths, maxSizeMB = 10 }) {
-    // @alpha: 使用集中路径管理
-    const p = paths || resolvePaths(dataDir);
-    this.logPath = p.logs.auditLog;
-    this.archiveDir = p.logs.auditArchive;
-    this.maxSize = maxSizeMB * 1024 * 1024;
-
-    try { fs.mkdirSync(this.archiveDir, { recursive: true }); } catch (_) {}
+  constructor({ store, maxEntries = 100000 }) {
+    this._store = store;
+    this._maxEntries = maxEntries;
   }
 
   /**
@@ -34,19 +25,17 @@ class AuditLogger {
    * @param {object} [req] - Express 请求对象（提取 IP）
    */
   log(action, detail = {}, req = null) {
-    const entry = {
-      ts: new Date().toISOString(),
-      action,
-      actor: req
-        ? (req.headers['x-forwarded-for']?.split(',')[0]?.trim() || req.ip || 'unknown')
-        : 'system',
-      ...detail,
-    };
-
-    const line = JSON.stringify(entry) + '\n';
+    const actor = req
+      ? (req.headers?.['x-forwarded-for']?.split(',')[0]?.trim() || req.ip || 'unknown')
+      : 'system';
 
     try {
-      fs.appendFileSync(this.logPath, line);
+      this._store.insertAudit({
+        ts: new Date().toISOString(),
+        action,
+        actor,
+        detailJson: JSON.stringify(detail),
+      });
       this._rotateIfNeeded();
     } catch (err) {
       console.error(`[AuditLogger] 写入失败: ${err.message}`);
@@ -69,28 +58,47 @@ class AuditLogger {
     };
   }
 
+  /**
+   * 查询审计日志（分页）
+   * @param {{action?: string, page?: number, pageSize?: number}} opts
+   */
+  query({ action, page = 1, pageSize = 50 } = {}) {
+    const offset = (Math.max(1, page) - 1) * pageSize;
+    const rows = this._store.queryAuditLogs({ action, limit: pageSize, offset });
+    // 解析 detail_json
+    return rows.map(r => ({
+      ...r,
+      detail: r.detail_json ? JSON.parse(r.detail_json) : {},
+    }));
+  }
+
+  /** 审计日志总数 */
+  count() {
+    return this._store.auditCount();
+  }
+
   /** @private 脱敏请求体 */
   _sanitizeBody(body) {
     if (!body || typeof body !== 'object') return body;
     const clone = { ...body };
-    // 脱敏可能的密码/Token 字段
     for (const key of ['password', 'token', 'passcode', 'privateKey', 'secret']) {
       if (clone[key]) clone[key] = '***';
     }
     return clone;
   }
 
-  /** @private 日志轮转 */
+  /** @private 条数限制 */
   _rotateIfNeeded() {
-    try {
-      const stat = fs.statSync(this.logPath);
-      if (stat.size < this.maxSize) return;
-
-      const ts = new Date().toISOString().replace(/[:.]/g, '-');
-      const archivePath = path.join(this.archiveDir, `audit_${ts}.log`);
-      fs.renameSync(this.logPath, archivePath);
-      console.log(`[AuditLogger] 日志已归档: ${archivePath}`);
-    } catch (_) {}
+    const count = this._store.auditCount();
+    if (count <= this._maxEntries) return;
+    // 保留最新的 maxEntries 条，按 id 删除最旧的
+    const excess = count - this._maxEntries;
+    const boundary = this._store.db.prepare(
+      'SELECT id FROM audit_logs ORDER BY id ASC LIMIT 1 OFFSET ?'
+    ).get(excess);
+    if (boundary) {
+      this._store.db.prepare('DELETE FROM audit_logs WHERE id < ?').run(boundary.id);
+    }
   }
 }
 

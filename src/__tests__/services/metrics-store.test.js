@@ -2,24 +2,22 @@
 
 const { describe, it, beforeEach, afterEach } = require('node:test');
 const assert = require('node:assert/strict');
-const fs = require('fs');
 const path = require('path');
 const { tmpDataDir } = require('../helpers');
 
-describe('services/metrics-store', () => {
-  let MetricsStore, store, dataDir, cleanup;
+describe('services/metrics-store (SQLite)', () => {
+  let MetricsStore, NodeStore, store, nodeStore, dataDir, cleanup;
 
   beforeEach(() => {
     ({ dir: dataDir, cleanup } = tmpDataDir());
-    fs.mkdirSync(path.join(dataDir, 'registry'), { recursive: true });
+    NodeStore = require('../../services/node-store');
     MetricsStore = require('../../services/metrics-store');
-    store = new MetricsStore({
-      metricsPath: path.join(dataDir, 'registry', 'metrics.json'),
-      flushIntervalMs: 0, // 禁止自动 flush，手动控制
-    });
+    nodeStore = new NodeStore(path.join(dataDir, 'nodes.db'));
+    nodeStore.init();
+    store = new MetricsStore({ store: nodeStore, maintenanceIntervalMs: 0 });
   });
 
-  afterEach(() => { store.stop(); cleanup(); });
+  afterEach(() => { store.stop(); nodeStore.close(); cleanup(); });
 
   describe('record + query', () => {
     it('记录数据点并查询返回', () => {
@@ -39,11 +37,10 @@ describe('services/metrics-store', () => {
     it('按时间范围过滤', () => {
       const now = Date.now();
       // 手动插入带时间戳的数据
-      store._data.set('node-1', [
-        { ts: now - 2 * 3600000, cpu: 10, memPct: 20, diskPct: 30, sshLatency: 50 }, // 2h ago
-        { ts: now - 30 * 60000, cpu: 20, memPct: 30, diskPct: 40, sshLatency: 60 },   // 30min ago
-        { ts: now - 5 * 60000, cpu: 30, memPct: 40, diskPct: 50, sshLatency: 70 },    // 5min ago
-      ]);
+      nodeStore.recordMetric({ nodeId: 'node-1', ts: now - 2 * 3600000, cpu: 10, memPct: 20, diskPct: 30, sshLatency: 50, loadAvg: '0', p2pDirect: 0, p2pTotal: 0, memTotalMB: 0, memUsedMB: 0 });
+      nodeStore.recordMetric({ nodeId: 'node-1', ts: now - 30 * 60000, cpu: 20, memPct: 30, diskPct: 40, sshLatency: 60, loadAvg: '0', p2pDirect: 0, p2pTotal: 0, memTotalMB: 0, memUsedMB: 0 });
+      nodeStore.recordMetric({ nodeId: 'node-1', ts: now - 5 * 60000, cpu: 30, memPct: 40, diskPct: 50, sshLatency: 70, loadAvg: '0', p2pDirect: 0, p2pTotal: 0, memTotalMB: 0, memUsedMB: 0 });
+
       const h1 = store.query('node-1', '1h');
       assert.equal(h1.length, 2); // 30min + 5min
       const h6 = store.query('node-1', '6h');
@@ -86,52 +83,63 @@ describe('services/metrics-store', () => {
   });
 
   describe('persistence', () => {
-    it('flush 后重新加载数据不丢失', () => {
+    it('关闭后重新打开数据不丢失', () => {
       store.record('node-1', { cpu: 42, memPct: 55, diskPct: 33, sshLatency: 80 });
-      store.flush();
+      store.stop();
+      nodeStore.close();
 
-      const store2 = new MetricsStore({
-        metricsPath: path.join(dataDir, 'registry', 'metrics.json'),
-        flushIntervalMs: 0,
-      });
+      // 重新打开
+      const ns2 = new NodeStore(path.join(dataDir, 'nodes.db'));
+      ns2.init();
+      const store2 = new MetricsStore({ store: ns2, maintenanceIntervalMs: 0 });
       const data = store2.query('node-1', '1h');
       assert.equal(data.length, 1);
       assert.equal(data[0].cpu, 42);
       store2.stop();
+      ns2.close();
     });
   });
 
   describe('downsample', () => {
     it('超过 24h 的数据被降采样', () => {
       const now = Date.now();
-      const points = [];
-      // 插入 30 小时的数据，每 10s 一个点
+      // 插入 30 小时前的 100 个数据点（每 10s 一个点）
       for (let i = 0; i < 100; i++) {
-        points.push({
+        nodeStore.recordMetric({
+          nodeId: 'node-1',
           ts: now - 30 * 3600000 + i * 10000,
           cpu: 50 + Math.round(Math.random() * 10),
           memPct: 60, diskPct: 40, sshLatency: 100,
+          loadAvg: '0', p2pDirect: 0, p2pTotal: 0, memTotalMB: 0, memUsedMB: 0,
         });
       }
-      store._data.set('node-1', points);
-      store._downsample('node-1');
-      const data = store._data.get('node-1');
+      // 执行降采样
+      const cutoff = now - 24 * 3600000;
+      nodeStore.downsampleNodeMetrics('node-1', cutoff, 5 * 60000);
+      const count = nodeStore.metricsCountByNode('node-1');
       // 所有点都超过 24h，应该被聚合为更少的点
-      assert.ok(data.length < 100);
-      assert.ok(data.length > 0);
+      assert.ok(count < 100);
+      assert.ok(count > 0);
     });
   });
 
   describe('size limit', () => {
-    it('超过上限自动清理最旧数据', () => {
-      // 设置极小上限
-      store._maxSizeBytes = 500;
-      for (let i = 0; i < 50; i++) {
-        store.record('node-1', { cpu: i, memPct: 50, diskPct: 30, sshLatency: 100 });
-      }
-      store._enforceLimit();
-      const data = store._data.get('node-1');
-      assert.ok(data.length < 50);
+    it('7 天过期自动清理', () => {
+      const now = Date.now();
+      // 插入一个 8 天前的数据
+      nodeStore.recordMetric({
+        nodeId: 'node-1', ts: now - 8 * 24 * 3600000,
+        cpu: 50, memPct: 50, diskPct: 50, sshLatency: 100,
+        loadAvg: '0', p2pDirect: 0, p2pTotal: 0, memTotalMB: 0, memUsedMB: 0,
+      });
+      // 插入一个当前的数据
+      store.record('node-1', { cpu: 60, memPct: 60, diskPct: 60, sshLatency: 100 });
+
+      // 手动触发维护
+      store._maintenance();
+      const data = store.query('node-1', '7d');
+      assert.equal(data.length, 1); // 只保留当前的
+      assert.equal(data[0].cpu, 60);
     });
   });
 });

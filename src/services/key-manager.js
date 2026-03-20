@@ -37,14 +37,8 @@ class KeyManager {
     this.gnbTunAddr = process.env.GNB_TUN_ADDR || '10.1.0.1';
     this.gnbIndexAddr = process.env.GNB_INDEX_ADDR || '';
 
-    // @alpha V2: SQLite 存储层（替代 this.nodes 数组 + nodes.json）
+    // @alpha V2: SQLite 存储层
     this.store = new NodeStore(paths.registry.nodesDb);
-    this.nodesPath = paths.registry.nodes; // 仅用于 JSON→SQLite 迁移
-
-    // @alpha: 分组数据模型
-    /** @type {Array<{id: string, name: string, color: string, createdAt: string}>} */
-    this.groups = [];
-    this.groupsPath = paths.registry.groups;
 
     /** @type {Map<string, {passcode: string, createdAt: string, used: boolean}>} */
     this.passcodes = new Map();
@@ -70,32 +64,13 @@ class KeyManager {
       console.log('[KeyManager] 已加载现有密钥对');
     }
 
-    // @alpha V2: 初始化 SQLite，自动从 nodes.json 迁移
-    const jsonNodes = this._loadJsonLegacy();
-    this.store.init(jsonNodes);
-    if (jsonNodes.length > 0 && this.store.count() > 0) {
-      // 迁移成功后重命名旧文件
-      const legacyPath = this.nodesPath;
-      if (fs.existsSync(legacyPath)) {
-        fs.renameSync(legacyPath, legacyPath + '.migrated');
-        console.log('[KeyManager] nodes.json 已迁移到 SQLite，旧文件已重命名为 .migrated');
-      }
-    }
-
-    this.groups = this._loadGroups();
+    // @alpha V2: 初始化 SQLite 存储
+    this.store.init();
 
     const approved = this.store.countByStatus('approved');
     const pending = this.store.countByStatus('pending');
-    console.log(`[KeyManager] ${approved} 个已审批节点, ${pending} 个待审批, ${this.groups.length} 个分组 (SQLite)`);
-  }
-
-  /** @private 加载旧 JSON 数据（仅用于迁移） */
-  _loadJsonLegacy() {
-    if (!fs.existsSync(this.nodesPath)) return [];
-    try {
-      const data = JSON.parse(fs.readFileSync(this.nodesPath, 'utf-8'));
-      return Array.isArray(data) ? data : [];
-    } catch (_) { return []; }
+    const groupCount = this.store.allGroups().length;
+    console.log(`[KeyManager] ${approved} 个已审批节点, ${pending} 个待审批, ${groupCount} 个分组 (SQLite)`);
   }
 
   /** @private */
@@ -522,7 +497,7 @@ class KeyManager {
   getPendingNodes() { return this.store.findByStatus('pending'); }
 
   // ═══════════════════════════════════════
-  // @alpha: 分组管理
+  // @alpha: 分组管理（委托 NodeStore）
   // ═══════════════════════════════════════
 
   /**
@@ -533,7 +508,7 @@ class KeyManager {
   createGroup({ name, color = '#388bfd' }) {
     const trimmed = (name || '').trim();
     if (!trimmed) throw new Error('名称不能为空');
-    if (this.groups.some(g => g.name === trimmed)) throw new Error('同名分组已存在');
+    if (this.store.findGroupByName(trimmed)) throw new Error('同名分组已存在');
 
     const group = {
       id: crypto.randomBytes(8).toString('hex'),
@@ -541,8 +516,7 @@ class KeyManager {
       color,
       createdAt: new Date().toISOString(),
     };
-    this.groups.push(group);
-    this._saveGroups();
+    this.store.insertGroup(group);
     return group;
   }
 
@@ -551,9 +525,9 @@ class KeyManager {
    * @returns {Array<object>}
    */
   getGroups() {
-    return this.groups.map(g => ({
+    return this.store.allGroups().map(g => ({
       ...g,
-      nodeCount: this.store.filter({ groupId: g.id }).length,
+      nodeCount: this.store.countNodesByGroup(g.id),
     }));
   }
 
@@ -563,27 +537,17 @@ class KeyManager {
    * @param {{name?: string, color?: string}} updates
    */
   updateGroup(groupId, updates) {
-    const group = this.groups.find(g => g.id === groupId);
-    if (!group) return { success: false, message: '分组不存在' };
-    if (updates.name !== undefined) group.name = updates.name;
-    if (updates.color !== undefined) group.color = updates.color;
-    this._saveGroups();
+    const ok = this.store.updateGroupFields(groupId, updates);
+    if (!ok) return { success: false, message: '分组不存在' };
     return { success: true };
   }
 
   /**
-   * 删除分组（清空关联节点的 groupId）
+   * 删除分组（事务：原子清空关联节点 groupId + 删除分组）
    * @param {string} groupId
    */
   deleteGroup(groupId) {
-    this.groups = this.groups.filter(g => g.id !== groupId);
-    const allNodes = this.store.all();
-    for (const node of allNodes) {
-      if (node.groupId === groupId) {
-        this.store.update(node.id, { groupId: '' });
-      }
-    }
-    this._saveGroups();
+    this.store.removeGroup(groupId);
     return { success: true };
   }
 
@@ -595,7 +559,7 @@ class KeyManager {
   updateNodeGroup(nodeId, groupId) {
     const node = this.store.findById(nodeId);
     if (!node) return { success: false, message: '节点不存在' };
-    if (groupId && !this.groups.find(g => g.id === groupId)) {
+    if (groupId && !this.store.findGroupById(groupId)) {
       return { success: false, message: '分组不存在' };
     }
     this.store.update(nodeId, { groupId: groupId || '' });
@@ -698,24 +662,6 @@ class KeyManager {
     return ip.split('.').reduce((acc, oct) => (acc << 8) + parseInt(oct, 10), 0) >>> 0;
   }
 
-  // ═══════════════════════════════════════
-  // @alpha: 分组持久化
-  // ═══════════════════════════════════════
-
-  /** @private 加载分组 */
-  _loadGroups() {
-    try {
-      const data = JSON.parse(fs.readFileSync(this.groupsPath, 'utf-8'));
-      return Array.isArray(data) ? data : [];
-    } catch (_) { return []; }
-  }
-
-  /** @private 保存分组 */
-  _saveGroups() {
-    const tmpPath = this.groupsPath + '.tmp';
-    fs.writeFileSync(tmpPath, JSON.stringify(this.groups, null, 2));
-    fs.renameSync(tmpPath, this.groupsPath);
-  }
 
   /**
    * 获取已审批节点的 SSH 配置（供 Monitor 使用）
