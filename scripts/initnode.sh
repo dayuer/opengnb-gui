@@ -433,8 +433,13 @@ CLAW_PORT=18789
 AGENTEOF
 chmod 600 /opt/gnb/bin/agent.env
 
+# 清理旧命名的 agent 服务（如果存在）
+systemctl stop gnb-agent.timer 2>/dev/null || true
+systemctl disable gnb-agent.timer 2>/dev/null || true
+rm -f /etc/systemd/system/gnb-agent.{service,timer} 2>/dev/null || true
+
 if command -v systemctl &>/dev/null; then
-  cat > /etc/systemd/system/gnb-agent.service << SVCEOF
+  cat > /etc/systemd/system/node-agent.service << SVCEOF
 [Unit]
 Description=GNB Node Monitor Agent
 After=gnb.service
@@ -445,21 +450,22 @@ EnvironmentFile=/opt/gnb/bin/agent.env
 ExecStart=/opt/gnb/bin/node-agent.sh
 SVCEOF
 
-  cat > /etc/systemd/system/gnb-agent.timer << TMREOF
+  cat > /etc/systemd/system/node-agent.timer << TMREOF
 [Unit]
 Description=GNB Agent Timer
 
 [Timer]
-OnBootSec=15
-OnUnitActiveSec=10
+OnBootSec=15s
+OnUnitActiveSec=10s
+AccuracySec=1s
 
 [Install]
 WantedBy=timers.target
 TMREOF
 
   systemctl daemon-reload
-  systemctl enable gnb-agent.timer
-  systemctl start gnb-agent.timer
+  systemctl enable node-agent.timer
+  systemctl start node-agent.timer
   echo "      ✅ Agent 已安装（systemd timer 每 10s）"
 else
   (crontab -l 2>/dev/null; echo "* * * * * /opt/gnb/bin/node-agent.sh") | sort -u | crontab -

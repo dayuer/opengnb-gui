@@ -319,19 +319,29 @@ SVCUNIT`, log);
   }
 
   /**
-   * 通过 SSH 代理验证终端 OpenClaw RPC 可达
+   * 验证终端 OpenClaw Gateway 是否运行
+   * 注意: Gateway 没有 /status JSON 端点，通过进程检测 + 端口可达性验证
    * @private
    */
   async _verifyClawRPC(nodeConfig, token, log) {
     try {
-      const result = await this._execQuiet(nodeConfig,
-        `curl -s -m 5 -H "Authorization: Bearer ${token}" http://127.0.0.1:18789/status`
-      );
-      if (result.includes('ok') || result.includes('"status"')) {
-        log(`      RPC 验证通过 ✓`);
+      // 检查进程是否运行
+      const proc = (await this._execQuiet(nodeConfig, 'pgrep -f openclaw-gateway >/dev/null 2>&1 && echo RUNNING || echo STOPPED')).trim();
+      if (proc === 'RUNNING') {
+        log('      Gateway 进程运行中 ✓');
+      } else {
+        log('      ⚠️ Gateway 进程未检测到');
+        return false;
+      }
+      // 检查端口可达（Gateway 返回 HTML 即表示正常）
+      const portCheck = (await this._execQuiet(nodeConfig,
+        `curl -s -m 3 -o /dev/null -w '%{http_code}' http://127.0.0.1:18789/ 2>/dev/null || echo 000`
+      )).trim();
+      if (portCheck === '200') {
+        log('      Gateway 端口可达 ✓');
         return true;
       }
-      log(`      RPC 响应: ${result.substring(0, 100)}`);
+      log(`      Gateway 端口响应: ${portCheck}`);
       return false;
     } catch (err) {
       log(`      RPC 验证失败: ${err.message}`);
