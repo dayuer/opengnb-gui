@@ -15,15 +15,15 @@ if [ -z "${CONSOLE_URL:-}" ] && [ -f "$AGENT_ENV" ]; then
 fi
 
 CONSOLE_URL="${CONSOLE_URL:-}"
-NODE_TOKEN="${NODE_TOKEN:-}"
+TOKEN="${TOKEN:-${NODE_TOKEN:-}}"
 NODE_ID="${NODE_ID:-}"
 GNB_NODE_ID="${GNB_NODE_ID:-}"
 GNB_MAP_PATH="${GNB_MAP_PATH:-/opt/gnb/conf/${GNB_NODE_ID}/gnb.map}"
 GNB_CTL="${GNB_CTL:-gnb_ctl}"
 CLAW_PORT="${CLAW_PORT:-18789}"
 
-if [ -z "$CONSOLE_URL" ] || [ -z "$NODE_TOKEN" ]; then
-  echo "[agent] 缺少 CONSOLE_URL 或 NODE_TOKEN" >&2
+if [ -z "$CONSOLE_URL" ] || [ -z "$TOKEN" ]; then
+  echo "[agent] 缺少 CONSOLE_URL 或 TOKEN" >&2
   exit 1
 fi
 
@@ -54,7 +54,7 @@ SYS_INFO="::HOSTNAME::$(hostname 2>/dev/null)
 CLAW_JSON="{}"
 if command -v curl &>/dev/null; then
   CLAW_HTTP=$(curl -s -m 3 -o /tmp/.claw_status -w '%{http_code}' \
-    -H "Authorization: Bearer ${NODE_TOKEN}" \
+    -H "Authorization: Bearer ${TOKEN}" \
     "http://127.0.0.1:${CLAW_PORT}/status" 2>/dev/null || echo "000")
   if [ "$CLAW_HTTP" = "200" ]; then
     CLAW_JSON=$(cat /tmp/.claw_status 2>/dev/null || echo '{}')
@@ -87,7 +87,7 @@ fi
 HTTP_CODE=$(curl -s -o /dev/null -w '%{http_code}' \
   -X POST \
   -H "Content-Type: application/json" \
-  -H "Authorization: Bearer ${NODE_TOKEN}" \
+  -H "Authorization: Bearer ${TOKEN}" \
   -d "$PAYLOAD" \
   "${CONSOLE_URL}/api/monitor/report?nodeId=${NODE_ID}" \
   -m 10 2>/dev/null || echo "000")

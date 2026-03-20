@@ -111,16 +111,18 @@ echo "      GNB 编译安装完成"
 # ============================================
 echo "[2/10] 提交注册..."
 
+# 统一用 TOKEN（兼容旧的 ADMIN_TOKEN）
+TOKEN="${TOKEN:-${ADMIN_TOKEN:-}}"
+
 if [ -z "${PASSCODE:-}" ]; then
-    # 未传入 PASSCODE → 使用 ADMIN_TOKEN 自动获取
-    if [ -z "${ADMIN_TOKEN:-}" ]; then
-        echo "      [失败] 未传入 PASSCODE 或 ADMIN_TOKEN"
-        echo "      用法: curl ... | ADMIN_TOKEN=<token> bash"
+    if [ -z "$TOKEN" ]; then
+        echo "      [失败] 未传入 TOKEN"
+        echo "      用法: curl ... | TOKEN=<token> bash"
         exit 1
     fi
     echo "      自动获取 passcode..."
     PC_RESP=$(curl -sS "$API_BASE/api/enroll/passcode" \
-      -H "Authorization: Bearer $ADMIN_TOKEN")
+      -H "Authorization: Bearer $TOKEN")
     PASSCODE=$(echo "$PC_RESP" | json_val passcode)
     if [ -z "$PASSCODE" ]; then
         echo "      [失败] 无法获取 passcode（Token 无效？）"
@@ -165,9 +167,9 @@ fetch_status() {
     resp=$(curl -sS -H "$ENROLL_AUTH" "$API_BASE/api/enroll/status/$NODE_ID" 2>/dev/null || echo '{}')
     STATUS=$(echo "$resp" | json_val status)
     if [ -z "$STATUS" ] || [ "$STATUS" = "null" ]; then
-        # enrollToken 可能失效，尝试 ADMIN_TOKEN
-        if [ -n "${ADMIN_TOKEN:-}" ]; then
-            resp=$(curl -sS -H "Authorization: Bearer $ADMIN_TOKEN" "$API_BASE/api/enroll/status/$NODE_ID" 2>/dev/null || echo '{}')
+        # enrollToken 可能失效，尝试 TOKEN
+        if [ -n "${TOKEN:-}" ]; then
+            resp=$(curl -sS -H "Authorization: Bearer $TOKEN" "$API_BASE/api/enroll/status/$NODE_ID" 2>/dev/null || echo '{}')
             STATUS=$(echo "$resp" | json_val status)
         fi
     fi
@@ -420,18 +422,10 @@ curl -sSf "$API_BASE/api/enroll/node-agent.sh" -o /opt/gnb/bin/node-agent.sh 2>/
   || echo "      ⚠️ 从 Console 下载 agent 失败，跳过"
 chmod +x /opt/gnb/bin/node-agent.sh 2>/dev/null || true
 
-# Agent 认证 token 优先级: ADMIN_TOKEN > ENROLL_TOKEN
-if [ -n "${ADMIN_TOKEN:-}" ]; then
-    NODE_TOKEN="${ADMIN_TOKEN}"
-else
-    NODE_TOKEN="${ENROLL_TOKEN}"
-    echo "      ⚠️ 未传入 ADMIN_TOKEN，Agent 使用 ENROLL_TOKEN（服务器重启后需重新初始化）"
-fi
-
-# 创建 agent 环境配置
+# 创建 agent 环境配置（TOKEN 统一认证）
 cat > /opt/gnb/bin/agent.env << AGENTEOF
 CONSOLE_URL=$API_BASE
-NODE_TOKEN=$NODE_TOKEN
+TOKEN=$TOKEN
 NODE_ID=$NODE_ID
 GNB_NODE_ID=$GNB_NODE_ID
 GNB_MAP_PATH=/opt/gnb/conf/$GNB_NODE_ID/gnb.map
