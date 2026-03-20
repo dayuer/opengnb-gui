@@ -116,7 +116,6 @@ const PAGE_TITLES = {
   dashboard: '仪表盘',
   nodes: '节点管理',
   users: '用户管理',
-  claw: 'OpenClaw',
   groups: '分组管理',
   settings: '系统设置',
 };
@@ -142,7 +141,6 @@ function renderPage(page) {
     case 'dashboard': renderDashboardPage(container); break;
     case 'nodes':     renderNodesPage(container); break;
     case 'users':     renderUsersPage(container); break;
-    case 'claw':      renderClawPage(container); break;
     case 'groups':    renderGroupsPage(container); break;
     case 'settings':  renderSettingsPage(container); break;
     default:          renderPlaceholder(container, L('lock'), '未知页面', ''); break;
@@ -491,15 +489,63 @@ function renderNodesTable() {
   refreshIcons();
 }
 
-// --- 内联详情面板（增强：完整监控仪表盘） ---
+// --- 内联运维面板（1Panel 风格 Tab Dashboard） ---
+let inlineTabState = {};  // per-node: { tab, clawSubTab }
+
+function getNodeTabState(nodeId) {
+  if (!inlineTabState[nodeId]) inlineTabState[nodeId] = { tab: 'overview', clawSubTab: 'status' };
+  return inlineTabState[nodeId];
+}
+
 function renderInlineDetail(panel, node) {
   if (!node.online) {
-    panel.innerHTML = `<div class="inline-offline">${L('zap')} 节点不可达 — ${escHtml(node.error || 'SSH 连接超时')}
+    panel.innerHTML = `<div class="inline-offline">${L('zap')} 节点不可达 — ${escHtml(node.error || '无上报数据')}
       <button class="confirm-btn" style="margin-left:12px" onclick="provisionNode('${safeAttr(node.id)}')">重新配置</button>
     </div>`;
     refreshIcons();
     return;
   }
+  const ts = getNodeTabState(node.id);
+
+  const tabs = [
+    { key: 'overview', icon: 'bar-chart-3', label: '概览' },
+    { key: 'claw', icon: 'bot', label: 'OpenClaw' },
+    { key: 'terminal', icon: 'terminal', label: '终端' },
+  ];
+
+  let html = `<div class="inline-ops-dashboard">`;
+  // Tab 导航条
+  html += `<div class="inline-tabs">`;
+  for (const t of tabs) {
+    html += `<button class="inline-tab-btn ${ts.tab === t.key ? 'active' : ''}" onclick="switchInlineTab('${safeAttr(node.id)}','${t.key}')">${L(t.icon)} ${t.label}</button>`;
+  }
+  html += `</div>`;
+  // Tab 内容区
+  html += `<div class="inline-tab-content" id="inline-tab-content-${safeAttr(node.id)}">`;
+  switch (ts.tab) {
+    case 'overview': html += renderOverviewTab(node); break;
+    case 'claw':     html += `<div class="inline-claw-loading">${L('loader')} 加载中...</div>`; break;
+    case 'terminal': html += renderTerminalTab(node); break;
+  }
+  html += `</div></div>`;
+  panel.innerHTML = html;
+  refreshIcons();
+
+  // OpenClaw tab 需要异步加载
+  if (ts.tab === 'claw') loadInlineClawTab(node.id, ts.clawSubTab);
+}
+
+function switchInlineTab(nodeId, tab) {
+  const ts = getNodeTabState(nodeId);
+  ts.tab = tab;
+  // 重新渲染当前节点的面板
+  const monitorNode = nodesData.find(n => n.id === nodeId);
+  const panel = document.querySelector(`tr[data-detail="${nodeId}"] .inline-panel`);
+  if (panel && monitorNode) renderInlineDetail(panel, monitorNode);
+}
+
+// --- Tab 1: 概览 ---
+function renderOverviewTab(node) {
   const si = node.sysInfo || {};
   const memPct = si.memTotalMB > 0 ? Math.round(si.memUsedMB / si.memTotalMB * 100) : 0;
   const diskPct = si.diskUsePct ? parseInt(si.diskUsePct) : 0;
@@ -509,17 +555,20 @@ function renderInlineDetail(panel, node) {
   const directRate = totalPeers > 0 ? Math.round(directP / totalPeers * 100) : 0;
   const totalIn = peers.reduce((s, n) => s + (n.inBytes || 0), 0);
   const totalOut = peers.reduce((s, n) => s + (n.outBytes || 0), 0);
-  const clawStatus = node.clawToken ? '已配置' : '未安装';
-  const clawColor = node.clawToken ? 'green' : 'yellow';
+
+  // OpenClaw 状态（从 agent 上报获取）
+  const oc = node.openclaw || {};
+  const clawRunning = oc.running === true;
+  const clawColor = clawRunning ? 'green' : 'yellow';
+  const clawLabel = clawRunning ? '运行中' : '未运行';
 
   let html = `<div class="inline-monitor">`;
-
-  // 健康环 + 实时指标条
+  // 健康环 + 实时指标
   html += `<div class="inline-hero">`;
   html += renderHealthRing(true, node.sshLatencyMs);
   html += `<div class="inline-realtime">
     <div class="realtime-bar">
-      <div class="realtime-item"><span class="ri-label">SSH 延迟</span><span class="ri-value ${node.sshLatencyMs > 500 ? 'red' : node.sshLatencyMs > 200 ? 'yellow' : 'green'}">${node.sshLatencyMs}ms</span></div>
+      <div class="realtime-item"><span class="ri-label">采集延迟</span><span class="ri-value ${node.sshLatencyMs > 500 ? 'red' : node.sshLatencyMs > 200 ? 'yellow' : 'green'}">${node.sshLatencyMs}ms</span></div>
       <div class="realtime-item"><span class="ri-label">P2P 节点</span><span class="ri-value accent">${totalPeers}</span></div>
       <div class="realtime-item"><span class="ri-label">直连率</span><span class="ri-value ${directRate >= 80 ? 'green' : directRate >= 50 ? 'yellow' : 'red'}">${directRate}%</span></div>
       <div class="realtime-item"><span class="ri-label">运行时长</span><span class="ri-value">${escHtml(si.uptime || '—')}</span></div>
@@ -527,57 +576,194 @@ function renderInlineDetail(panel, node) {
   </div>`;
   html += `</div>`;
 
-  // 指标卡片网格
+  // 指标卡片
   html += `<div class="metric-grid">`;
-  html += renderMetricCard(L('link'), 'P2P 直连', `${directP}/${totalPeers}`,
-    directRate >= 80 ? 'green' : directRate >= 50 ? 'yellow' : 'red',
-    `<div class="mc-detail-row"><span>直连率</span><span>${directRate}%</span></div>`,
-    { text: directRate >= 80 ? '健康' : '注意', color: directRate >= 80 ? 'green' : 'yellow' });
-  html += renderMetricCard(L('download'), '总流入', formatBytes(totalIn), 'accent', '');
-  html += renderMetricCard(L('upload'), '总流出', formatBytes(totalOut), 'accent', '');
-  html += renderMetricCard(L('bot'), 'OpenClaw', clawStatus, clawColor,
-    node.clawToken
-      ? `<div class="mc-detail-row"><span>端口</span><span>${node.clawPort || 18789}</span></div>`
-      : '');
+  html += renderMetricCard(L('cpu'), 'CPU', si.cpuCores ? `${si.cpuUsage ?? 0}%` : '—', pctColor(si.cpuUsage || 0),
+    si.cpuCores ? `${si.cpuCores} 核 · ${escHtml(si.loadAvg || '—')}` : '');
+  html += renderMetricCard(L('memory-stick'), '内存', memPct > 0 ? `${memPct}%` : '—', pctColor(memPct),
+    si.memTotalMB > 0 ? `${si.memUsedMB} / ${si.memTotalMB} MB` : '');
+  html += renderMetricCard(L('hard-drive'), '磁盘', diskPct > 0 ? `${diskPct}%` : '—', pctColor(diskPct),
+    si.diskTotal ? `${escHtml(si.diskUsed)} / ${escHtml(si.diskTotal)}` : '');
+  html += renderMetricCard(L('bot'), 'OpenClaw', clawLabel, clawColor,
+    clawRunning ? `PID ${oc.pid || '—'}` : '');
+  html += renderMetricCard(L('link'), 'P2P', `${directP}/${totalPeers}`, directRate >= 80 ? 'green' : 'yellow',
+    `流入 ${formatBytes(totalIn)} · 流出 ${formatBytes(totalOut)}`);
+  html += renderMetricCard(L('monitor'), '系统', escHtml(si.hostname || '—'), 'accent',
+    `${escHtml(si.os || '—')} · ${escHtml(si.kernel || '—')}`);
   html += `</div>`;
 
-  // 系统信息
-  html += `<div class="sys-grid">`;
-  html += renderSysCard(L('cpu'), 'CPU', si.cpuCores ? `${si.cpuCores} 核` : '—', 'accent', `负载 ${escHtml(si.loadAvg || '—')}`);
-  html += renderSysCard(L('memory-stick'), '内存', memPct > 0 ? `${memPct}%` : '—', pctColor(memPct),
-    si.memTotalMB > 0 ? `${si.memUsedMB} / ${si.memTotalMB} MB` : '—', memPct > 0 ? memPct : undefined);
-  html += renderSysCard(L('hard-drive'), '磁盘', diskPct > 0 ? `${diskPct}%` : '—', pctColor(diskPct),
-    si.diskTotal ? `${escHtml(si.diskUsed)} / ${escHtml(si.diskTotal)}` : '—', diskPct > 0 ? diskPct : undefined);
-  html += renderSysCard(L('monitor'), '系统', escHtml(si.hostname || '—'), 'accent', escHtml(si.os || '—'));
-  html += renderSysCard(L('wrench'), '内核', escHtml(si.kernel || '—'), '', escHtml(si.arch || '—'));
+  // GNB 节点表
+  if (peers.length) {
+    html += `<div class="monitor-section-title">GNB 节点 (${peers.length})</div>`;
+    html += `<table class="sub-node-table"><thead><tr><th>UUID</th><th>TUN</th><th>状态</th><th>延迟</th><th>流入</th><th>流出</th></tr></thead><tbody>`;
+    for (const sn of peers) {
+      const sc = sn.status === 'Direct' ? 'green' : sn.status === 'Detecting' ? 'yellow' : 'red';
+      html += `<tr><td>${escHtml(sn.uuid64||'—')}</td><td>${escHtml(sn.tunAddr4||'—')}</td><td class="${sc}">${escHtml(sn.status||'—')}</td><td>${sn.latency4Usec ? `${(sn.latency4Usec/1000).toFixed(1)}ms` : '—'}</td><td>${formatBytes(sn.inBytes||0)}</td><td>${formatBytes(sn.outBytes||0)}</td></tr>`;
+    }
+    html += `</tbody></table>`;
+  }
   html += `</div>`;
+  return html;
+}
 
-  // AI 快捷操作
-  html += `<div class="inline-actions">
-    <button class="quick-btn" onclick="inlineAiCmd('${safeAttr(node.id)}','状态')">${L('bar-chart-3')} 状态</button>
-    <button class="quick-btn" onclick="inlineAiCmd('${safeAttr(node.id)}','重启 gnb')">${L('refresh-cw')} 重启 GNB</button>
-    <button class="quick-btn" onclick="inlineAiCmd('${safeAttr(node.id)}','重启 openclaw')">${L('refresh-cw')} 重启 Claw</button>
-    <button class="quick-btn" onclick="inlineAiCmd('${safeAttr(node.id)}','日志')">${L('file-text')} 日志</button>
-    <button class="quick-btn" onclick="switchPage('claw')">${L('bot')} OpenClaw</button>
-  </div>`;
+// --- Tab 2: OpenClaw (子 Tab) ---
+async function loadInlineClawTab(nodeId, subTab) {
+  const container = document.getElementById(`inline-tab-content-${nodeId}`);
+  if (!container) return;
 
-  html += `</div>`;
-  panel.innerHTML = html;
+  const subTabs = [
+    { key: 'status', icon: 'activity', label: '状态' },
+    { key: 'models', icon: 'cpu', label: '模型' },
+    { key: 'config', icon: 'settings', label: '配置' },
+    { key: 'sessions', icon: 'message-square', label: '会话' },
+    { key: 'channels', icon: 'radio', label: '渠道' },
+  ];
+
+  let html = `<div class="inline-claw-subtabs">`;
+  for (const st of subTabs) {
+    html += `<button class="claw-subtab-btn ${subTab === st.key ? 'active' : ''}" onclick="switchClawSubTab('${safeAttr(nodeId)}','${st.key}')">${L(st.icon)} ${st.label}</button>`;
+  }
+  html += `</div><div class="inline-claw-content" id="claw-content-${safeAttr(nodeId)}">${L('loader')} 加载中...</div>`;
+  container.innerHTML = html;
+  refreshIcons();
+
+  // 检查 clawToken
+  const nodeConfig = allNodesRaw.find(n => n.id === nodeId);
+  if (!nodeConfig?.clawToken) {
+    const detail = document.getElementById(`claw-content-${nodeId}`);
+    if (detail) {
+      // 尝试从 agent 上报的 openclaw 数据展示
+      const monNode = nodesData.find(n => n.id === nodeId);
+      const oc = monNode?.openclaw;
+      if (oc && oc.running && oc.config) {
+        renderAgentClawInfo(detail, oc, subTab);
+      } else {
+        detail.innerHTML = `<div class="claw-empty">${L('info')} 未配置 OpenClaw Token — 无法通过 RPC 查询。<br>请先通过终端执行「安装 openclaw」或手动配置 Token。</div>`;
+      }
+    }
+    refreshIcons();
+    return;
+  }
+
+  // 有 token，走 RPC 代理
+  const detail = document.getElementById(`claw-content-${nodeId}`);
+  try {
+    const res = await authFetch(`/api/claw/${encodeURIComponent(nodeId)}/${subTab}`);
+    const data = await res.json();
+    if (data.error) {
+      detail.innerHTML = `<div class="claw-error">${L('alert-circle')} ${escHtml(data.error)}</div>`;
+      refreshIcons();
+      return;
+    }
+    switch (subTab) {
+      case 'status':   renderClawStatus(detail, data); break;
+      case 'models':   renderClawModels(detail, data); break;
+      case 'config':   renderClawConfig(detail, data); break;
+      case 'sessions': renderClawSessions(detail, data); break;
+      case 'channels': renderClawChannels(detail, data); break;
+    }
+  } catch (err) {
+    detail.innerHTML = `<div class="claw-error">${L('alert-circle')} 请求失败: ${escHtml(err.message)}</div>`;
+    refreshIcons();
+  }
+}
+
+function renderAgentClawInfo(detail, oc, subTab) {
+  const cfg = oc.config || {};
+  if (subTab === 'status') {
+    let html = `<div class="claw-status-grid">`;
+    html += renderMetricCard(L('bot'), '状态', oc.running ? '运行中' : '停止', oc.running ? 'green' : 'red', `PID ${oc.pid || '—'}`);
+    html += renderMetricCard(L('file-code'), '配置', oc.configPath || '—', 'accent', cfg.meta?.lastTouchedVersion || '—');
+    const modelKey = cfg.agents?.defaults?.model?.primary || '—';
+    html += renderMetricCard(L('cpu'), '默认模型', modelKey, 'accent', '');
+    html += `</div>`;
+    detail.innerHTML = html;
+  } else if (subTab === 'config') {
+    detail.innerHTML = `<div class="claw-config"><pre class="claw-config-view">${escHtml(JSON.stringify(cfg, null, 2))}</pre></div>`;
+  } else {
+    detail.innerHTML = `<div class="claw-empty">${L('info')} 需要配置 clawToken 才能查看此标签页数据</div>`;
+  }
   refreshIcons();
 }
 
-/** 内联 AI 指令 — 直接通过 API 发送 */
-async function inlineAiCmd(nodeId, cmd) {
-  const fullCmd = `${cmd} ${nodeId}`;
+function switchClawSubTab(nodeId, subTab) {
+  const ts = getNodeTabState(nodeId);
+  ts.clawSubTab = subTab;
+  loadInlineClawTab(nodeId, subTab);
+}
+
+// --- Tab 3: 终端 ---
+let terminalLogs = {};  // per-node command history
+
+function renderTerminalTab(node) {
+  const logs = terminalLogs[node.id] || [];
+  let html = `<div class="inline-terminal">`;
+  html += `<div class="terminal-output" id="terminal-output-${safeAttr(node.id)}">`;
+  if (logs.length === 0) {
+    html += `<div class="terminal-welcome">输入运维指令，如：状态、重启 gnb、安装 openclaw、日志</div>`;
+  } else {
+    for (const log of logs) {
+      html += `<div class="terminal-line ${log.role}">${log.role === 'user' ? '❯ ' : ''}${escHtml(log.text)}</div>`;
+    }
+  }
+  html += `</div>`;
+  html += `<div class="terminal-input-row">
+    <input type="text" class="terminal-input" id="terminal-input-${safeAttr(node.id)}" placeholder="输入运维指令..." autocomplete="off" onkeydown="if(event.key==='Enter')execTerminalCmd('${safeAttr(node.id)}')">
+    <button class="terminal-send" onclick="execTerminalCmd('${safeAttr(node.id)}')">${L('send')} 执行</button>
+  </div>`;
+  html += `</div>`;
+  return html;
+}
+
+async function execTerminalCmd(nodeId) {
+  const input = document.getElementById(`terminal-input-${nodeId}`);
+  const output = document.getElementById(`terminal-output-${nodeId}`);
+  if (!input || !input.value.trim()) return;
+  const cmd = input.value.trim();
+  input.value = '';
+
+  if (!terminalLogs[nodeId]) terminalLogs[nodeId] = [];
+  terminalLogs[nodeId].push({ role: 'user', text: cmd });
+  output.innerHTML += `<div class="terminal-line user">❯ ${escHtml(cmd)}</div>`;
+  output.innerHTML += `<div class="terminal-line system" id="terminal-pending-${nodeId}">⏳ 执行中...</div>`;
+  output.scrollTop = output.scrollHeight;
+
   try {
+    const fullCmd = cmd.includes(nodeId) ? cmd : `${cmd} ${nodeId}`;
     const res = await authFetch('/api/ai/chat', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ message: fullCmd, nodeId }),
     });
     const data = await res.json();
-    alert(data.response || '指令已发送');
-  } catch (e) { alert(`指令发送失败: ${e.message}`); }
+    const response = data.response || '(无响应)';
+    terminalLogs[nodeId].push({ role: 'assistant', text: response });
+    const pending = document.getElementById(`terminal-pending-${nodeId}`);
+    if (pending) pending.remove();
+    output.innerHTML += `<div class="terminal-line assistant">${escHtml(response)}</div>`;
+  } catch (e) {
+    terminalLogs[nodeId].push({ role: 'error', text: `错误: ${e.message}` });
+    const pending = document.getElementById(`terminal-pending-${nodeId}`);
+    if (pending) pending.remove();
+    output.innerHTML += `<div class="terminal-line error">❌ ${escHtml(e.message)}</div>`;
+  }
+  output.scrollTop = output.scrollHeight;
+}
+
+/** 内联 AI 指令（兼容旧调用） */
+async function inlineAiCmd(nodeId, cmd) {
+  // 切换到终端 tab 并执行
+  const ts = getNodeTabState(nodeId);
+  ts.tab = 'terminal';
+  if (!terminalLogs[nodeId]) terminalLogs[nodeId] = [];
+  terminalLogs[nodeId].push({ role: 'user', text: `${cmd} ${nodeId}` });
+
+  const monitorNode = nodesData.find(n => n.id === nodeId);
+  const panel = document.querySelector(`tr[data-detail="${nodeId}"] .inline-panel`);
+  if (panel && monitorNode) renderInlineDetail(panel, monitorNode);
+
+  // 延迟执行命令
+  setTimeout(() => execTerminalCmd(nodeId), 100);
 }
 
 // --- 分页 ---
@@ -1485,141 +1671,7 @@ function initTheme() {
 // @alpha: OpenClaw 管理页面
 // ═══════════════════════════════════════
 
-let clawSelectedNodeId = null;
-let clawActiveTab = 'status';
-let clawTabCache = {};
-
-function renderClawPage(container) {
-  // 筛选有 clawToken 的节点
-  const clawNodes = nodesData.filter(n => n.clawToken);
-
-  // 自动选中第一个
-  if (!clawSelectedNodeId && clawNodes.length > 0) clawSelectedNodeId = clawNodes[0].id;
-  // 如果选中的节点不在列表中，重置
-  if (clawSelectedNodeId && !clawNodes.find(n => n.id === clawSelectedNodeId)) {
-    clawSelectedNodeId = clawNodes.length > 0 ? clawNodes[0].id : null;
-  }
-
-  if (clawNodes.length === 0) {
-    container.innerHTML = `
-      <div class="page-placeholder">
-        <div class="placeholder-icon">${L('bot')}</div>
-        <div class="placeholder-title">暂无已安装 OpenClaw 的节点</div>
-        <div class="placeholder-desc">在「运维监控」页面选择节点，使用 AI 面板执行「安装 openclaw」</div>
-      </div>`;
-    refreshIcons();
-    return;
-  }
-
-  container.innerHTML = `
-    <div class="claw-layout">
-      <aside class="claw-sidebar" id="claw-sidebar"></aside>
-      <div class="claw-main">
-        <div class="claw-tabs" id="claw-tabs"></div>
-        <div class="claw-detail" id="claw-detail"></div>
-      </div>
-    </div>`;
-
-  renderClawSidebar(clawNodes);
-  renderClawTabs();
-  loadClawTab(clawActiveTab);
-}
-
-function renderClawSidebar(clawNodes) {
-  const sb = $('#claw-sidebar');
-  if (!sb) return;
-  let html = `<div class="group-sidebar-header"><span class="group-sidebar-title">Claw 节点</span></div>`;
-  html += `<ul class="group-list">`;
-  for (const n of clawNodes) {
-    const monNode = nodesData.find(mn => mn.id === n.id);
-    const online = monNode?.online;
-    html += `<li class="group-item ${clawSelectedNodeId === n.id ? 'active' : ''}" onclick="selectClawNode('${safeAttr(n.id)}')">
-      <span class="node-dot ${online ? 'online' : 'offline'}"></span>
-      <span class="group-name">${escHtml(n.name || n.id)}</span>
-    </li>`;
-  }
-  html += `</ul>`;
-  sb.innerHTML = html;
-}
-
-function renderClawTabs() {
-  const tabs = $('#claw-tabs');
-  if (!tabs) return;
-  const tabList = [
-    { key: 'status', icon: 'activity', label: '状态' },
-    { key: 'models', icon: 'cpu', label: '模型' },
-    { key: 'config', icon: 'settings', label: '配置' },
-    { key: 'sessions', icon: 'message-square', label: '会话' },
-    { key: 'channels', icon: 'radio', label: '渠道' },
-  ];
-  tabs.innerHTML = tabList.map(t =>
-    `<button class="claw-tab-btn ${clawActiveTab === t.key ? 'active' : ''}" onclick="switchClawTab('${t.key}')">${L(t.icon)} ${t.label}</button>`
-  ).join('');
-  refreshIcons();
-}
-
-function selectClawNode(nodeId) {
-  clawSelectedNodeId = nodeId;
-  clawTabCache = {};
-  renderClawSidebar(nodesData.filter(n => n.clawToken));
-  loadClawTab(clawActiveTab);
-}
-
-function switchClawTab(tab) {
-  clawActiveTab = tab;
-  renderClawTabs();
-  loadClawTab(tab);
-}
-
-async function loadClawTab(tab) {
-  const detail = $('#claw-detail');
-  if (!detail || !clawSelectedNodeId) return;
-  const nodeId = clawSelectedNodeId;
-
-  // 节点离线检查
-  const monNode = nodesData.find(n => n.id === nodeId);
-  if (!monNode?.online) {
-    detail.innerHTML = `<div class="claw-offline">${L('zap')} 节点不可达 — 无法查询 OpenClaw 状态</div>`;
-    refreshIcons();
-    return;
-  }
-
-  detail.innerHTML = `<div class="claw-loading">${L('loader')} 加载中...</div>`;
-  refreshIcons();
-
-  try {
-    let endpoint = '';
-    switch (tab) {
-      case 'status': endpoint = 'status'; break;
-      case 'models': endpoint = 'models'; break;
-      case 'config': endpoint = 'config'; break;
-      case 'sessions': endpoint = 'sessions'; break;
-      case 'channels': endpoint = 'channels'; break;
-    }
-
-    const res = await authFetch(`/api/claw/${encodeURIComponent(nodeId)}/${endpoint}`);
-    const data = await res.json();
-
-    if (data.error) {
-      detail.innerHTML = `<div class="claw-error">${L('alert-circle')} ${escHtml(data.error)}</div>`;
-      refreshIcons();
-      return;
-    }
-
-    clawTabCache[tab] = data;
-
-    switch (tab) {
-      case 'status': renderClawStatus(detail, data); break;
-      case 'models': renderClawModels(detail, data); break;
-      case 'config': renderClawConfig(detail, data); break;
-      case 'sessions': renderClawSessions(detail, data); break;
-      case 'channels': renderClawChannels(detail, data); break;
-    }
-  } catch (err) {
-    detail.innerHTML = `<div class="claw-error">${L('alert-circle')} 请求失败: ${escHtml(err.message)}</div>`;
-    refreshIcons();
-  }
-}
+// OpenClaw 渲染器（被内联面板 Tab 2 复用）
 
 function renderClawStatus(detail, data) {
   const version = data.runtimeVersion || data.version || '—';
@@ -1702,13 +1754,13 @@ function cancelClawConfigEdit() {
 }
 
 async function saveClawConfig() {
-  if (!clawSelectedNodeId) return;
+  if (!selectedNodeId) return;
   const textarea = $('#claw-config-textarea');
   if (!textarea) return;
   const patch = textarea.value;
 
   try {
-    const res = await authFetch(`/api/claw/${encodeURIComponent(clawSelectedNodeId)}/config`, {
+    const res = await authFetch(`/api/claw/${encodeURIComponent(selectedNodeId)}/config`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ patch }),
@@ -1719,7 +1771,8 @@ async function saveClawConfig() {
     } else {
       showToast('配置已保存');
       cancelClawConfigEdit();
-      loadClawTab('config');
+      // 重新加载 config sub-tab
+      loadInlineClawTab(selectedNodeId, 'config');
     }
   } catch (err) {
     showToast(`保存失败: ${err.message}`, 'error');
