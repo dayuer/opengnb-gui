@@ -174,41 +174,39 @@ SVCUNIT`, log);
 
   /**
    * 安装 OpenClaw Agent
-   * 流程: 升级 Node 到 v22 → npm install -g openclaw@latest → onboard → 提取 token
+   * 流程: 升级 Node → npm install -g openclaw → 手动创建 config + systemd → 提取 token
    * @private
    */
   async _installClaw(nodeConfig, log) {
+    // @alpha: 统一 PATH — sudo 默认 secure_path 不含 /usr/local/bin
+    const envPath = 'export PATH=/usr/local/bin:$PATH;';
+    const sudoEnv = 'sudo env PATH=/usr/local/bin:$PATH';
+
     // Step 1: 确保 Node.js >= 22
-    const nodeVer = (await this._execQuiet(nodeConfig, 'node --version 2>/dev/null || echo "NOT_FOUND"')).trim();
+    const nodeVer = (await this._execQuiet(nodeConfig, `${envPath} node --version 2>/dev/null || echo "NOT_FOUND"`)).trim();
     const majorVer = nodeVer.startsWith('v') ? parseInt(nodeVer.slice(1), 10) : 0;
 
     if (majorVer < 22) {
       log(`      Node.js ${nodeVer || '未安装'}, 需要 >= 22，升级中...`);
-      // 用 n 版本管理器升级
-      await this._exec(nodeConfig, 'sudo npm install -g n 2>/dev/null || (curl -fsSL https://raw.githubusercontent.com/tj/n/master/bin/n | sudo bash -s 22)', log);
-      await this._exec(nodeConfig, 'sudo n 22', log);
-      // 刷新 hash 表
+      await this._exec(nodeConfig, `${sudoEnv} npm install -g n 2>/dev/null || (curl -fsSL https://raw.githubusercontent.com/tj/n/master/bin/n | sudo bash -s 22)`, log);
+      await this._exec(nodeConfig, `${sudoEnv} n 22`, log);
       await this._exec(nodeConfig, 'hash -r 2>/dev/null; node --version', log);
     } else {
       log(`      Node.js ${nodeVer} ✓`);
     }
 
     // Step 2: 安装 OpenClaw
-    // 注意: n 22 后 node/npm 在 /usr/local/bin，SSH 新会话可能还用旧 PATH
-    const envPath = 'export PATH=/usr/local/bin:$PATH;';
     const clawVer = (await this._execQuiet(nodeConfig, `${envPath} openclaw --version 2>/dev/null || echo "NOT_FOUND"`)).trim();
     if (clawVer.includes('NOT_FOUND') || clawVer === '0.0.1') {
       log('      安装 openclaw@latest (后台安装，轮询检查)...');
-      await this._exec(nodeConfig, `${envPath} sudo npm uninstall -g openclaw 2>/dev/null || true`, log);
+      await this._exec(nodeConfig, `${sudoEnv} npm uninstall -g openclaw 2>/dev/null || true`, log);
 
-      // 用 nohup 后台安装，避免 SSH 超时
       await this._execQuiet(nodeConfig,
         `sudo nohup bash -c '${envPath} npm install -g openclaw@latest > /tmp/openclaw-install.log 2>&1 && echo INSTALL_DONE >> /tmp/openclaw-install.log || echo INSTALL_FAIL >> /tmp/openclaw-install.log' &`
       );
 
-      // 轮询等待安装完成 (最长 10 分钟)
-      const maxWait = 600000; // 10min
-      const pollInterval = 15000; // 15s
+      const maxWait = 600000;
+      const pollInterval = 15000;
       const startTime = Date.now();
       let installed = false;
 
@@ -225,51 +223,64 @@ SVCUNIT`, log);
           log(`      npm install 失败: ${errLog.substring(0, 200)}`);
           throw new Error('openclaw npm install 失败');
         }
-        const elapsed = Math.round((Date.now() - startTime) / 1000);
-        log(`      安装中... (${elapsed}s)`);
+        log(`      安装中... (${Math.round((Date.now() - startTime) / 1000)}s)`);
       }
 
-      if (!installed) {
-        throw new Error('openclaw 安装超时 (10分钟)');
-      }
+      if (!installed) throw new Error('openclaw 安装超时 (10分钟)');
     } else {
       log(`      OpenClaw ${clawVer} ✓`);
     }
 
     // 验证安装
     const verCheck = (await this._execQuiet(nodeConfig, `${envPath} openclaw --version 2>/dev/null || echo "FAIL"`)).trim();
-    if (verCheck === 'FAIL') {
-      throw new Error('openclaw 安装失败，命令不可用');
-    }
+    if (verCheck === 'FAIL') throw new Error('openclaw 安装失败，命令不可用');
     log(`      openclaw ${verCheck} 安装成功`);
 
-    // Step 3: 执行 onboard（自动创建 systemd 服务 + 生成 token）
-    log('      执行 openclaw onboard ...');
-    // onboard 需要以实际运行用户身份执行（创建 ~/.openclaw 目录）
-    // 用 root 运行以便 systemd 服务以 root 身份运行
-    await this._exec(nodeConfig, `${envPath} sudo openclaw onboard --install-daemon --yes 2>&1 || sudo openclaw onboard --install-daemon 2>&1 || true`, log);
-
-    // Step 4: 确保 Gateway 服务运行
-    log('      启动 Gateway ...');
-    // onboard 可能创建了 openclaw-gateway 或 openclaw 服务
-    const svcName = (await this._execQuiet(nodeConfig,
-      'systemctl list-unit-files | grep -o "openclaw[^ ]*\\.service" | head -1 || echo "openclaw-gateway.service"'
+    // Step 3: 手动创建 config + systemd (绕过交互式 onboard TUI)
+    // @alpha: onboard 有不可跳过的交互式安全确认 TUI，无法通过 SSH 自动化
+    log('      创建 OpenClaw 配置 ...');
+    const token = (await this._execQuiet(nodeConfig,
+      `python3 -c "import secrets; print(secrets.token_hex(32))" 2>/dev/null || openssl rand -hex 32`
     )).trim();
-    log(`      服务名: ${svcName}`);
-    await this._exec(nodeConfig, `sudo systemctl enable ${svcName} && sudo systemctl restart ${svcName}`, log);
-    await this._exec(nodeConfig, `sleep 5 && sudo systemctl is-active ${svcName}`, log);
 
-    // Step 5: 提取 Gateway Token
-    log('      提取 Gateway Token ...');
-    const tokenResult = await this._extractClawToken(nodeConfig, log);
+    const clawConfig = JSON.stringify({
+      gateway: {
+        port: 18789, bind: '0.0.0.0',
+        auth: { mode: 'token', token },
+      },
+    }, null, 2);
+
+    await this._exec(nodeConfig, `sudo mkdir -p /root/.openclaw && echo '${clawConfig}' | sudo tee /root/.openclaw/openclaw.json > /dev/null`, log);
+    log(`      配置已写入 (/root/.openclaw/openclaw.json)`);
+
+    // Step 4: 创建 systemd 服务
+    log('      创建 systemd 服务 ...');
+    const svcUnit = [
+      '[Unit]', 'Description=OpenClaw Gateway', 'After=network.target', '',
+      '[Service]', 'Type=simple', 'Environment=PATH=/usr/local/bin:/usr/bin:/bin',
+      'ExecStart=/usr/local/bin/openclaw gateway', 'Restart=always', 'RestartSec=5',
+      'WorkingDirectory=/root', '',
+      '[Install]', 'WantedBy=multi-user.target',
+    ].join('\\n');
+
+    await this._exec(nodeConfig, `printf '${svcUnit}' | sudo tee /etc/systemd/system/openclaw-gateway.service > /dev/null`, log);
+    await this._exec(nodeConfig, 'sudo systemctl daemon-reload && sudo systemctl enable openclaw-gateway && sudo systemctl start openclaw-gateway', log);
+    await this._exec(nodeConfig, 'sleep 3 && sudo systemctl is-active openclaw-gateway', log);
+
+    // Step 5: 提取 Token + 触发保存
+    log(`      Token: ${token.substring(0, 8)}...`);
+    this.emit('claw_ready', {
+      nodeId: nodeConfig.id,
+      token,
+      port: 18789,
+      tunAddr: nodeConfig.tunAddr,
+    });
 
     // Step 6: 验证 RPC 可达
-    if (tokenResult.token) {
-      await this._verifyClawRPC(nodeConfig, tokenResult.token, log);
-    }
+    await this._verifyClawRPC(nodeConfig, token, log);
 
     log('      ✅ OpenClaw 安装完成');
-    return tokenResult;
+    return { token, port: 18789 };
   }
 
   /**
