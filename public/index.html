@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<html lang="zh-CN">
+<html lang="zh-CN" class="dark">
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
@@ -7,146 +7,200 @@
   <title>SynonClaw Console</title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
-  <link rel="stylesheet" href="/css/style.css">
   <script src="https://unpkg.com/lucide@latest/dist/umd/lucide.min.js"></script>
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@tailwindcss/browser@4"></link>
+  <script src="https://cdn.jsdelivr.net/npm/@tailwindcss/browser@4"></script>
+  <style type="text/tailwindcss">
+    @theme {
+      --color-primary: #135bec;
+      --color-primary-light: #3b7bf0;
+      --color-primary-dark: #0e47bd;
+      --color-surface: #111118;
+      --color-elevated: #1a1a24;
+      --color-base: #0a0a0f;
+      --color-border-default: #2a2a3a;
+      --color-border-subtle: #1e1e2e;
+      --color-text-primary: #f0f0f5;
+      --color-text-secondary: #9898a8;
+      --color-text-muted: #5c5c6e;
+      --color-success: #3fb950;
+      --color-warning: #d29922;
+      --color-danger: #f85149;
+      --color-info: #58a6ff;
+      --font-sans: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+      --font-mono: 'JetBrains Mono', 'Fira Code', monospace;
+    }
+
+    /* 全局滚动条 */
+    ::-webkit-scrollbar { width: 6px; height: 6px; }
+    ::-webkit-scrollbar-track { background: transparent; }
+    ::-webkit-scrollbar-thumb { background: var(--color-border-default); border-radius: 3px; }
+
+    /* 健康圆环 SVG */
+    .health-ring-bg { fill: none; stroke: var(--color-border-default); stroke-width: 4; }
+    .health-ring-fg { fill: none; stroke-width: 4; stroke-linecap: round; transition: stroke-dashoffset 0.6s; }
+    .health-ring-fg.online { stroke: var(--color-success); }
+    .health-ring-fg.offline { stroke: var(--color-danger); }
+
+    /* 自定义进度条 */
+    .gauge-bar { height: 4px; border-radius: 2px; background: var(--color-border-default); overflow: hidden; }
+    .gauge-fill { height: 100%; border-radius: 2px; transition: width 0.4s; }
+  </style>
 </head>
-<body>
-  <!-- @beta: 独立全屏登录页 -->
-  <div id="login-page" style="display:none">
-    <div class="login-bg">
-      <div class="login-bg-orb login-bg-orb-1"></div>
-      <div class="login-bg-orb login-bg-orb-2"></div>
-      <div class="login-bg-orb login-bg-orb-3"></div>
+<body class="bg-base text-text-primary font-sans antialiased min-h-screen">
+
+  <!-- ===== 登录页 ===== -->
+  <div id="login-page" class="hidden fixed inset-0 z-50 flex items-center justify-center">
+    <!-- 背景光晕 -->
+    <div class="absolute inset-0 overflow-hidden">
+      <div class="absolute w-[500px] h-[500px] rounded-full bg-primary/10 blur-[120px] -top-20 -left-20 animate-pulse"></div>
+      <div class="absolute w-[400px] h-[400px] rounded-full bg-info/8 blur-[100px] bottom-10 right-10 animate-pulse [animation-delay:1s]"></div>
     </div>
-    <div class="login-card">
-      <div class="login-brand">
-        <div class="login-logo">◈</div>
-        <h1 class="login-title">SynonClaw Console</h1>
-        <p class="login-subtitle">P2P VPN 管理中控台</p>
+    <!-- 登录卡片 -->
+    <div class="relative bg-surface/90 backdrop-blur-xl border border-border-default rounded-2xl p-10 w-full max-w-md shadow-2xl">
+      <div class="text-center mb-8">
+        <div class="text-4xl mb-3">◈</div>
+        <h1 class="text-2xl font-bold text-text-primary">SynonClaw Console</h1>
+        <p class="text-text-muted text-sm mt-1">P2P VPN 管理中控台</p>
       </div>
-      <form id="login-form" onsubmit="doLogin(event)">
-        <div class="login-field">
-          <label for="login-username">用户名</label>
-          <div class="login-input-wrap">
-            <i data-lucide="user" class="login-input-icon"></i>
-            <input type="text" id="login-username" placeholder="输入用户名" autocomplete="username" required>
+      <form id="login-form" onsubmit="App.doLogin(event)">
+        <div class="mb-5">
+          <label for="login-username" class="block text-xs font-medium text-text-secondary mb-1.5">用户名</label>
+          <div class="relative">
+            <i data-lucide="user" class="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-text-muted"></i>
+            <input type="text" id="login-username" placeholder="输入用户名" autocomplete="username" required
+              class="w-full bg-elevated border border-border-default rounded-lg pl-10 pr-4 py-2.5 text-sm text-text-primary placeholder:text-text-muted focus:border-primary focus:ring-1 focus:ring-primary/50 outline-none transition">
           </div>
         </div>
-        <div class="login-field">
-          <label for="login-password">密码</label>
-          <div class="login-input-wrap">
-            <i data-lucide="lock" class="login-input-icon"></i>
-            <input type="password" id="login-password" placeholder="输入密码" autocomplete="current-password" required>
+        <div class="mb-5">
+          <label for="login-password" class="block text-xs font-medium text-text-secondary mb-1.5">密码</label>
+          <div class="relative">
+            <i data-lucide="lock" class="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-text-muted"></i>
+            <input type="password" id="login-password" placeholder="输入密码" autocomplete="current-password" required
+              class="w-full bg-elevated border border-border-default rounded-lg pl-10 pr-4 py-2.5 text-sm text-text-primary placeholder:text-text-muted focus:border-primary focus:ring-1 focus:ring-primary/50 outline-none transition">
           </div>
         </div>
-        <div id="login-error" class="login-error"></div>
-        <button type="submit" class="login-btn" id="login-btn">
+        <div id="login-error" class="hidden text-danger text-xs mb-3"></div>
+        <button type="submit" id="login-btn"
+          class="w-full bg-primary hover:bg-primary-light text-white font-medium py-2.5 rounded-lg transition flex items-center justify-center gap-2 cursor-pointer disabled:opacity-50">
           <span id="login-btn-text">登 录</span>
-          <i data-lucide="arrow-right" class="login-btn-icon"></i>
+          <i data-lucide="arrow-right" class="w-4 h-4"></i>
         </button>
       </form>
-      <div class="login-footer">
-        <span>Powered by <a href="https://github.com/gnbdev/opengnb" target="_blank" rel="noopener">OpenGNB</a></span>
+      <div class="text-center mt-6 text-text-muted text-xs">
+        Powered by <a href="https://github.com/gnbdev/opengnb" target="_blank" rel="noopener" class="text-primary hover:underline">OpenGNB</a>
       </div>
     </div>
   </div>
 
-  <div id="app" style="display:none">
-    <!-- 左侧：抽屉导航 -->
-    <nav id="sidebar">
-      <div class="sidebar-logo">
-        <span class="logo">◈ SynonClaw Console</span>
-        <span class="version">v0.1.0</span>
+  <!-- ===== 主应用 ===== -->
+  <div id="app" class="hidden h-screen flex">
+    <!-- 侧边栏 -->
+    <nav id="sidebar" class="w-60 bg-surface border-r border-border-default flex flex-col shrink-0 transition-all duration-300 max-md:fixed max-md:inset-y-0 max-md:left-0 max-md:z-40 max-md:-translate-x-full max-md:data-[open]:translate-x-0">
+      <div class="px-5 py-4 border-b border-border-subtle flex items-center justify-between">
+        <div>
+          <span class="font-semibold text-sm text-text-primary">◈ SynonClaw Console</span>
+          <span class="text-[10px] text-text-muted ml-1.5">v0.1.0</span>
+        </div>
       </div>
-      <ul id="nav-menu">
-        <li class="nav-item active" data-page="dashboard">
-          <span class="nav-icon"><i data-lucide="layout-dashboard"></i></span><span class="nav-label">仪表盘</span>
+      <ul id="nav-menu" class="flex-1 py-3 px-3 space-y-0.5 overflow-y-auto">
+        <li class="nav-item group flex items-center gap-3 px-3 py-2 rounded-lg text-sm cursor-pointer transition text-text-secondary hover:text-text-primary hover:bg-elevated data-[active]:bg-primary/10 data-[active]:text-primary" data-page="dashboard" data-active>
+          <i data-lucide="layout-dashboard" class="w-4 h-4"></i><span>仪表盘</span>
         </li>
-
-        <li class="nav-item" data-page="nodes">
-          <span class="nav-icon"><i data-lucide="globe"></i></span><span class="nav-label">节点管理</span>
+        <li class="nav-item group flex items-center gap-3 px-3 py-2 rounded-lg text-sm cursor-pointer transition text-text-secondary hover:text-text-primary hover:bg-elevated data-[active]:bg-primary/10 data-[active]:text-primary" data-page="nodes">
+          <i data-lucide="globe" class="w-4 h-4"></i><span>节点管理</span>
         </li>
-        <li class="nav-item" data-page="users">
-          <span class="nav-icon"><i data-lucide="users"></i></span><span class="nav-label">用户管理</span>
+        <li class="nav-item group flex items-center gap-3 px-3 py-2 rounded-lg text-sm cursor-pointer transition text-text-secondary hover:text-text-primary hover:bg-elevated data-[active]:bg-primary/10 data-[active]:text-primary" data-page="users">
+          <i data-lucide="users" class="w-4 h-4"></i><span>用户管理</span>
         </li>
-
-        <li class="nav-item" data-page="groups">
-          <span class="nav-icon"><i data-lucide="folder"></i></span><span class="nav-label">分组管理</span>
+        <li class="nav-item group flex items-center gap-3 px-3 py-2 rounded-lg text-sm cursor-pointer transition text-text-secondary hover:text-text-primary hover:bg-elevated data-[active]:bg-primary/10 data-[active]:text-primary" data-page="groups">
+          <i data-lucide="folder" class="w-4 h-4"></i><span>分组管理</span>
         </li>
-        <li class="nav-item" data-page="settings">
-          <span class="nav-icon"><i data-lucide="settings"></i></span><span class="nav-label">系统设置</span>
+        <li class="nav-item group flex items-center gap-3 px-3 py-2 rounded-lg text-sm cursor-pointer transition text-text-secondary hover:text-text-primary hover:bg-elevated data-[active]:bg-primary/10 data-[active]:text-primary" data-page="settings">
+          <i data-lucide="settings" class="w-4 h-4"></i><span>系统设置</span>
         </li>
       </ul>
-      <div class="sidebar-footer">
-        <div id="sidebar-status">
-          <span id="connection-status" class="status-badge offline">断开</span>
-          <span id="last-update" class="meta-text">—</span>
-        </div>
+      <div class="px-5 py-3 border-t border-border-subtle flex items-center gap-2 text-xs">
+        <span id="connection-status" class="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-medium bg-danger/15 text-danger">断开</span>
+        <span id="last-update" class="text-text-muted">—</span>
       </div>
     </nav>
 
-    <!-- 主内容区 -->
-    <div id="main-wrapper">
-      <header id="header">
-        <div class="header-left">
-          <button id="sidebar-toggle" class="sidebar-toggle-btn"><i data-lucide="menu"></i></button>
-          <h1 id="page-title">仪表盘</h1>
+    <!-- 侧边栏遮罩（移动端） -->
+    <div id="sidebar-backdrop" class="hidden fixed inset-0 bg-black/50 z-30 md:hidden" onclick="App.closeSidebar()"></div>
+
+    <!-- 主内容区域 -->
+    <div id="main-wrapper" class="flex-1 flex flex-col min-w-0">
+      <!-- Header -->
+      <header class="h-14 bg-surface/80 backdrop-blur border-b border-border-default flex items-center justify-between px-4 shrink-0 sticky top-0 z-20">
+        <div class="flex items-center gap-3">
+          <button id="sidebar-toggle" class="p-1.5 rounded-lg text-text-secondary hover:text-text-primary hover:bg-elevated transition cursor-pointer md:hidden">
+            <i data-lucide="menu" class="w-5 h-5"></i>
+          </button>
+          <h1 id="page-title" class="text-base font-semibold">仪表盘</h1>
         </div>
-        <div class="header-right">
-          <span id="pending-badge" class="badge accent" style="display:none;cursor:pointer" onclick="switchPage('nodes');setTimeout(()=>{const s=document.getElementById('filter-status');if(s){s.value='pending';s.dispatchEvent(new Event('change'))}},100)">待审批 <span id="pending-count">0</span></span>
+        <div class="flex items-center gap-3">
+          <span id="pending-badge" class="hidden px-2.5 py-1 rounded-full text-xs font-medium bg-warning/15 text-warning cursor-pointer" onclick="App.switchPage('nodes');setTimeout(()=>{const s=document.getElementById('filter-status');if(s){s.value='pending';s.dispatchEvent(new Event('change'))}},100)">
+            待审批 <span id="pending-count">0</span>
+          </span>
           <!-- 用户菜单 -->
-          <div class="user-menu" id="user-menu">
-            <button class="user-menu-trigger" id="user-menu-trigger" onclick="toggleUserMenu()">
-              <span class="user-avatar">AD</span>
-              <div class="user-menu-info">
-                <span class="user-menu-name">Admin</span>
-                <span class="user-menu-role">Admin</span>
+          <div class="relative" id="user-menu">
+            <button id="user-menu-trigger" onclick="App.toggleUserMenu()" class="flex items-center gap-2 px-2 py-1 rounded-lg hover:bg-elevated transition cursor-pointer">
+              <span class="w-7 h-7 rounded-full bg-primary/20 text-primary flex items-center justify-center text-xs font-semibold">AD</span>
+              <div class="hidden sm:block text-left">
+                <div class="text-xs font-medium text-text-primary leading-tight">Admin</div>
+                <div class="text-[10px] text-text-muted">Admin</div>
               </div>
-              <i data-lucide="chevron-down" class="user-menu-chevron"></i>
+              <i data-lucide="chevron-down" class="w-3.5 h-3.5 text-text-muted"></i>
             </button>
-            <div class="user-dropdown" id="user-dropdown">
-              <div class="user-dropdown-header">
-                <div class="user-dropdown-name">Admin</div>
-                <div class="user-dropdown-email">SynonClaw Console 管理员</div>
+            <!-- 下拉菜单 -->
+            <div id="user-dropdown" class="hidden absolute right-0 top-full mt-1 w-56 bg-surface border border-border-default rounded-xl shadow-xl py-1 z-50">
+              <div class="px-4 py-2.5 border-b border-border-subtle">
+                <div class="text-sm font-medium text-text-primary">Admin</div>
+                <div class="text-xs text-text-muted">SynonClaw Console 管理员</div>
               </div>
-              <div class="user-dropdown-divider"></div>
-              <button class="user-dropdown-item" onclick="closeUserMenu()">
-                <i data-lucide="user"></i><span>个人资料</span>
+              <button class="w-full flex items-center gap-2.5 px-4 py-2 text-xs text-text-secondary hover:text-text-primary hover:bg-elevated transition cursor-pointer" onclick="App.closeUserMenu()">
+                <i data-lucide="user" class="w-3.5 h-3.5"></i><span>个人资料</span>
               </button>
-              <button class="user-dropdown-item" onclick="showApiKey()">
-                <i data-lucide="key-round"></i><span>API 密钥</span>
+              <button class="w-full flex items-center gap-2.5 px-4 py-2 text-xs text-text-secondary hover:text-text-primary hover:bg-elevated transition cursor-pointer" onclick="App.showApiKey()">
+                <i data-lucide="key-round" class="w-3.5 h-3.5"></i><span>API 密钥</span>
               </button>
-              <a class="user-dropdown-item" href="https://github.com/gnbdev/opengnb" target="_blank" rel="noopener" onclick="closeUserMenu()">
-                <i data-lucide="github"></i><span>GitHub</span>
+              <a class="flex items-center gap-2.5 px-4 py-2 text-xs text-text-secondary hover:text-text-primary hover:bg-elevated transition" href="https://github.com/gnbdev/opengnb" target="_blank" rel="noopener" onclick="App.closeUserMenu()">
+                <i data-lucide="github" class="w-3.5 h-3.5"></i><span>GitHub</span>
               </a>
-              <div class="user-dropdown-divider"></div>
-              <button class="user-dropdown-item" id="theme-toggle-btn" onclick="toggleTheme()">
-                <i data-lucide="sun" id="theme-icon"></i><span id="theme-label">亮色模式</span>
+              <div class="border-t border-border-subtle my-1"></div>
+              <button class="w-full flex items-center gap-2.5 px-4 py-2 text-xs text-text-secondary hover:text-text-primary hover:bg-elevated transition cursor-pointer" onclick="App.toggleTheme()">
+                <i data-lucide="sun" id="theme-icon" class="w-3.5 h-3.5"></i><span id="theme-label">亮色模式</span>
               </button>
-              <button class="user-dropdown-item" onclick="closeUserMenu()">
-                <i data-lucide="help-circle"></i><span>重新查看新手引导</span>
-              </button>
-              <div class="user-dropdown-divider"></div>
-              <button class="user-dropdown-item danger" onclick="logout()">
-                <i data-lucide="log-out"></i><span>退出登录</span>
+              <div class="border-t border-border-subtle my-1"></div>
+              <button class="w-full flex items-center gap-2.5 px-4 py-2 text-xs text-danger hover:bg-danger/10 transition cursor-pointer" onclick="App.logout()">
+                <i data-lucide="log-out" class="w-3.5 h-3.5"></i><span>退出登录</span>
               </button>
             </div>
           </div>
         </div>
       </header>
 
-      <div id="main-content">
-        <!-- 页面内容由 JS 动态渲染 -->
-      </div>
-    </div>
-
-    <!-- 全局弹窗 -->
-    <div class="modal-overlay" id="modal-overlay" style="display:none">
-      <div class="modal" id="modal-content"></div>
+      <!-- 页面内容 -->
+      <div id="main-content" class="flex-1 overflow-y-auto p-4 md:p-6"></div>
     </div>
   </div>
 
+  <!-- 全局弹窗 -->
+  <div id="modal-overlay" class="hidden fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm" onclick="if(event.target===this)App.closeModal()">
+    <div id="modal-content" class="bg-surface border border-border-default rounded-2xl shadow-2xl w-full max-w-md mx-4 p-6"></div>
+  </div>
+
+  <!-- JS 模块 -->
+  <script src="/js/utils.js"></script>
+  <script src="/js/core.js"></script>
+  <script src="/js/ws.js"></script>
+  <script src="/js/modal.js"></script>
   <script src="/js/dashboard.js"></script>
+  <script src="/js/nodes.js"></script>
+  <script src="/js/users.js"></script>
+  <script src="/js/groups.js"></script>
+  <script src="/js/settings.js"></script>
   <script src="/js/app.js"></script>
 </body>
 </html>
