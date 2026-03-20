@@ -60,10 +60,39 @@ function createEnrollRouter(keyManager, security = {}) {
     res.status(result.success ? 200 : 400).json(result);
   });
 
-  // @alpha: GET /api/enroll/status/:id — 受 enrollToken + nodeId 绑定保护
-  router.get('/status/:id', requireEnrollToken, requireNodeIdMatch, (req, res) => {
+  // @alpha: GET /api/enroll/status/:id — 支持 enrollToken 或 admin/apiToken 认证
+  //   解决服务器重启后 enrollToken 丢失导致脚本轮询失败
+  const flexAuthStatus = (req, res, next) => {
+    const authHeader = req.headers.authorization;
+    if (!authHeader || !authHeader.startsWith('Bearer ')) {
+      return res.status(401).json({ error: '未提供认证 token' });
+    }
+    const token = authHeader.slice(7);
+    // 优先尝试 enrollToken
+    const enrollResult = keyManager.verifyEnrollToken(token);
+    if (enrollResult.valid) {
+      // enrollToken 仍需校验 nodeId 绑定
+      if (req.params.id && req.params.id !== enrollResult.nodeId) {
+        return res.status(403).json({ error: '无权访问此节点' });
+      }
+      req.enrollNode = { nodeId: enrollResult.nodeId };
+      return next();
+    }
+    // 降级: admin/apiToken — 允许任何管理员查询任意节点状态
+    if (requireAuth) {
+      requireAuth(req, res, (err) => {
+        if (err) return res.status(401).json({ error: 'token 无效' });
+        req.enrollNode = { nodeId: req.params.id }; // 管理员可查任意节点
+        next();
+      });
+    } else {
+      res.status(401).json({ error: 'token 无效' });
+    }
+  };
+
+  router.get('/status/:id', flexAuthStatus, (req, res) => {
     const node = keyManager.getAllNodes().find(n => n.id === req.params.id);
-    if (!node) return res.status(404).json({ status: 'unknown' });
+    if (!node) return res.status(404).json({ status: 'deleted', message: '节点不存在或已被拒绝' });
     res.json({
       status: node.status,
       tunAddr: node.tunAddr || '',

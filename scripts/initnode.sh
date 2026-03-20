@@ -160,8 +160,16 @@ CONSOLE_GNB_TUN_ADDR=""
 
 fetch_status() {
     local resp
+    # 优先用 enrollToken，失败时用 ADMIN_TOKEN fallback（服务器重启后 enrollToken 可能丢失）
     resp=$(curl -sS -H "$ENROLL_AUTH" "$API_BASE/api/enroll/status/$NODE_ID" 2>/dev/null || echo '{}')
     STATUS=$(echo "$resp" | json_val status)
+    if [ -z "$STATUS" ] || [ "$STATUS" = "null" ]; then
+        # enrollToken 可能失效，尝试 ADMIN_TOKEN
+        if [ -n "${ADMIN_TOKEN:-}" ]; then
+            resp=$(curl -sS -H "Authorization: Bearer $ADMIN_TOKEN" "$API_BASE/api/enroll/status/$NODE_ID" 2>/dev/null || echo '{}')
+            STATUS=$(echo "$resp" | json_val status)
+        fi
+    fi
     TUN_ADDR=$(echo "$resp" | json_val tunAddr)
     GNB_NODE_ID=$(echo "$resp" | json_val gnbNodeId)
     CONSOLE_GNB_NODE_ID=$(echo "$resp" | json_val consoleGnbNodeId)
@@ -180,8 +188,9 @@ else
         fetch_status
         case "$STATUS" in
             approved) echo "" && echo "      ✅ 审批通过！"; break ;;
-            rejected) echo "" && echo "      ❌ 审批被拒绝"; exit 1 ;;
+            rejected|deleted) echo "" && echo "      ❌ 审批被拒绝"; exit 1 ;;
             pending)  printf "." ;;
+            *)        printf "?" ;;  # 未知状态（如认证失败），继续重试
         esac
     done
 fi
