@@ -39,14 +39,14 @@ describe('routes/enroll (split auth)', () => {
 
   const auth = { Authorization: 'Bearer admin-token' };
 
-  // @alpha: 辅助 — 注册节点并获取 enrollToken
-  async function enrollNode(id, name = 'Test') {
+  // @alpha: 辅助 — 注册节点并获取 enrollToken + 平台分配的 nodeId
+  async function enrollNode(name, displayName = 'Test') {
     const pcRes = await request(app, 'GET', '/api/enroll/passcode', { headers: auth });
     const { passcode } = pcRes.body;
     const res = await request(app, 'POST', '/api/enroll', {
-      body: { passcode, id, name },
+      body: { passcode, id: name, name: displayName },
     });
-    return { enrollToken: res.body.enrollToken, res };
+    return { enrollToken: res.body.enrollToken, nodeId: res.body.nodeId, res };
   }
 
   // --- 公开端点 ---
@@ -159,10 +159,10 @@ describe('routes/enroll (split auth)', () => {
 
   // S4.10: 审批 (已认证+节点存在)
   it('S4.10 should approve pending node with auth', async () => {
-    await enrollNode('n1', 'N1');
+    const { nodeId } = await enrollNode('n1', 'N1');
 
-    // 审批
-    const res = await request(app, 'POST', '/api/enroll/n1/approve', {
+    // 审批 — 使用平台分配的 nodeId
+    const res = await request(app, 'POST', `/api/enroll/${nodeId}/approve`, {
       headers: auth,
       body: { tunAddr: '10.1.0.2' },
     });
@@ -172,21 +172,21 @@ describe('routes/enroll (split auth)', () => {
 
   // S4.13: 删除 (已认证)
   it('S4.13 should delete node with auth', async () => {
-    await enrollNode('del1', 'Del');
+    const { nodeId } = await enrollNode('del1', 'Del');
 
-    const res = await request(app, 'DELETE', '/api/enroll/del1', { headers: auth });
+    const res = await request(app, 'DELETE', `/api/enroll/${nodeId}`, { headers: auth });
     assert.equal(res.statusCode, 200);
     assert.ok(res.body.success);
   });
 
-  // S4.16: 注册缺 id
+  // S4.16: 注册缺 name (旧式缺 id)
   it('S4.16 should reject enrollment without id', async () => {
     const pcRes = await request(app, 'GET', '/api/enroll/passcode', { headers: auth });
     const res = await request(app, 'POST', '/api/enroll', {
-      body: { passcode: pcRes.body.passcode, name: 'NoId' },
+      body: { passcode: pcRes.body.passcode },
     });
     assert.equal(res.statusCode, 400);
-    assert.ok(res.body.message.includes('id'));
+    assert.ok(res.body.message.includes('名称') || res.body.message.includes('id'));
   });
 
   // ═══════════════════════════════════════
@@ -227,9 +227,9 @@ describe('routes/enroll (split auth)', () => {
 
   describe('enrollToken — 200 有效 token', () => {
     it('should allow status with valid token', async () => {
-      const { enrollToken } = await enrollNode('node-1');
+      const { enrollToken, nodeId } = await enrollNode('node-1');
       const headers = { Authorization: `Bearer ${enrollToken}` };
-      const res = await request(app, 'GET', '/api/enroll/status/node-1', { headers });
+      const res = await request(app, 'GET', `/api/enroll/status/${nodeId}`, { headers });
       assert.equal(res.statusCode, 200);
       assert.equal(res.body.status, 'pending');
     });
@@ -244,19 +244,19 @@ describe('routes/enroll (split auth)', () => {
 
   describe('enrollToken — 403 nodeId 绑定', () => {
     it('should reject status for different nodeId', async () => {
-      const { enrollToken } = await enrollNode('node-a');
-      await enrollNode('node-b');
+      const { enrollToken, nodeId: idA } = await enrollNode('node-a');
+      const { nodeId: idB } = await enrollNode('node-b');
       const headers = { Authorization: `Bearer ${enrollToken}` };
       // node-a 的 token 访问 node-b 的状态
-      const res = await request(app, 'GET', '/api/enroll/status/node-b', { headers });
+      const res = await request(app, 'GET', `/api/enroll/status/${idB}`, { headers });
       assert.equal(res.statusCode, 403);
     });
 
     it('should reject gnb-pubkey POST for different nodeId', async () => {
       const { enrollToken } = await enrollNode('node-a');
-      await enrollNode('node-b');
+      const { nodeId: idB } = await enrollNode('node-b');
       const headers = { Authorization: `Bearer ${enrollToken}` };
-      const res = await request(app, 'POST', '/api/enroll/node-b/gnb-pubkey', {
+      const res = await request(app, 'POST', `/api/enroll/${idB}/gnb-pubkey`, {
         headers,
         body: { publicKey: 'attacker-key' },
       });
@@ -265,9 +265,9 @@ describe('routes/enroll (split auth)', () => {
 
     it('should reject ready POST for different nodeId', async () => {
       const { enrollToken } = await enrollNode('node-a');
-      await enrollNode('node-b');
+      const { nodeId: idB } = await enrollNode('node-b');
       const headers = { Authorization: `Bearer ${enrollToken}` };
-      const res = await request(app, 'POST', '/api/enroll/node-b/ready', {
+      const res = await request(app, 'POST', `/api/enroll/${idB}/ready`, {
         headers,
         body: { sshUser: 'synon' },
       });
@@ -300,8 +300,8 @@ describe('routes/enroll (split auth)', () => {
 
   describe('管理端点兼容', () => {
     it('should still allow admin operations with ADMIN_TOKEN', async () => {
-      await enrollNode('mgmt-1');
-      const res = await request(app, 'POST', '/api/enroll/mgmt-1/approve', {
+      const { nodeId } = await enrollNode('mgmt-1');
+      const res = await request(app, 'POST', `/api/enroll/${nodeId}/approve`, {
         headers: auth,
         body: { tunAddr: '10.1.0.99' },
       });

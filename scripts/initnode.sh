@@ -20,8 +20,7 @@ set -euo pipefail
 
 # --- 参数（全部可通过环境变量覆盖）---
 CONSOLE="${CONSOLE:-api.synonclaw.com}"
-NODE_ID="${NODE_ID:-$(hostname -s)}"
-NODE_NAME="${NODE_NAME:-$NODE_ID}"
+NODE_NAME="${NODE_ID:-$(hostname -s)}"  # @alpha: 用户提交的名称（hostname）
 SSH_USER="synon"
 
 # 自动检测协议：域名用 https，IP 用 http
@@ -36,11 +35,11 @@ json_val() { python3 -c "import sys,json; print(json.load(sys.stdin).get('$1',''
 
 echo ""
 echo "  ╔══════════════════════════════════════╗"
-echo "  ║  SynonClaw Console — 节点初始化 v0.5.0     ║"
+echo "  ║  SynonClaw Console — 节点初始化 v0.6.0     ║"
 echo "  ╚══════════════════════════════════════╝"
 echo ""
 echo "  Console:  $CONSOLE ($API_BASE)"
-echo "  Node ID:  $NODE_ID"
+echo "  节点名:   $NODE_NAME"
 echo ""
 
 # ============================================
@@ -133,10 +132,12 @@ fi
 
 ENROLL_RESP=$(curl -sS -X POST "$API_BASE/api/enroll" \
   -H "Content-Type: application/json" \
-  -d "{\"passcode\":\"$PASSCODE\",\"id\":\"$NODE_ID\",\"name\":\"$NODE_NAME\"}")
+  -d "{\"passcode\":\"$PASSCODE\",\"id\":\"$NODE_NAME\",\"name\":\"$NODE_NAME\"}")
 
 STATUS=$(echo "$ENROLL_RESP" | json_val status)
 ENROLL_TOKEN=$(echo "$ENROLL_RESP" | json_val enrollToken)
+# @alpha: 提取平台分配的唯一 NodeID
+PLATFORM_NODE_ID=$(echo "$ENROLL_RESP" | json_val nodeId)
 echo "      $(echo "$ENROLL_RESP" | json_val message)"
 
 if [ "$STATUS" = "error" ]; then
@@ -147,6 +148,10 @@ fi
 if [ -z "$ENROLL_TOKEN" ]; then
     echo "      [失败] 未获取到 enrollToken"
     exit 1
+fi
+
+if [ -n "$PLATFORM_NODE_ID" ]; then
+    echo "      平台分配 ID: $PLATFORM_NODE_ID"
 fi
 
 # @alpha: 后续 API 调用统一使用 enrollToken 认证
@@ -163,12 +168,13 @@ CONSOLE_GNB_TUN_ADDR=""
 fetch_status() {
     local resp
     # 优先用 enrollToken，失败时用 ADMIN_TOKEN fallback（服务器重启后 enrollToken 可能丢失）
-    resp=$(curl -sS -H "$ENROLL_AUTH" "$API_BASE/api/enroll/status/$NODE_ID" 2>/dev/null || echo '{}')
+    local use_id="${PLATFORM_NODE_ID:-$NODE_NAME}"
+    resp=$(curl -sS -H "$ENROLL_AUTH" "$API_BASE/api/enroll/status/$use_id" 2>/dev/null || echo '{}')
     STATUS=$(echo "$resp" | json_val status)
     if [ -z "$STATUS" ] || [ "$STATUS" = "null" ]; then
         # enrollToken 可能失效，尝试 TOKEN
         if [ -n "${TOKEN:-}" ]; then
-            resp=$(curl -sS -H "Authorization: Bearer $TOKEN" "$API_BASE/api/enroll/status/$NODE_ID" 2>/dev/null || echo '{}')
+            resp=$(curl -sS -H "Authorization: Bearer $TOKEN" "$API_BASE/api/enroll/status/$use_id" 2>/dev/null || echo '{}')
             STATUS=$(echo "$resp" | json_val status)
         fi
     fi
@@ -237,7 +243,7 @@ fi
 # 上传本节点公钥到 Console
 LOCAL_PUBKEY=$(cat "$GNB_CONF/security/${GNB_NODE_ID}.public" 2>/dev/null || echo "")
 if [ -n "$LOCAL_PUBKEY" ]; then
-    curl -sS -X POST "$API_BASE/api/enroll/$NODE_ID/gnb-pubkey" \
+    curl -sS -X POST "$API_BASE/api/enroll/${PLATFORM_NODE_ID:-$NODE_NAME}/gnb-pubkey" \
       -H "$ENROLL_AUTH" \
       -H "Content-Type: application/json" \
       -d "{\"publicKey\":\"$LOCAL_PUBKEY\"}" > /dev/null
@@ -425,7 +431,7 @@ chmod +x /opt/gnb/bin/node-agent.sh 2>/dev/null || true
 cat > /opt/gnb/bin/agent.env << AGENTEOF
 CONSOLE_URL=$API_BASE
 TOKEN=$TOKEN
-NODE_ID=$NODE_ID
+NODE_ID=${PLATFORM_NODE_ID:-$NODE_NAME}
 GNB_NODE_ID=$GNB_NODE_ID
 GNB_MAP_PATH=/opt/gnb/conf/$GNB_NODE_ID/gnb.map
 GNB_CTL=gnb_ctl
@@ -477,7 +483,7 @@ fi
 # ============================================
 echo "[10/10] 通知 Console 节点已就绪..."
 
-READY_RESP=$(curl -sS -X POST "$API_BASE/api/enroll/$NODE_ID/ready" \
+READY_RESP=$(curl -sS -X POST "$API_BASE/api/enroll/${PLATFORM_NODE_ID:-$NODE_NAME}/ready" \
   -H "$ENROLL_AUTH" \
   -H "Content-Type: application/json" \
   -d "{\"sshUser\":\"$SSH_USER\",\"sshPort\":22,\"tunAddr\":\"$TUN_ADDR\"}")

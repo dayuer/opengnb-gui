@@ -10,6 +10,11 @@ const NodeStore = require('./node-store');
 // @alpha: passcode 有效期（毫秒）
 const PASSCODE_TTL_MS = 30 * 60 * 1000; // 30 分钟
 
+// @alpha: 平台自动生成 NodeID — 12 位 URL-safe 随机字符
+function generateNodeId() {
+  return 'node-' + crypto.randomBytes(9).toString('base64url');
+}
+
 /**
  * SSH 密钥管理器 + 节点注册（审批制）
  *
@@ -119,8 +124,10 @@ class KeyManager {
    * @returns {{success: boolean, status: string, message: string}}
    */
   submitEnrollment(nodeInfo) {
-    if (!nodeInfo.id) {
-      return { success: false, status: 'error', message: '缺少 id' };
+    // @alpha: 用户提交的 id 实际是 hostname，平台自动生成唯一 NodeID
+    const submittedName = nodeInfo.id || nodeInfo.name || '';
+    if (!submittedName) {
+      return { success: false, status: 'error', message: '缺少节点名称' };
     }
 
     // 验证 passcode
@@ -141,33 +148,37 @@ class KeyManager {
 
     // 标记 passcode 已用
     pc.used = true;
-    pc.usedBy = nodeInfo.id;
+    pc.usedBy = submittedName;
 
-    // @alpha: 签发 enrollToken
-    const enrollToken = this._issueEnrollToken(nodeInfo.id);
-
-    const existing = this.store.findById(nodeInfo.id);
+    // @alpha: 查找是否已有同名节点（按 name 或旧式 id 匹配）
+    const existing = this.store.findById(submittedName) || this.store.findByName?.(submittedName);
     if (existing) {
+      const enrollToken = this._issueEnrollToken(existing.id);
       if (existing.status === 'approved') {
-        return { success: true, status: 'approved', message: '节点已通过审批', enrollToken };
+        return { success: true, status: 'approved', nodeId: existing.id, message: '节点已通过审批', enrollToken };
       }
       if (existing.status === 'pending') {
-        const updates = { ...nodeInfo, updatedAt: new Date().toISOString() };
-        delete updates.passcode;
-        this.store.update(nodeInfo.id, updates);
-        return { success: true, status: 'pending', message: '注册信息已更新，等待管理员审批', enrollToken };
+        const updates = { name: submittedName, updatedAt: new Date().toISOString() };
+        this.store.update(existing.id, updates);
+        return { success: true, status: 'pending', nodeId: existing.id, message: '注册信息已更新，等待管理员审批', enrollToken };
       }
     }
+
+    // @alpha: 平台生成唯一 NodeID
+    const nodeId = generateNodeId();
+    const enrollToken = this._issueEnrollToken(nodeId);
 
     const record = { ...nodeInfo };
     delete record.passcode;
 
     this.store.insert({
       ...record,
+      id: nodeId,
+      name: submittedName,
       tunAddr: record.tunAddr || '',
       sshUser: 'synon',
       sshPort: 22,
-      gnbMapPath: record.gnbMapPath || `/opt/gnb/conf/${record.id}/gnb.map`,
+      gnbMapPath: record.gnbMapPath || `/opt/gnb/conf/${nodeId}/gnb.map`,
       gnbCtlPath: record.gnbCtlPath || 'gnb_ctl',
       status: 'pending',
       ready: false,
@@ -177,9 +188,9 @@ class KeyManager {
     });
 
     // @alpha: 通知前端新节点注册
-    if (this.onChange) this.onChange('enroll', nodeInfo.id);
+    if (this.onChange) this.onChange('enroll', nodeId);
 
-    return { success: true, status: 'pending', message: '注册申请已提交，等待管理员审批', enrollToken };
+    return { success: true, status: 'pending', nodeId, message: '注册申请已提交，等待管理员审批', enrollToken };
   }
 
   // @alpha: 签发 enrollToken — 128-bit 随机，绑定 nodeId

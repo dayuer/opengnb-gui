@@ -42,6 +42,9 @@ class NodeStore {
     if (existingNodes.length > 0 && this.count() === 0) {
       this._migrateFromJson(existingNodes);
     }
+
+    // @alpha: 迁移旧式 hostname-based ID → 平台生成 ID
+    this._migrateNodeIds();
   }
 
   /** @private 建表 */
@@ -145,6 +148,7 @@ class NodeStore {
   _prepareStatements() {
     this._stmts = {
       findById: this.db.prepare('SELECT * FROM nodes WHERE id = ?'),
+      findByName: this.db.prepare('SELECT * FROM nodes WHERE name = ? LIMIT 1'),
       findByStatus: this.db.prepare('SELECT * FROM nodes WHERE status = ?'),
       all: this.db.prepare('SELECT * FROM nodes'),
       count: this.db.prepare('SELECT COUNT(*) AS cnt FROM nodes'),
@@ -252,6 +256,52 @@ class NodeStore {
   }
 
   /**
+   * @alpha: 将旧式 hostname-based ID 迁移为平台生成的唯一 ID
+   * 规则：id 不以 'node-' 开头的节点需要迁移
+   * @private
+   */
+  _migrateNodeIds() {
+    const crypto = require('crypto');
+    const oldNodes = this.db.prepare(
+      "SELECT * FROM nodes WHERE id NOT LIKE 'node-%'"
+    ).all();
+    if (oldNodes.length === 0) return;
+
+    console.log(`[NodeStore] 发现 ${oldNodes.length} 个旧式 ID 节点，开始迁移...`);
+    const txn = this.db.transaction(() => {
+      for (const node of oldNodes) {
+        const newId = 'node-' + crypto.randomBytes(9).toString('base64url');
+        const oldId = node.id;
+        // 保留旧 id 为 name（如果 name 为空或等于 id）
+        const name = (node.name && node.name !== oldId) ? node.name : oldId;
+
+        // 插入新 ID 记录
+        this.db.prepare(`
+          INSERT INTO nodes (id, name, tunAddr, gnbNodeId, status, sshUser, sshPort,
+            netmask, groupId, clawToken, clawPort, gnbMapPath, gnbCtlPath, ready,
+            ownerId, submittedAt, approvedAt, updatedAt, readyAt)
+          VALUES (@id, @name, @tunAddr, @gnbNodeId, @status, @sshUser, @sshPort,
+            @netmask, @groupId, @clawToken, @clawPort, @gnbMapPath, @gnbCtlPath, @ready,
+            @ownerId, @submittedAt, @approvedAt, @updatedAt, @readyAt)
+        `).run({
+          ...node, id: newId, name, ready: node.ready ? 1 : 0,
+        });
+
+        // 更新 metrics 和 jobs 外键
+        this.db.prepare('UPDATE metrics SET nodeId = ? WHERE nodeId = ?').run(newId, oldId);
+        this.db.prepare('UPDATE jobs SET nodeId = ? WHERE nodeId = ?').run(newId, oldId);
+
+        // 删除旧记录
+        this.db.prepare('DELETE FROM nodes WHERE id = ?').run(oldId);
+
+        console.log(`[NodeStore] 迁移: ${oldId} → ${newId} (name: ${name})`);
+      }
+    });
+    txn();
+    console.log(`[NodeStore] 旧式 ID 迁移完成`);
+  }
+
+  /**
    * 将节点对象规范化为数据库行
    * @private
    */
@@ -293,6 +343,11 @@ class NodeStore {
 
   findById(id) {
     return this._fromRow(this._stmts.findById.get(id));
+  }
+
+  /** @alpha: 按 name 查找节点（用于重复注册匹配） */
+  findByName(name) {
+    return this._fromRow(this._stmts.findByName.get(name));
   }
 
   findByStatus(status) {
