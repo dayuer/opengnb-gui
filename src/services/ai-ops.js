@@ -27,6 +27,9 @@ class AiOps {
     this.sshManager = options.sshManager;
     this.getNodeStatus = options.getNodeStatus;
     this.provisioner = options.provisioner;
+    // @beta: 异步命令框架依赖
+    this.jobManager = options.jobManager || null;
+    this.callbackBaseUrl = options.callbackBaseUrl || '';
   }
 
   /**
@@ -76,6 +79,11 @@ class AiOps {
     // 执行自定义命令: "exec <nodeId> <command>"
     if (/^(exec|run|执行)\s/i.test(msg)) {
       return this._handleExec(msg);
+    }
+
+    // @beta: 异步执行: "async exec <nodeId> <command>"
+    if (/^async\s+(exec|run)\s/i.test(msg)) {
+      return this._handleAsyncExec(msg);
     }
 
     // 帮助
@@ -168,6 +176,43 @@ class AiOps {
     }
   }
 
+  // @beta: 异步执行命令
+  async _handleAsyncExec(msg) {
+    if (!this.jobManager) {
+      return { response: '❌ 异步命令框架未初始化', commands: [] };
+    }
+
+    const parts = msg.replace(/^async\s+(exec|run)\s+/i, '').trim();
+    const spaceIdx = parts.indexOf(' ');
+    if (spaceIdx < 0) return { response: '格式: async exec <节点ID> <命令>', commands: [] };
+
+    const nodeId = parts.substring(0, spaceIdx);
+    const command = parts.substring(spaceIdx + 1);
+    const nodeConfig = this._resolveNode(nodeId);
+    if (!nodeConfig) return { response: this._nodeNotFoundMsg(nodeId), commands: [] };
+
+    const { jobId } = this.jobManager.create(nodeConfig.id, command);
+    const callbackUrl = `${this.callbackBaseUrl}/api/jobs/${jobId}/callback`;
+
+    try {
+      await this.sshManager.execAsync(nodeConfig, command, jobId, callbackUrl);
+      this.jobManager.markRunning(jobId);
+      return {
+        response: `✅ 命令已异步投递\nJob ID: \`${jobId}\`\n命令: \`${command}\`\n结果将通过 WebSocket 推送`,
+        commands: [],
+        targetNodeId: nodeConfig.id,
+        jobId,
+      };
+    } catch (err) {
+      this.jobManager.fail(jobId, err.message);
+      return {
+        response: `❌ 投递失败: ${err.message}\nJob ID: \`${jobId}\``,
+        commands: [],
+        targetNodeId: nodeConfig.id,
+      };
+    }
+  }
+
   _handleHelp() {
     return {
       response: `📖 可用指令：
@@ -177,7 +222,8 @@ class AiOps {
 • 重启 gnb <节点ID> — 重启 GNB 服务
 • 重启 openclaw <节点ID> — 重启 OpenClaw
 • 日志 <节点ID> — 查看最近日志
-• exec <节点ID> <命令> — 执行自定义命令`,
+• exec <节点ID> <命令> — 执行自定义命令（同步）
+• async exec <节点ID> <命令> — 异步执行（后台运行，WS 推送结果）`,
       commands: [],
     };
   }

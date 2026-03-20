@@ -110,6 +110,22 @@ class NodeStore {
         role TEXT DEFAULT 'admin',
         createdAt TEXT
       );
+
+      CREATE TABLE IF NOT EXISTS jobs (
+        id TEXT PRIMARY KEY,
+        nodeId TEXT NOT NULL,
+        command TEXT NOT NULL,
+        status TEXT DEFAULT 'dispatched',
+        exitCode INTEGER,
+        stdout TEXT,
+        stderr TEXT,
+        error TEXT,
+        createdAt TEXT NOT NULL,
+        completedAt TEXT
+      );
+      CREATE INDEX IF NOT EXISTS idx_jobs_node ON jobs(nodeId);
+      CREATE INDEX IF NOT EXISTS idx_jobs_status ON jobs(status);
+      CREATE INDEX IF NOT EXISTS idx_jobs_created ON jobs(createdAt);
     `);
   }
 
@@ -185,6 +201,24 @@ class NodeStore {
       allUsers: this.db.prepare('SELECT id, username, role, createdAt FROM users ORDER BY createdAt'),
       removeUser: this.db.prepare('DELETE FROM users WHERE id = ?'),
       userCount: this.db.prepare('SELECT COUNT(*) AS cnt FROM users'),
+      // @alpha: 异步 job
+      insertJob: this.db.prepare(
+        `INSERT INTO jobs (id, nodeId, command, status, createdAt)
+         VALUES (@id, @nodeId, @command, @status, @createdAt)`
+      ),
+      findJob: this.db.prepare('SELECT * FROM jobs WHERE id = ?'),
+      updateJobResult: this.db.prepare(
+        `UPDATE jobs SET status = @status, exitCode = @exitCode,
+         stdout = @stdout, stderr = @stderr, error = @error,
+         completedAt = @completedAt WHERE id = @id`
+      ),
+      jobsByNode: this.db.prepare(
+        'SELECT * FROM jobs WHERE nodeId = ? ORDER BY createdAt DESC LIMIT ?'
+      ),
+      recentJobs: this.db.prepare(
+        'SELECT * FROM jobs ORDER BY createdAt DESC LIMIT ?'
+      ),
+      deleteJobsBefore: this.db.prepare('DELETE FROM jobs WHERE createdAt < ?'),
     };
   }
 

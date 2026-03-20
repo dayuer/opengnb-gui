@@ -19,6 +19,7 @@ const createEnrollRouter = require('./routes/enroll');
 const createMirrorRouter = require('./routes/mirror');
 const createClawRouter = require('./routes/claw');
 const createAuthRouter = require('./routes/auth');
+const createJobsRouter = require('./routes/jobs');
 const ClawRPC = require('./services/claw-rpc');
 const { requireAuth, initToken, getAdminToken, setJwtSecret, hashPassword } = require('./middleware/auth');
 const { createRateLimit } = require('./middleware/rate-limit');
@@ -90,6 +91,10 @@ async function boot() {
 
   // @alpha: 首次启动自动创建 admin 用户
   const store = keyManager.store;
+
+  // @alpha: 异步 Job 管理器（SQLite 持久化）
+  const JobManager = require('./services/job-manager');
+  const jobManager = new JobManager({ store, timeoutMs: 60000 });
   if (store.userCount() === 0) {
     const crypto = require('crypto');
     const tempPwd = crypto.randomBytes(8).toString('hex');
@@ -126,6 +131,7 @@ async function boot() {
     sshManager,
     getNodeStatus: () => monitor.getAllStatus(),
     provisioner,
+    jobManager,
   });
 
   const clawRPC = new ClawRPC(sshManager);
@@ -175,12 +181,27 @@ async function boot() {
     res.json({ success: true, nodeId: node.id });
   });
 
-  // 认证路由（login 公开，其余需认证）
-  app.use('/api/auth', express.json(), createAuthRouter(store));
+  // 认证路由（login 公开，其余需认证）— @alpha: login 独立限速防暴力破解
+  const loginLimit = createRateLimit({ windowMs: 60000, max: 5, message: '登录尝试过于频繁，请 1 分钟后重试' });
+  app.use('/api/auth', loginLimit, express.json(), createAuthRouter(store));
 
   // 需认证 + 审计的管理路由
   app.use('/api/nodes', requireAuth, audit.middleware('nodes'), createNodesRouter(monitor, sshManager, monitor.nodesConfig, keyManager, metricsStore));
   app.use('/api/ai', requireAuth, strictLimit, audit.middleware('ai_ops'), createAiRouter(aiOps, saveOpsLog));
+
+  // @alpha: 异步 Job 路由 — callback 端点公开（clawToken 认证），其余需管理员认证
+  // 注意：wss 在后面初始化，此处用闭包延迟访问
+  app.use('/api/jobs', createJobsRouter({
+    jobManager,
+    sshManager,
+    keyManager: { getNodeById: (id) => store.findById(id) },
+    requireAuth,
+    broadcastWS: (msg) => {
+      if (!wss) return;
+      const data = JSON.stringify(msg);
+      wss.clients.forEach(ws => { if (ws.readyState === 1) ws.send(data); });
+    },
+  }));
 
   // 初始化脚本下载（公开，必须在 enroll 路由之前注册）
   app.get('/api/enroll/init.sh', (req, res) => {
@@ -263,38 +284,74 @@ async function boot() {
   const MAX_WS_CLIENTS = 10;
 
   wss.on('connection', (ws, req) => {
-    // WebSocket 认证：从 URL 参数提取 token
-    const url = new URL(req.url, 'http://localhost');
-    const wsToken = url.searchParams.get('token');
-    if (adminToken && wsToken !== adminToken) {
-      audit.log('ws_auth_fail', { reason: 'invalid_token' }, req);
-      ws.close(4001, '认证失败');
-      return;
-    }
-
     // 连接数限制
     if (wss.clients.size > MAX_WS_CLIENTS) {
       ws.close(4002, '连接数超限');
       return;
     }
 
-    console.log('[WS] 客户端连接');
-    audit.log('ws_connect', {}, req);
-
-    ws.send(JSON.stringify({
-      type: 'snapshot',
-      data: enrichNodesData(monitor.getAllStatus()),
-      pending: keyManager.getPendingNodes(),
-      groups: keyManager.getGroups(),
-      allNodes: keyManager.getAllNodes(),
-      timestamp: new Date().toISOString(),
-    }));
-    // 发送历史日志（按终端分组）
-    const allLogs = loadAllOpsLogs();
-    if (Object.keys(allLogs).length > 0) {
-      ws.send(JSON.stringify({ type: 'chat_history', logs: allLogs }));
+    // @alpha: WebSocket 认证 — 支持 URL 参数（兼容）和首条消息认证（安全）
+    let authenticated = false;
+    const url = new URL(req.url, 'http://localhost');
+    const wsToken = url.searchParams.get('token');
+    if (adminToken && wsToken === adminToken) {
+      authenticated = true;
     }
-    ws.on('close', () => console.log('[WS] 客户端断开'));
+
+    // @alpha: 首条消息认证（推荐方式，token 不暴露在 URL 中）
+    const AUTH_TIMEOUT = 5000;
+    let authTimer = null;
+
+    function onAuthenticated() {
+      if (authTimer) { clearTimeout(authTimer); authTimer = null; }
+      console.log('[WS] 客户端已认证');
+      audit.log('ws_connect', {}, req);
+
+      ws.send(JSON.stringify({
+        type: 'snapshot',
+        data: enrichNodesData(monitor.getAllStatus()),
+        pending: keyManager.getPendingNodes(),
+        groups: keyManager.getGroups(),
+        allNodes: keyManager.getAllNodes(),
+        timestamp: new Date().toISOString(),
+      }));
+      const allLogs = loadAllOpsLogs();
+      if (Object.keys(allLogs).length > 0) {
+        ws.send(JSON.stringify({ type: 'chat_history', logs: allLogs }));
+      }
+    }
+
+    if (authenticated) {
+      onAuthenticated();
+    } else {
+      // 等待首条消息认证，超时断开
+      authTimer = setTimeout(() => {
+        if (!authenticated) {
+          audit.log('ws_auth_fail', { reason: 'timeout' }, req);
+          ws.close(4001, '认证超时');
+        }
+      }, AUTH_TIMEOUT);
+
+      ws.once('message', (data) => {
+        try {
+          const msg = JSON.parse(data.toString());
+          if (msg.type === 'auth' && adminToken && msg.token === adminToken) {
+            authenticated = true;
+            onAuthenticated();
+          } else {
+            audit.log('ws_auth_fail', { reason: 'invalid_token' }, req);
+            ws.close(4001, '认证失败');
+          }
+        } catch {
+          ws.close(4001, '认证消息格式错误');
+        }
+      });
+    }
+
+    ws.on('close', () => {
+      if (authTimer) clearTimeout(authTimer);
+      console.log('[WS] 客户端断开');
+    });
   });
 
   // 监控更新 + 待审批推送
