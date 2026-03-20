@@ -11,7 +11,47 @@
   <script src="https://unpkg.com/lucide@latest/dist/umd/lucide.min.js"></script>
 </head>
 <body>
-  <div id="app">
+  <!-- @beta: 独立全屏登录页 -->
+  <div id="login-page" style="display:none">
+    <div class="login-bg">
+      <div class="login-bg-orb login-bg-orb-1"></div>
+      <div class="login-bg-orb login-bg-orb-2"></div>
+      <div class="login-bg-orb login-bg-orb-3"></div>
+    </div>
+    <div class="login-card">
+      <div class="login-brand">
+        <div class="login-logo">◈</div>
+        <h1 class="login-title">GNB Console</h1>
+        <p class="login-subtitle">P2P VPN 管理中控台</p>
+      </div>
+      <form id="login-form" onsubmit="doLogin(event)">
+        <div class="login-field">
+          <label for="login-username">用户名</label>
+          <div class="login-input-wrap">
+            <i data-lucide="user" class="login-input-icon"></i>
+            <input type="text" id="login-username" placeholder="输入用户名" autocomplete="username" required>
+          </div>
+        </div>
+        <div class="login-field">
+          <label for="login-password">密码</label>
+          <div class="login-input-wrap">
+            <i data-lucide="lock" class="login-input-icon"></i>
+            <input type="password" id="login-password" placeholder="输入密码" autocomplete="current-password" required>
+          </div>
+        </div>
+        <div id="login-error" class="login-error"></div>
+        <button type="submit" class="login-btn" id="login-btn">
+          <span id="login-btn-text">登 录</span>
+          <i data-lucide="arrow-right" class="login-btn-icon"></i>
+        </button>
+      </form>
+      <div class="login-footer">
+        <span>Powered by <a href="https://github.com/gnbdev/opengnb" target="_blank" rel="noopener">OpenGNB</a></span>
+      </div>
+    </div>
+  </div>
+
+  <div id="app" style="display:none">
     <!-- 左侧：抽屉导航 -->
     <nav id="sidebar">
       <div class="sidebar-logo">

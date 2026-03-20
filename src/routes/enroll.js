@@ -11,15 +11,46 @@ function createEnrollRouter(keyManager, security = {}) {
   const router = express.Router();
   const { requireAuth, audit } = security;
 
-  // --- 公开端点（节点调用） ---
+  // --- @alpha: enrollToken 认证中间件（节点端点） ---
+
+  /**
+   * 从 Bearer token 提取并验证 enrollToken
+   * 失败返回 401；通过后 req.enrollNode = {nodeId}
+   */
+  const requireEnrollToken = (req, res, next) => {
+    const authHeader = req.headers.authorization;
+    if (!authHeader || !authHeader.startsWith('Bearer ')) {
+      return res.status(401).json({ error: '未提供 enrollToken' });
+    }
+    const token = authHeader.slice(7);
+    const result = keyManager.verifyEnrollToken(token);
+    if (!result.valid) {
+      return res.status(401).json({ error: 'enrollToken 无效' });
+    }
+    req.enrollNode = { nodeId: result.nodeId };
+    next();
+  };
+
+  /**
+   * 校验 :id 参数与 enrollToken 绑定的 nodeId 是否一致
+   * 必须在 requireEnrollToken 之后使用
+   */
+  const requireNodeIdMatch = (req, res, next) => {
+    if (req.params.id !== req.enrollNode.nodeId) {
+      return res.status(403).json({ error: '无权访问此节点' });
+    }
+    next();
+  };
+
+  // --- 公开端点（无需认证） ---
 
   // GET /api/enroll/pubkey — 下载 Console SSH 公钥
   router.get('/pubkey', (req, res) => {
     res.json({ publicKey: keyManager.getPublicKey() });
   });
 
-  // GET /api/enroll/address-conf — 下载全量 address.conf（公开，节点初始化调用）
-  router.get('/address-conf', (req, res) => {
+  // @alpha: GET /api/enroll/address-conf — 受 enrollToken 保护
+  router.get('/address-conf', requireEnrollToken, (req, res) => {
     res.type('text/plain').send(keyManager.generateFullAddressConf());
   });
 
@@ -29,8 +60,8 @@ function createEnrollRouter(keyManager, security = {}) {
     res.status(result.success ? 200 : 400).json(result);
   });
 
-  // GET /api/enroll/status/:id — 节点查询审批状态
-  router.get('/status/:id', (req, res) => {
+  // @alpha: GET /api/enroll/status/:id — 受 enrollToken + nodeId 绑定保护
+  router.get('/status/:id', requireEnrollToken, requireNodeIdMatch, (req, res) => {
     const node = keyManager.getAllNodes().find(n => n.id === req.params.id);
     if (!node) return res.status(404).json({ status: 'unknown' });
     res.json({
@@ -42,23 +73,23 @@ function createEnrollRouter(keyManager, security = {}) {
     });
   });
 
-  // POST /api/enroll/:id/ready — 节点通知就绪（synon + 公钥已部署）
-  router.post('/:id/ready', (req, res) => {
+  // @alpha: POST /api/enroll/:id/ready — 受 enrollToken + nodeId 绑定保护
+  router.post('/:id/ready', requireEnrollToken, requireNodeIdMatch, (req, res) => {
     const result = keyManager.markNodeReady(req.params.id, req.body);
     res.status(result.success ? 200 : 400).json(result);
   });
 
-  // --- GNB 公钥交换（公开） ---
+  // --- GNB 公钥交换 ---
 
-  // GET /api/enroll/gnb-pubkey — 获取 Console 的 GNB Ed25519 公钥
+  // GET /api/enroll/gnb-pubkey — 获取 Console 的 GNB Ed25519 公钥（保持公开）
   router.get('/gnb-pubkey', (req, res) => {
     const pubKey = keyManager.getGnbPublicKey();
     if (!pubKey) return res.status(404).json({ error: 'Console GNB 公钥不存在' });
     res.json({ publicKey: pubKey, nodeId: keyManager.gnbNodeId });
   });
 
-  // POST /api/enroll/:id/gnb-pubkey — 终端上传自身 GNB 公钥
-  router.post('/:id/gnb-pubkey', (req, res) => {
+  // @alpha: POST /api/enroll/:id/gnb-pubkey — 受 enrollToken + nodeId 绑定保护
+  router.post('/:id/gnb-pubkey', requireEnrollToken, requireNodeIdMatch, (req, res) => {
     const { publicKey } = req.body;
     if (!publicKey) return res.status(400).json({ error: '缺少 publicKey' });
     const result = keyManager.saveNodeGnbPubkey(req.params.id, publicKey);

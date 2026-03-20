@@ -233,4 +233,88 @@ describe('services/key-manager', () => {
       assert.ok(result.message.includes('无变更'));
     });
   });
+
+  // ═══════════════════════════════════════
+  // @alpha: enrollToken 测试
+  // ═══════════════════════════════════════
+
+  describe('enrollToken', () => {
+    it('should return enrollToken on successful enrollment', () => {
+      const passcode = km.generatePasscode();
+      const result = km.submitEnrollment({ passcode, id: 'et1', name: 'ET1' });
+      assert.ok(result.success);
+      assert.ok(result.enrollToken);
+      assert.equal(typeof result.enrollToken, 'string');
+      assert.equal(result.enrollToken.length, 32); // 16 bytes hex
+    });
+
+    it('should NOT return enrollToken on failed enrollment', () => {
+      const result = km.submitEnrollment({ passcode: 'invalid', id: 'et2', name: 'ET2' });
+      assert.ok(!result.success);
+      assert.equal(result.enrollToken, undefined);
+    });
+
+    it('should verify valid enrollToken', () => {
+      const passcode = km.generatePasscode();
+      const { enrollToken } = km.submitEnrollment({ passcode, id: 'et3', name: 'ET3' });
+      const check = km.verifyEnrollToken(enrollToken);
+      assert.ok(check.valid);
+      assert.equal(check.nodeId, 'et3');
+    });
+
+    it('should reject invalid enrollToken', () => {
+      const check = km.verifyEnrollToken('nonexistent-token');
+      assert.ok(!check.valid);
+    });
+
+    it('should reject null/undefined enrollToken', () => {
+      assert.ok(!km.verifyEnrollToken(null).valid);
+      assert.ok(!km.verifyEnrollToken(undefined).valid);
+      assert.ok(!km.verifyEnrollToken('').valid);
+    });
+
+    it('should return enrollToken for already-approved node re-enrollment', () => {
+      const pc1 = km.generatePasscode();
+      km.submitEnrollment({ passcode: pc1, id: 'et4', name: 'ET4' });
+      km.approveNode('et4', { tunAddr: '10.1.0.40' });
+
+      const pc2 = km.generatePasscode();
+      const result = km.submitEnrollment({ passcode: pc2, id: 'et4', name: 'ET4' });
+      assert.ok(result.success);
+      assert.equal(result.status, 'approved');
+      assert.ok(result.enrollToken);
+    });
+  });
+
+  // ═══════════════════════════════════════
+  // @alpha: passcode TTL 测试
+  // ═══════════════════════════════════════
+
+  describe('passcode TTL', () => {
+    it('should accept fresh passcode', () => {
+      const passcode = km.generatePasscode();
+      const result = km.submitEnrollment({ passcode, id: 'ttl1', name: 'TTL1' });
+      assert.ok(result.success);
+    });
+
+    it('should reject expired passcode (>30min)', () => {
+      const passcode = km.generatePasscode();
+      // 手动将 createdAt 设回 31 分钟前
+      const pc = km.passcodes.get(passcode);
+      pc.createdAt = new Date(Date.now() - 31 * 60 * 1000).toISOString();
+
+      const result = km.submitEnrollment({ passcode, id: 'ttl2', name: 'TTL2' });
+      assert.ok(!result.success);
+      assert.ok(result.message.includes('已过期'));
+    });
+
+    it('should accept passcode at 29 minutes', () => {
+      const passcode = km.generatePasscode();
+      const pc = km.passcodes.get(passcode);
+      pc.createdAt = new Date(Date.now() - 29 * 60 * 1000).toISOString();
+
+      const result = km.submitEnrollment({ passcode, id: 'ttl3', name: 'TTL3' });
+      assert.ok(result.success);
+    });
+  });
 });

@@ -15,39 +15,35 @@ function getToken() { return localStorage.getItem('gnb_admin_token') || ''; }
 function setToken(token) { localStorage.setItem('gnb_admin_token', token); }
 
 function promptToken() {
-  showLoginModal();
+  showLoginPage();
 }
 
-/** @beta: 登录弹窗 */
-function showLoginModal() {
-  const overlay = $('#modal-overlay');
-  const content = $('#modal-content');
-  if (!overlay || !content) return;
-  overlay.style.display = 'flex';
-  content.innerHTML = `
-    <div class="modal-header">登录 GNB Console</div>
-    <div class="modal-body">
-      <label>用户名</label>
-      <input type="text" id="login-username" placeholder="admin" autofocus>
-      <label>密码</label>
-      <input type="password" id="login-password" placeholder="输入密码...">
-      <div id="login-error" style="color:var(--red);font-size:12px;margin-top:4px;display:none"></div>
-    </div>
-    <div class="modal-footer">
-      <button class="modal-btn primary" onclick="doLogin()">登录</button>
-    </div>
-  `;
-  setTimeout(() => {
-    const pwdInput = $('#login-password');
-    if (pwdInput) pwdInput.addEventListener('keydown', e => { if (e.key === 'Enter') doLogin(); });
-  }, 50);
+/** @beta: 显示独立登录页 */
+function showLoginPage() {
+  const lp = $('#login-page');
+  const app = $('#app');
+  if (lp) { lp.style.display = 'flex'; refreshIcons(); }
+  if (app) app.style.display = 'none';
 }
 
-async function doLogin() {
+/** @beta: 隐藏登录页，显示主应用 */
+function hideLoginPage() {
+  const lp = $('#login-page');
+  const app = $('#app');
+  if (lp) lp.style.display = 'none';
+  if (app) app.style.display = 'flex';
+}
+
+async function doLogin(e) {
+  if (e) e.preventDefault();
   const username = $('#login-username')?.value?.trim();
   const password = $('#login-password')?.value;
   if (!username || !password) return;
   const errEl = $('#login-error');
+  const btn = $('#login-btn');
+  const btnText = $('#login-btn-text');
+  if (btn) btn.disabled = true;
+  if (btnText) btnText.textContent = '登录中...';
   try {
     const res = await fetch('/api/auth/login', {
       method: 'POST',
@@ -56,14 +52,19 @@ async function doLogin() {
     });
     const data = await res.json();
     if (!res.ok) {
-      if (errEl) { errEl.textContent = data.error || '登录失败'; errEl.style.display = 'block'; }
+      if (errEl) { errEl.textContent = data.error || '登录失败'; errEl.classList.add('show'); }
+      if (btn) btn.disabled = false;
+      if (btnText) btnText.textContent = '登 录';
       return;
     }
     setToken(data.token);
-    closeModal();
-    location.reload();
+    hideLoginPage();
+    connectWS();
+    switchPage('dashboard');
   } catch (e) {
-    if (errEl) { errEl.textContent = '网络错误'; errEl.style.display = 'block'; }
+    if (errEl) { errEl.textContent = '网络错误'; errEl.classList.add('show'); }
+    if (btn) btn.disabled = false;
+    if (btnText) btnText.textContent = '登 录';
   }
 }
 
@@ -71,7 +72,7 @@ async function authFetch(url, options = {}) {
   const token = getToken();
   options.headers = { ...options.headers, ...(token ? { 'Authorization': `Bearer ${token}` } : {}) };
   const res = await fetch(url, options);
-  if (res.status === 401) { showLoginModal(); throw new Error('认证失败'); }
+  if (res.status === 401) { showLoginPage(); throw new Error('认证失败'); }
   return res;
 }
 
@@ -1509,8 +1510,9 @@ function initTheme() {
 // 启动
 initTheme();
 if (!getToken()) {
-  promptToken();
+  showLoginPage();
 } else {
+  hideLoginPage();
   connectWS();
   switchPage('dashboard');
 }

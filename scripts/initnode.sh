@@ -134,12 +134,21 @@ ENROLL_RESP=$(curl -sS -X POST "$API_BASE/api/enroll" \
   -d "{\"passcode\":\"$PASSCODE\",\"id\":\"$NODE_ID\",\"name\":\"$NODE_NAME\"}")
 
 STATUS=$(echo "$ENROLL_RESP" | json_val status)
+ENROLL_TOKEN=$(echo "$ENROLL_RESP" | json_val enrollToken)
 echo "      $(echo "$ENROLL_RESP" | json_val message)"
 
 if [ "$STATUS" = "error" ]; then
     echo "      [失败] 注册失败"
     exit 1
 fi
+
+if [ -z "$ENROLL_TOKEN" ]; then
+    echo "      [失败] 未获取到 enrollToken"
+    exit 1
+fi
+
+# @alpha: 后续 API 调用统一使用 enrollToken 认证
+ENROLL_AUTH="Authorization: Bearer $ENROLL_TOKEN"
 
 # ============================================
 # Step 3: 等待管理员审批
@@ -151,7 +160,7 @@ CONSOLE_GNB_TUN_ADDR=""
 
 fetch_status() {
     local resp
-    resp=$(curl -sS "$API_BASE/api/enroll/status/$NODE_ID" 2>/dev/null || echo '{}')
+    resp=$(curl -sS -H "$ENROLL_AUTH" "$API_BASE/api/enroll/status/$NODE_ID" 2>/dev/null || echo '{}')
     STATUS=$(echo "$resp" | json_val status)
     TUN_ADDR=$(echo "$resp" | json_val tunAddr)
     GNB_NODE_ID=$(echo "$resp" | json_val gnbNodeId)
@@ -197,6 +206,7 @@ mkdir -p "$GNB_CONF"/{security,ed25519,scripts}
 if [ ! -f "$GNB_CONF/security/${GNB_NODE_ID}.private" ]; then
     cd "$GNB_CONF/security"
     /opt/gnb/bin/gnb_crypto -c -p "${GNB_NODE_ID}.private" -k "${GNB_NODE_ID}.public"
+    chmod 600 "${GNB_NODE_ID}.private"  # @alpha: 私钥权限加固
     cp "${GNB_NODE_ID}.public" "$GNB_CONF/ed25519/${GNB_NODE_ID}.public"
     echo "      Ed25519 密钥已生成"
 fi
@@ -217,6 +227,7 @@ fi
 LOCAL_PUBKEY=$(cat "$GNB_CONF/security/${GNB_NODE_ID}.public" 2>/dev/null || echo "")
 if [ -n "$LOCAL_PUBKEY" ]; then
     curl -sS -X POST "$API_BASE/api/enroll/$NODE_ID/gnb-pubkey" \
+      -H "$ENROLL_AUTH" \
       -H "Content-Type: application/json" \
       -d "{\"publicKey\":\"$LOCAL_PUBKEY\"}" > /dev/null
     echo "      本节点公钥已上传到 Console"
@@ -239,7 +250,7 @@ unified-forwarding auto
 GNBEOF
 
 # address.conf — 从 Console API 拉取全量（包含所有已审批节点）
-if curl -sSf "$API_BASE/api/enroll/address-conf" -o "$GNB_CONF/address.conf" 2>/dev/null; then
+if curl -sSf -H "$ENROLL_AUTH" "$API_BASE/api/enroll/address-conf" -o "$GNB_CONF/address.conf" 2>/dev/null; then
     echo "      address.conf 已从 Console 拉取（含全部节点）"
 else
     echo "      API 不可用，使用最小配置（仅 Console + 自身）"
@@ -387,6 +398,7 @@ chown -R "$SSH_USER:$SSH_USER" "$SSH_DIR"
 echo "[9/9] 通知 Console 节点已就绪..."
 
 READY_RESP=$(curl -sS -X POST "$API_BASE/api/enroll/$NODE_ID/ready" \
+  -H "$ENROLL_AUTH" \
   -H "Content-Type: application/json" \
   -d "{\"sshUser\":\"$SSH_USER\",\"sshPort\":22,\"tunAddr\":\"$TUN_ADDR\"}")
 
@@ -414,6 +426,7 @@ GNB_MAP_PATH=/opt/gnb/conf/$GNB_NODE_ID/gnb.map
 GNB_CTL=gnb_ctl
 CLAW_PORT=18789
 AGENTEOF
+chmod 600 /opt/gnb/bin/agent.env  # @alpha: 敏感信息权限加固
 
 if command -v systemctl &>/dev/null; then
   # systemd service
