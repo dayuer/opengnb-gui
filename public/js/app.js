@@ -34,6 +34,7 @@ function hideLoginPage() {
   if (app) app.style.display = 'flex';
 }
 
+let _cachedApiToken = '';
 async function doLogin(e) {
   if (e) e.preventDefault();
   const username = $('#login-username')?.value?.trim();
@@ -58,6 +59,7 @@ async function doLogin(e) {
       return;
     }
     setToken(data.token);
+    _cachedApiToken = data.apiToken || '';
     hideLoginPage();
     connectWS();
     switchPage('dashboard');
@@ -1250,11 +1252,11 @@ function logout() {
 
 function showApiKey() {
   closeUserMenu();
-  // @beta: 从后端获取新 JWT
+  // @beta: 获取短 apiToken
   authFetch('/api/auth/token')
     .then(r => r.json())
     .then(data => {
-      const token = data.token || getToken();
+      const apiToken = data.apiToken || _cachedApiToken || '';
       const overlay = $('#modal-overlay');
       const content = $('#modal-content');
       if (overlay && content) {
@@ -1262,17 +1264,17 @@ function showApiKey() {
         content.innerHTML = `
           <div class="modal-header">API Token（节点初始化用）</div>
           <div class="modal-body">
-            <label>当前 Token（24h 有效）</label>
+            <label>API Token（永久有效）</label>
             <div style="display:flex;gap:8px;align-items:center">
-              <input type="text" id="api-key-display" value="${escHtml(token)}" readonly
-                style="flex:1;font-family:var(--font-mono);font-size:12px">
+              <input type="text" id="api-key-display" value="${escHtml(apiToken)}" readonly
+                style="flex:1;font-family:var(--font-mono);font-size:14px;letter-spacing:1px">
               <button class="toolbar-btn" onclick="copyApiKey()">复制</button>
             </div>
             <div style="font-size:11px;color:var(--text-muted);margin-top:8px">
               节点初始化命令:
             </div>
             <code style="display:block;font-size:11px;padding:8px;background:var(--bg-tertiary);border-radius:4px;word-break:break-all;margin-top:4px">
-              curl -sSL https://${location.host}/api/enroll/init.sh | ADMIN_TOKEN=${escHtml(token)} bash
+              curl -sSL https://${location.host}/api/enroll/init.sh | ADMIN_TOKEN=${escHtml(apiToken)} bash
             </code>
           </div>
           <div class="modal-footer">

@@ -55,7 +55,10 @@ function createAuthRouter(store) {
       username: req.user.username,
       role: req.user.role,
     });
-    res.json({ token, expiresIn: '24h' });
+    // @alpha: 同时返回短 apiToken
+    const user = store.findUserByName(req.user.username);
+    const apiToken = user?.apiToken || '';
+    res.json({ token, apiToken, expiresIn: '24h' });
   });
 
   /** POST /api/auth/register — 创建新用户 */
