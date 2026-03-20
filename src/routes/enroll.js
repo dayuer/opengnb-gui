@@ -106,7 +106,8 @@ function createEnrollRouter(keyManager, security = {}) {
   // GET /api/enroll/passcode — 获取一次性注册 passcode（管理员操作）
   router.get('/passcode', ...adminMiddleware, (req, res) => {
     const { nodeId } = req.query;
-    const passcode = keyManager.generatePasscode(nodeId || '');
+    // @alpha: passcode 绑定生成者 userId（节点归属）
+    const passcode = keyManager.generatePasscode(nodeId || '', req.user?.userId || '');
     res.json({ passcode, note: '此 passcode 仅可使用一次' });
   });
 

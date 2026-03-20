@@ -148,16 +148,18 @@ async function boot() {
     console.log(`[Approval] 监控已更新: ${updatedNodes.length} 个节点`);
   };
 
-  // @alpha: 节点列表变更回调 — 广播 WS snapshot 实现前端实时更新
+  // @alpha: 节点列表变更回调 — 广播用户专属 WS snapshot 实现前端实时更新
   keyManager.onChange = (action, nodeId) => {
     if (!wss) return;
-    const snapshot = JSON.stringify({
-      type: 'snapshot',
-      allNodes: keyManager.getAllNodes(),
-      timestamp: new Date().toISOString(),
-    });
     for (const client of wss.clients) {
-      if (client.readyState === 1 && client._authenticated) client.send(snapshot);
+      if (client.readyState !== 1 || !client._authenticated) continue;
+      const userId = client._userId || '';
+      const snapshot = JSON.stringify({
+        type: 'snapshot',
+        allNodes: keyManager.getNodesByOwner(userId),
+        timestamp: new Date().toISOString(),
+      });
+      client.send(snapshot);
     }
     console.log(`[WS] 广播 snapshot (${action}: ${nodeId})`);
   };
@@ -301,10 +303,18 @@ async function boot() {
   const wss = new WebSocketServer({ server, path: '/ws' });
   const MAX_WS_CLIENTS = 10;
 
-  // @alpha: WS token 校验 — 兼容 adminToken 和 JWT
-  function _isValidWsToken(token) {
-    if (adminToken && token === adminToken) return true;
-    try { return !!verifyJwt(token); } catch { return false; }
+  // @alpha: WS token 校验 — 兼容 adminToken、JWT、apiToken，返回 {valid, userId}
+  function _resolveWsToken(token) {
+    if (adminToken && token === adminToken) return { valid: true, userId: 'admin' };
+    // JWT
+    const payload = verifyJwt(token);
+    if (payload) return { valid: true, userId: payload.userId || '' };
+    // apiToken
+    if (store && token.length <= 20) {
+      const user = store._stmts.findUserByApiToken?.get(token);
+      if (user) return { valid: true, userId: user.id };
+    }
+    return { valid: false, userId: '' };
   }
 
   wss.on('connection', (ws, req) => {
@@ -319,8 +329,12 @@ async function boot() {
     let authenticated = false;
     const url = new URL(req.url, 'http://localhost');
     const wsToken = url.searchParams.get('token');
-    if (wsToken && _isValidWsToken(wsToken)) {
-      authenticated = true;
+    if (wsToken) {
+      const result = _resolveWsToken(wsToken);
+      if (result.valid) {
+        authenticated = true;
+        ws._userId = result.userId;
+      }
     }
 
     // @alpha: 首条消息认证（推荐方式，token 不暴露在 URL 中）
@@ -330,15 +344,17 @@ async function boot() {
     function onAuthenticated() {
       if (authTimer) { clearTimeout(authTimer); authTimer = null; }
       ws._authenticated = true;
-      console.log('[WS] 客户端已认证');
+      console.log(`[WS] 客户端已认证 (userId: ${ws._userId || 'unknown'})`);
       audit.log('ws_connect', {}, req);
 
+      // @alpha: 按用户过滤节点列表
+      const userId = ws._userId || '';
       ws.send(JSON.stringify({
         type: 'snapshot',
         data: enrichNodesData(monitor.getAllStatus()),
-        pending: keyManager.getPendingNodes(),
+        pending: keyManager.getPendingNodes().filter(n => !n.ownerId || n.ownerId === userId),
         groups: keyManager.getGroups(),
-        allNodes: keyManager.getAllNodes(),
+        allNodes: keyManager.getNodesByOwner(userId),
         timestamp: new Date().toISOString(),
       }));
       const allLogs = loadAllOpsLogs();
@@ -361,12 +377,18 @@ async function boot() {
       ws.once('message', (data) => {
         try {
           const msg = JSON.parse(data.toString());
-          if (msg.type === 'auth' && msg.token && _isValidWsToken(msg.token)) {
-            authenticated = true;
-            onAuthenticated();
+          if (msg.type === 'auth' && msg.token) {
+            const result = _resolveWsToken(msg.token);
+            if (result.valid) {
+              authenticated = true;
+              ws._userId = result.userId;
+              onAuthenticated();
+            } else {
+              audit.log('ws_auth_fail', { reason: 'invalid_token' }, req);
+              ws.close(4001, '认证失败');
+            }
           } else {
-            audit.log('ws_auth_fail', { reason: 'invalid_token' }, req);
-            ws.close(4001, '认证失败');
+            ws.close(4001, '认证消息格式错误');
           }
         } catch {
           ws.close(4001, '认证消息格式错误');

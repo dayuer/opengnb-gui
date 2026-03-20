@@ -62,6 +62,7 @@ class NodeStore {
         gnbMapPath TEXT DEFAULT '',
         gnbCtlPath TEXT DEFAULT '',
         ready INTEGER DEFAULT 0,
+        ownerId TEXT DEFAULT '',
         submittedAt TEXT,
         approvedAt TEXT,
         updatedAt TEXT,
@@ -132,6 +133,11 @@ class NodeStore {
     // @alpha: 向后兼容迁移 — 旧 db 的 users 表可能缺少 apiToken 列
     try {
       this.db.exec(`ALTER TABLE users ADD COLUMN apiToken TEXT DEFAULT ''`);
+    } catch { /* 列已存在，忽略 */ }
+
+    // @alpha: 向后兼容迁移 — 旧 db 的 nodes 表可能缺少 ownerId 列
+    try {
+      this.db.exec(`ALTER TABLE nodes ADD COLUMN ownerId TEXT DEFAULT ''`);
     } catch { /* 列已存在，忽略 */ }
   }
 

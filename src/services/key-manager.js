@@ -107,9 +107,9 @@ class KeyManager {
    * @param {string} [label] - 标签
    * @returns {string} passcode
    */
-  generatePasscode(label = '') {
+  generatePasscode(label = '', userId = '') {
     const passcode = crypto.randomBytes(16).toString('hex');
-    this.passcodes.set(passcode, { label, createdAt: new Date().toISOString(), used: false });
+    this.passcodes.set(passcode, { label, userId, createdAt: new Date().toISOString(), used: false });
     return passcode;
   }
 
@@ -171,6 +171,7 @@ class KeyManager {
       gnbCtlPath: record.gnbCtlPath || 'gnb_ctl',
       status: 'pending',
       ready: false,
+      ownerId: pc.userId || '',
       submittedAt: new Date().toISOString(),
       approvedAt: null,
     });
@@ -532,6 +533,15 @@ class KeyManager {
    * 获取全部节点（含状态）
    */
   getAllNodes() { return this.store.all(); }
+
+  /**
+   * @alpha: 按 ownerId 获取节点（用户隔离）
+   * @param {string} ownerId
+   */
+  getNodesByOwner(ownerId) {
+    if (!ownerId) return this.store.all();
+    return this.store.all().filter(n => n.ownerId === ownerId);
+  }
 
   /**
    * 获取待审批节点
