@@ -21,7 +21,7 @@ const createClawRouter = require('./routes/claw');
 const createAuthRouter = require('./routes/auth');
 const createJobsRouter = require('./routes/jobs');
 const ClawRPC = require('./services/claw-rpc');
-const { requireAuth, initToken, getAdminToken, setJwtSecret, hashPassword } = require('./middleware/auth');
+const { requireAuth, initToken, getAdminToken, setJwtSecret, hashPassword, verifyJwt } = require('./middleware/auth');
 const { createRateLimit } = require('./middleware/rate-limit');
 const { errorHandler } = require('./middleware/error-handler');
 const { resolvePaths, ensureDataDirs } = require('./services/data-paths');
@@ -283,6 +283,12 @@ async function boot() {
   const wss = new WebSocketServer({ server, path: '/ws' });
   const MAX_WS_CLIENTS = 10;
 
+  // @alpha: WS token 校验 — 兼容 adminToken 和 JWT
+  function _isValidWsToken(token) {
+    if (adminToken && token === adminToken) return true;
+    try { return !!verifyJwt(token); } catch { return false; }
+  }
+
   wss.on('connection', (ws, req) => {
     // 连接数限制
     if (wss.clients.size > MAX_WS_CLIENTS) {
@@ -291,10 +297,11 @@ async function boot() {
     }
 
     // @alpha: WebSocket 认证 — 支持 URL 参数（兼容）和首条消息认证（安全）
+    // 同时兼容 adminToken 和 JWT
     let authenticated = false;
     const url = new URL(req.url, 'http://localhost');
     const wsToken = url.searchParams.get('token');
-    if (adminToken && wsToken === adminToken) {
+    if (wsToken && _isValidWsToken(wsToken)) {
       authenticated = true;
     }
 
@@ -335,7 +342,7 @@ async function boot() {
       ws.once('message', (data) => {
         try {
           const msg = JSON.parse(data.toString());
-          if (msg.type === 'auth' && adminToken && msg.token === adminToken) {
+          if (msg.type === 'auth' && msg.token && _isValidWsToken(msg.token)) {
             authenticated = true;
             onAuthenticated();
           } else {

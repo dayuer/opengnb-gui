@@ -1140,6 +1140,11 @@ function connectWS() {
     wsRetryDelay = 1000; // 重连成功，重置退避
     $('#connection-status').className = 'status-badge online';
     $('#connection-status').textContent = '已连接';
+    // @alpha: 发送首条消息认证（JWT token）
+    const authToken = getToken();
+    if (authToken) {
+      ws.send(JSON.stringify({ type: 'auth', token: authToken }));
+    }
   };
 
   ws.onclose = () => {
