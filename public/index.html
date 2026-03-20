@@ -65,53 +65,117 @@
     .health-ring-fg.offline { stroke: var(--color-danger); }
 
     /* 自定义进度条 */
-    .gauge-bar { height: 4px; border-radius: 2px; background: var(--color-border-default); overflow: hidden; }
-    .gauge-fill { height: 100%; border-radius: 2px; transition: width 0.4s; }
+    .gauge-bar { height: 6px; border-radius: 9999px; background: var(--color-border-default); overflow: hidden; }
+    .gauge-fill { height: 100%; border-radius: 9999px; transition: width 0.6s ease; }
+
+    /* Stitch 设计模式 — glassmorphism */
+    .glass-card {
+      background: rgba(17, 17, 24, 0.75);
+      backdrop-filter: blur(16px);
+      -webkit-backdrop-filter: blur(16px);
+    }
+
+    /* 网格点阵背景 */
+    .bg-grid-pattern {
+      background-image: radial-gradient(circle, rgba(19, 91, 236, 0.06) 1px, transparent 1px);
+      background-size: 32px 32px;
+    }
+
+    /* 品牌渐变 */
+    .signature-gradient { background: linear-gradient(135deg, #135bec 0%, #3b7bf0 100%); }
+
+    /* 深色模式环境阴影 */
+    .shadow-ambient { box-shadow: 0 4px 20px rgba(0, 0, 0, 0.4), 0 0 1px rgba(19, 91, 236, 0.1); }
+
+    /* 微动画 */
+    @keyframes fadeInUp {
+      from { opacity: 0; transform: translateY(12px); }
+      to { opacity: 1; transform: none; }
+    }
+    .animate-fade-in-up { animation: fadeInUp 0.5s ease-out both; }
+    .delay-100 { animation-delay: 100ms; }
+    .delay-200 { animation-delay: 200ms; }
+    .delay-300 { animation-delay: 300ms; }
   </style>
 </head>
 <body class="bg-base text-text-primary font-sans antialiased min-h-screen">
 
   <!-- ===== 登录页 ===== -->
-  <div id="login-page" class="hidden fixed inset-0 z-50 flex items-center justify-center">
-    <!-- 背景光晕 -->
-    <div class="absolute inset-0 overflow-hidden">
-      <div class="absolute w-[500px] h-[500px] rounded-full bg-primary/10 blur-[120px] -top-20 -left-20 animate-pulse"></div>
-      <div class="absolute w-[400px] h-[400px] rounded-full bg-info/8 blur-[100px] bottom-10 right-10 animate-pulse [animation-delay:1s]"></div>
+  <div id="login-page" class="hidden fixed inset-0 z-50 flex flex-col items-center justify-center p-6">
+    <!-- 背景层 -->
+    <div class="absolute inset-0 bg-grid-pattern -z-10"></div>
+    <div class="absolute -top-[10%] -left-[10%] w-[40%] h-[40%] bg-primary/8 rounded-full blur-[120px] -z-10"></div>
+    <div class="absolute -bottom-[10%] -right-[10%] w-[40%] h-[40%] bg-info/6 rounded-full blur-[120px] -z-10"></div>
+
+    <!-- 登录主体 -->
+    <main class="w-full max-w-[440px] z-10">
+      <!-- Logo -->
+      <div class="text-center mb-10 animate-fade-in-up">
+        <div class="inline-flex items-center justify-center p-3 mb-5 rounded-lg bg-surface shadow-ambient">
+          <i data-lucide="diamond" class="w-8 h-8 text-primary"></i>
+        </div>
+        <h1 class="text-3xl font-bold tracking-tight text-text-primary mb-2">SynonClaw Console</h1>
+        <p class="text-text-muted font-medium text-sm">P2P VPN 管理中控台</p>
+      </div>
+
+      <!-- Glassmorphic 登录卡片 -->
+      <div class="glass-card border border-border-default rounded-lg p-8 lg:p-10 shadow-ambient animate-fade-in-up delay-100">
+        <form id="login-form" onsubmit="App.doLogin(event)" class="space-y-5">
+          <div>
+            <label for="login-username" class="block text-xs font-semibold text-text-secondary uppercase tracking-wider mb-2 ml-0.5">用户名</label>
+            <div class="relative">
+              <i data-lucide="user" class="absolute left-4 top-1/2 -translate-y-1/2 w-4 h-4 text-text-muted"></i>
+              <input type="text" id="login-username" placeholder="admin" autocomplete="username" required
+                class="w-full bg-base border-none rounded-lg pl-12 pr-4 py-3.5 text-sm text-text-primary placeholder:text-text-muted focus:ring-2 focus:ring-primary/30 outline-none transition-all font-medium">
+            </div>
+          </div>
+          <div>
+            <label for="login-password" class="block text-xs font-semibold text-text-secondary uppercase tracking-wider mb-2 ml-0.5">密码</label>
+            <div class="relative">
+              <i data-lucide="lock" class="absolute left-4 top-1/2 -translate-y-1/2 w-4 h-4 text-text-muted"></i>
+              <input type="password" id="login-password" placeholder="••••••••" autocomplete="current-password" required
+                class="w-full bg-base border-none rounded-lg pl-12 pr-4 py-3.5 text-sm text-text-primary placeholder:text-text-muted focus:ring-2 focus:ring-primary/30 outline-none transition-all">
+            </div>
+          </div>
+          <div id="login-error" class="hidden text-danger text-xs"></div>
+          <button type="submit" id="login-btn"
+            class="w-full signature-gradient text-white font-semibold py-3.5 rounded-lg shadow-lg shadow-primary/20 hover:scale-[1.01] active:scale-95 transition-all flex items-center justify-center gap-2 cursor-pointer disabled:opacity-50">
+            <span id="login-btn-text">登 录</span>
+            <i data-lucide="arrow-right" class="w-4 h-4"></i>
+          </button>
+        </form>
+      </div>
+
+      <!-- 状态页脚 -->
+      <div class="mt-8 flex items-center justify-center gap-5 animate-fade-in-up delay-200">
+        <div class="flex items-center gap-2">
+          <span class="w-2 h-2 rounded-full bg-success animate-pulse"></span>
+          <span class="text-xs font-semibold text-text-muted uppercase tracking-widest">系统在线</span>
+        </div>
+        <div class="w-px h-3 bg-border-default"></div>
+        <div class="flex items-center gap-1.5">
+          <i data-lucide="globe" class="w-3 h-3 text-text-muted"></i>
+          <span class="text-xs font-semibold text-text-muted uppercase tracking-widest">P2P Network</span>
+        </div>
+      </div>
+    </main>
+
+    <!-- 底部品牌 -->
+    <footer class="mt-auto pt-10 pb-4 flex flex-col items-center gap-3 animate-fade-in-up delay-300">
+      <div class="flex items-center gap-2 opacity-50 hover:opacity-100 transition-opacity">
+        <span class="font-semibold text-xs tracking-tight text-text-secondary">Powered by OpenGNB</span>
+        <i data-lucide="settings-2" class="w-3.5 h-3.5 text-primary"></i>
+      </div>
+    </footer>
+
+    <!-- 装饰角元素 -->
+    <div class="fixed top-8 left-8 hidden lg:block">
+      <div class="text-xs font-semibold text-text-muted uppercase tracking-widest mb-1">Architecture</div>
+      <div class="h-px w-12 bg-primary/20"></div>
     </div>
-    <!-- 登录卡片 -->
-    <div class="relative bg-surface/90 backdrop-blur-xl border border-border-default rounded-lg p-10 w-full max-w-md shadow-lg">
-      <div class="text-center mb-8">
-        <div class="text-4xl mb-3">◈</div>
-        <h1 class="text-2xl font-bold text-text-primary">SynonClaw Console</h1>
-        <p class="text-text-muted text-sm mt-1">P2P VPN 管理中控台</p>
-      </div>
-      <form id="login-form" onsubmit="App.doLogin(event)">
-        <div class="mb-5">
-          <label for="login-username" class="block text-xs font-medium text-text-secondary mb-1.5">用户名</label>
-          <div class="relative">
-            <i data-lucide="user" class="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-text-muted"></i>
-            <input type="text" id="login-username" placeholder="输入用户名" autocomplete="username" required
-              class="w-full bg-elevated border border-border-default rounded-lg pl-10 pr-4 py-2.5 text-sm text-text-primary placeholder:text-text-muted focus:border-primary focus:ring-1 focus:ring-primary/50 outline-none transition">
-          </div>
-        </div>
-        <div class="mb-5">
-          <label for="login-password" class="block text-xs font-medium text-text-secondary mb-1.5">密码</label>
-          <div class="relative">
-            <i data-lucide="lock" class="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-text-muted"></i>
-            <input type="password" id="login-password" placeholder="输入密码" autocomplete="current-password" required
-              class="w-full bg-elevated border border-border-default rounded-lg pl-10 pr-4 py-2.5 text-sm text-text-primary placeholder:text-text-muted focus:border-primary focus:ring-1 focus:ring-primary/50 outline-none transition">
-          </div>
-        </div>
-        <div id="login-error" class="hidden text-danger text-xs mb-3"></div>
-        <button type="submit" id="login-btn"
-          class="w-full bg-primary hover:bg-primary-light text-white font-medium py-2.5 rounded-lg transition flex items-center justify-center gap-2 cursor-pointer disabled:opacity-50">
-          <span id="login-btn-text">登 录</span>
-          <i data-lucide="arrow-right" class="w-4 h-4"></i>
-        </button>
-      </form>
-      <div class="text-center mt-6 text-text-muted text-xs">
-        Powered by <a href="https://github.com/gnbdev/opengnb" target="_blank" rel="noopener" class="text-primary hover:underline">OpenGNB</a>
-      </div>
+    <div class="fixed bottom-8 right-8 hidden lg:block text-right">
+      <div class="text-xs font-semibold text-text-muted uppercase tracking-widest mb-1">Secure Node</div>
+      <div class="h-px w-12 bg-primary/20 ml-auto"></div>
     </div>
   </div>
 
@@ -119,10 +183,13 @@
   <div id="app" class="hidden h-screen flex">
     <!-- 侧边栏 -->
     <nav id="sidebar" class="w-60 bg-surface border-r border-border-default flex flex-col shrink-0 transition-all duration-300 max-md:fixed max-md:inset-y-0 max-md:left-0 max-md:z-40 max-md:-translate-x-full max-md:data-[open]:translate-x-0">
-      <div class="px-5 py-4 border-b border-border-subtle flex items-center justify-between">
-        <div>
-          <span class="font-semibold text-sm text-text-primary">◈ SynonClaw Console</span>
-          <span class="text-xs text-text-muted ml-1.5">v0.1.0</span>
+      <div class="px-4 py-4 border-b border-border-subtle flex items-center gap-3">
+        <div class="w-9 h-9 rounded-lg signature-gradient flex items-center justify-center text-white shrink-0">
+          <i data-lucide="diamond" class="w-5 h-5"></i>
+        </div>
+        <div class="min-w-0">
+          <div class="font-bold text-sm tracking-tight text-text-primary truncate">SynonClaw</div>
+          <div class="text-xs text-text-muted uppercase tracking-widest">Console</div>
         </div>
       </div>
       <ul id="nav-menu" class="flex-1 py-3 px-3 space-y-0.5 overflow-y-auto">

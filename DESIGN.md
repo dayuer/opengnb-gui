@@ -153,3 +153,66 @@
   --font-mono: 'JetBrains Mono', monospace;
 }
 ```
+
+## 高级设计模式 (Advanced Patterns)
+
+> 从 Stitch 屏幕源码提取的组件级模式
+
+### Glassmorphism
+
+```css
+.glass-card {
+  background: rgba(17, 17, 24, 0.75);
+  backdrop-filter: blur(16px);
+}
+```
+
+### 网格点阵背景
+
+```css
+.bg-grid-pattern {
+  background-image: radial-gradient(circle, rgba(19, 91, 236, 0.06) 1px, transparent 1px);
+  background-size: 32px 32px;
+}
+```
+
+### 品牌渐变
+
+```css
+.signature-gradient { background: linear-gradient(135deg, #135bec 0%, #3b7bf0 100%); }
+```
+
+### 环境阴影 (Dark Mode)
+
+```css
+.shadow-ambient { box-shadow: 0 4px 20px rgba(0, 0, 0, 0.4), 0 0 1px rgba(19, 91, 236, 0.1); }
+```
+
+### 微动画
+
+```css
+@keyframes fadeInUp {
+  from { opacity: 0; transform: translateY(12px); }
+  to { opacity: 1; transform: none; }
+}
+```
+
+### 排版模式
+
+| 模式 | 类名 | 说明 |
+|------|------|------|
+| 标签 | `uppercase tracking-wider font-semibold text-xs` | 表单标签、卡片标题 |
+| 徽章 | `uppercase tracking-widest text-xs font-bold` | 状态/变化指示器 |
+| 值 | `text-2xl font-bold` | 仪表盘数值 |
+| 品牌 | `font-bold tracking-tight` | 侧边栏品牌名 |
+
+### 组件模式
+
+| 组件 | 描述 |
+|------|------|
+| **Metric Card** | icon circle(40×40, rounded-lg, bg-color/10) → label(uppercase) → value(2xl bold) → progress bar |
+| **Login Card** | glass-card + border border-default + rounded-lg + shadow-ambient |
+| **Sidebar Logo** | signature-gradient icon(36×36) + tracking-tight name + uppercase subtitle |
+| **Status Footer** | pulse dot + uppercase tracking-widest label + divider + icon label |
+| **Decorative Corners** | fixed corners with uppercase label + primary/20 line |
+
