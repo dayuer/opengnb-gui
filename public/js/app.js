@@ -1327,9 +1327,10 @@ function showApiKey() {
             <div style="font-size:11px;color:var(--text-muted);margin-top:8px">
               节点初始化命令:
             </div>
-            <code style="display:block;font-size:11px;padding:8px;background:var(--bg-tertiary);border-radius:4px;word-break:break-all;margin-top:4px">
-              curl -sSL https://${location.host}/api/enroll/init.sh | ADMIN_TOKEN=${escHtml(apiToken)} bash
-            </code>
+            <div style="position:relative;margin-top:4px">
+              <code id="init-cmd" style="display:block;font-size:11px;padding:8px 32px 8px 8px;background:var(--bg-tertiary);border-radius:4px;word-break:break-all">curl -sSL https://${location.host}/api/enroll/init.sh | TOKEN=${escHtml(apiToken)} bash</code>
+              <span onclick="navigator.clipboard.writeText(document.getElementById('init-cmd').textContent.trim()).then(()=>{this.textContent='✓';setTimeout(()=>this.textContent='📋',1500)})" style="position:absolute;top:6px;right:6px;cursor:pointer;font-size:14px;opacity:0.6" title="复制命令">📋</span>
+            </div>
           </div>
           <div class="modal-footer">
             <button class="modal-btn cancel" onclick="closeModal()">关闭</button>

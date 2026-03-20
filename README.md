@@ -29,8 +29,8 @@ npm run dev
 在目标节点以 root 执行：
 
 ```bash
-# 方式 1: ADMIN_TOKEN 自动获取 passcode（推荐）
-curl -sSL https://api.synonclaw.com/api/enroll/init.sh | ADMIN_TOKEN=xxx bash
+# 方式 1: TOKEN 自动获取 passcode（推荐）
+curl -sSL https://api.synonclaw.com/api/enroll/init.sh | TOKEN=xxx bash
 
 # 方式 2: 手动传入 passcode
 curl -sSL https://api.synonclaw.com/api/enroll/init.sh | PASSCODE=xxx bash
@@ -42,13 +42,13 @@ curl -sSL https://api.synonclaw.com/api/enroll/init.sh | PASSCODE=xxx bash
 |------|------|------|
 | 1 | 安装 GNB | 优先 Console 镜像，GitHub fallback |
 | 2 | 注册 | 获取 passcode → 提交注册 → 返回 enrollToken |
-| 3 | 等待审批 | 轮询（enrollToken + ADMIN_TOKEN 双认证） |
+| 3 | 等待审批 | 轮询（enrollToken + TOKEN 双认证） |
 | 4 | 配置 GNB | Ed25519 密钥生成 + 公钥交换 + systemd |
 | 5 | 启动 GNB | TUN 接口 + **隧道连通验证**（ping Console TUN） |
 | 6 | 创建用户 | `synon` 用户 + sudo 免密 |
 | 7 | 安装 Node.js | v22+（OpenClaw 由 Console 远程推送安装） |
 | 8 | SSH 公钥 | 下载 Console 公钥 → `authorized_keys` |
-| 9 | Agent 安装 | 监控 Agent（ADMIN_TOKEN 认证，每 10s 上报） |
+| 9 | Agent 安装 | 监控 Agent（TOKEN 认证，每 10s 上报） |
 | 10 | 通知就绪 | Console 触发 OpenClaw 远程安装 |
 
 > **TUN 地址段**: 从 `10.1.0.2` 开始分配，跳过 `10.0.x.x` 避免与云厂商内网冲突。
@@ -64,7 +64,7 @@ curl -sSL https://api.synonclaw.com/api/enroll/init.sh | PASSCODE=xxx bash
 Node                          Console
 ┌──────────┐   POST /api/monitor/report   ┌──────────────┐
 │ Agent.sh │ ──────────────────────────→   │ GnbMonitor   │
-│ (10s)    │   ADMIN_TOKEN + nodeId       │  .ingest()   │
+│ (10s)    │   TOKEN + nodeId             │  .ingest()   │
 └──────────┘                              │  → latestState│
                                           │  → metricsStore│
                                           └──────────────┘
@@ -115,11 +115,10 @@ opengnb-gui/
 | 场景 | Token 类型 | 说明 |
 |------|-----------|------|
 | 管理员登录 | JWT | `/api/auth/login` 签发 |
-| API 短 Token | apiToken (10 字符) | 管理员操作替代 JWT |
+| API Token | apiToken (10 字符) | 管理员操作 / Agent 上报 / WS 认证 |
 | 节点注册 | passcode (一次性) | TTL 有效期内单次使用 |
 | 注册后操作 | enrollToken | 绑定 nodeId，服务器重启后失效 |
-| Agent 上报 | ADMIN_TOKEN + nodeId | 持久稳定，不受重启影响 |
-| WS 连接 | JWT / apiToken / ADMIN_TOKEN | 多策略认证 |
+| 节点初始化 | TOKEN | `curl ... \| TOKEN=xxx bash` |
 
 ## 环境变量
 
@@ -127,7 +126,7 @@ opengnb-gui/
 |------|--------|------|
 | `PORT` | 3000 | HTTP 端口 |
 | `DATA_DIR` | ./data | 数据目录 |
-| `ADMIN_TOKEN` | — | 管理员 token（必填） |
+| `ADMIN_TOKEN` | — | 管理员 token（服务端环境变量） |
 | `GNB_INDEX_NODES` | — | Index Node 地址 |
 | `GNB_CONF_DIR` | /opt/gnb/conf/1001 | GNB 配置目录 |
 
