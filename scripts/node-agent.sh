@@ -6,7 +6,14 @@
 # 部署：由 initnode.sh 安装到 /opt/gnb/bin/，systemd timer 每 10s 触发
 # ═══════════════════════════════════════════════════════════════
 
-# --- 配置（由 systemd EnvironmentFile 注入） ---
+# --- 配置（systemd EnvironmentFile 或手动 source） ---
+AGENT_ENV="/opt/gnb/bin/agent.env"
+if [ -z "${CONSOLE_URL:-}" ] && [ -f "$AGENT_ENV" ]; then
+  set -a  # 自动 export
+  . "$AGENT_ENV"
+  set +a
+fi
+
 CONSOLE_URL="${CONSOLE_URL:-}"
 NODE_TOKEN="${NODE_TOKEN:-}"
 NODE_ID="${NODE_ID:-}"
