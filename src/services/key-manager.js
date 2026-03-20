@@ -54,6 +54,8 @@ class KeyManager {
     this.onApproval = null;
     /** @type {Function|null} 节点就绪回调（触发 Provisioner） */
     this.onNodeReady = null;
+    /** @type {Function|null} 节点列表变更回调（WS 广播） */
+    this.onChange = null;
   }
 
   /**
@@ -173,6 +175,9 @@ class KeyManager {
       approvedAt: null,
     });
 
+    // @alpha: 通知前端新节点注册
+    if (this.onChange) this.onChange('enroll', nodeInfo.id);
+
     return { success: true, status: 'pending', message: '注册申请已提交，等待管理员审批', enrollToken };
   }
 
@@ -250,6 +255,7 @@ class KeyManager {
     this._updateGnbConfig(updated);
 
     if (this.onApproval) this.onApproval(this.getApprovedNodesConfig());
+    if (this.onChange) this.onChange('approve', nodeId);
 
     return { success: true, message: `节点 ${nodeId} 已通过审批`, tunAddr: updated.tunAddr, gnbNodeId: updated.gnbNodeId };
   }
@@ -409,6 +415,7 @@ class KeyManager {
     const node = this.store.findById(nodeId);
     if (!node) return { success: false, message: '节点不存在' };
     this.store.update(nodeId, { status: 'rejected' });
+    if (this.onChange) this.onChange('reject', nodeId);
     return { success: true, message: `节点 ${nodeId} 已拒绝` };
   }
 
@@ -418,6 +425,7 @@ class KeyManager {
    */
   removeNode(nodeId) {
     this.store.remove(nodeId);
+    if (this.onChange) this.onChange('remove', nodeId);
     return { success: true, message: `节点 ${nodeId} 已删除` };
   }
 

@@ -148,6 +148,20 @@ async function boot() {
     console.log(`[Approval] 监控已更新: ${updatedNodes.length} 个节点`);
   };
 
+  // @alpha: 节点列表变更回调 — 广播 WS snapshot 实现前端实时更新
+  keyManager.onChange = (action, nodeId) => {
+    if (!wss) return;
+    const snapshot = JSON.stringify({
+      type: 'snapshot',
+      allNodes: keyManager.getAllNodes(),
+      timestamp: new Date().toISOString(),
+    });
+    for (const client of wss.clients) {
+      if (client.readyState === 1 && client._authenticated) client.send(snapshot);
+    }
+    console.log(`[WS] 广播 snapshot (${action}: ${nodeId})`);
+  };
+
   // 就绪回调：节点完成 synon + 公钥部署后，自动 SSH 安装 OpenClaw
   keyManager.onNodeReady = (nodeConfig) => {
     console.log(`[Ready] 节点 ${nodeConfig.id} 已就绪，启动 OpenClaw 远程安装`);
@@ -315,6 +329,7 @@ async function boot() {
 
     function onAuthenticated() {
       if (authTimer) { clearTimeout(authTimer); authTimer = null; }
+      ws._authenticated = true;
       console.log('[WS] 客户端已认证');
       audit.log('ws_connect', {}, req);
 
