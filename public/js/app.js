@@ -1319,10 +1319,9 @@ function showApiKey() {
           <div class="modal-header">API Token（节点初始化用）</div>
           <div class="modal-body">
             <label>API Token（永久有效）</label>
-            <div style="display:flex;gap:8px;align-items:center">
-              <input type="text" id="api-key-display" value="${escHtml(apiToken)}" readonly
-                style="flex:1;font-family:var(--font-mono);font-size:14px;letter-spacing:1px">
-              <button class="toolbar-btn" onclick="copyApiKey()">复制</button>
+            <div style="display:flex;align-items:center;background:var(--bg-tertiary);border:1px solid var(--border);border-radius:6px;cursor:pointer;transition:border-color .2s" onclick="navigator.clipboard.writeText('${escHtml(apiToken)}').then(()=>{const b=this.querySelector('.copy-icon');b.innerHTML='✓';b.style.color='var(--accent)';setTimeout(()=>{b.innerHTML='<svg width=\\'14\\' height=\\'14\\' viewBox=\\'0 0 24 24\\' fill=\\'none\\' stroke=\\'currentColor\\' stroke-width=\\'2\\'><rect x=\\'9\\' y=\\'9\\' width=\\'13\\' height=\\'13\\' rx=\\'2\\'/><path d=\\'M5 15H4a2 2 0 01-2-2V4a2 2 0 012-2h9a2 2 0 012 2v1\\'/></svg>';b.style.color=''},1500)})" onmouseenter="this.style.borderColor='var(--accent)'" onmouseleave="this.style.borderColor='var(--border)'">
+              <code style="flex:1;display:block;font-size:14px;padding:10px 12px;font-family:var(--font-mono);letter-spacing:1px;color:var(--text-primary)">${escHtml(apiToken)}</code>
+              <span class="copy-icon" style="padding:0 12px;color:var(--text-muted);flex-shrink:0;display:flex;align-items:center"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 01-2-2V4a2 2 0 012-2h9a2 2 0 012 2v1"/></svg></span>
             </div>
             <div style="margin-top:12px">
               <div style="font-size:11px;color:var(--text-muted);margin-bottom:4px">节点初始化命令:</div>
