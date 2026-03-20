@@ -349,18 +349,18 @@ class KeyManager {
 
   /**
    * 自动分配下一个可用 TUN IP 地址
-   * 策略：10.0.0.x → 10.0.1.x → ... → 10.255.255.x 顺序填充
-   * 并发安全：Node.js 单线程，此方法同步执行，调用后立即 _save()
-   * @returns {string} 如 '10.0.0.2'
+   * 策略：10.1.0.x → 10.1.1.x → ... → 10.255.255.x 顺序填充
+   * 跳过 10.0.x.x 避免与常见云厂商内网 10.0.0.0/22 冲突
+   * @returns {string} 如 '10.1.0.2'
    */
   _nextAvailableIp() {
     const usedIps = this.store.allTunAddrs();
     if (this.gnbTunAddr) usedIps.add(this.gnbTunAddr);
 
-    // 遍历 10.0.0.x → 10.0.1.x → ... → 10.255.255.x
-    for (let b = 0; b <= 255; b++) {
+    // 从 10.1.0.x 开始，跳过 10.0.x.x
+    for (let b = 1; b <= 255; b++) {
       for (let c = 0; c <= 255; c++) {
-        const start = (b === 0 && c === 0) ? 2 : 1; // 10.0.0.0/1 跳过
+        const start = (b === 1 && c === 0) ? 2 : 1; // 10.1.0.0/1 跳过
         for (let d = start; d <= 254; d++) {
           const candidate = `10.${b}.${c}.${d}`;
           if (!usedIps.has(candidate)) return candidate;
