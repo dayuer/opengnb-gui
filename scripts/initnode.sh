@@ -46,7 +46,7 @@ echo ""
 # ============================================
 # Step 1: 安装 GNB
 # ============================================
-echo "[1/9] 安装 GNB..."
+echo "[1/10] 安装 GNB..."
 
 # 清理旧安装
 if command -v gnb &>/dev/null || [ -d /opt/gnb ]; then
@@ -109,7 +109,7 @@ echo "      GNB 编译安装完成"
 # ============================================
 # Step 2: 获取 passcode 并提交注册
 # ============================================
-echo "[2/9] 提交注册..."
+echo "[2/10] 提交注册..."
 
 if [ -z "${PASSCODE:-}" ]; then
     # 未传入 PASSCODE → 使用 ADMIN_TOKEN 自动获取
@@ -181,7 +181,7 @@ if [ "$STATUS" = "approved" ]; then
     echo "      已审批（之前已注册）"
     fetch_status
 else
-    echo "[3/9] 等待管理员审批..."
+    echo "[3/10] 等待管理员审批..."
     echo "      审批时将分配 GNB TUN 地址 (每 10 秒检查, Ctrl+C 退出)"
     echo ""
     while true; do
@@ -207,7 +207,7 @@ echo "      TUN 地址:    $TUN_ADDR"
 # ============================================
 # Step 4: 配置 GNB（密钥 + 公钥交换 + 配置文件）
 # ============================================
-echo "[4/9] 配置 GNB..."
+echo "[4/10] 配置 GNB..."
 
 GNB_CONF="/opt/gnb/conf/$GNB_NODE_ID"
 mkdir -p "$GNB_CONF"/{security,ed25519,scripts}
@@ -279,7 +279,7 @@ echo "      GNB 配置文件已写入"
 # ============================================
 # Step 5: 启动 GNB 并等待 TUN 接口
 # ============================================
-echo "[5/9] 启动 GNB..."
+echo "[5/10] 启动 GNB..."
 
 if command -v systemctl &>/dev/null; then
     cat > /etc/systemd/system/gnb.service << SVCEOF
@@ -339,7 +339,7 @@ fi
 # ============================================
 # Step 6: 创建 synon 用户
 # ============================================
-echo "[6/9] 创建运维用户 $SSH_USER..."
+echo "[6/10] 创建运维用户 $SSH_USER..."
 
 if id "$SSH_USER" &>/dev/null; then
     echo "      用户已存在"
@@ -420,8 +420,13 @@ curl -sSf "$API_BASE/api/enroll/node-agent.sh" -o /opt/gnb/bin/node-agent.sh 2>/
   || echo "      ⚠️ 从 Console 下载 agent 失败，跳过"
 chmod +x /opt/gnb/bin/node-agent.sh 2>/dev/null || true
 
-# 使用 ADMIN_TOKEN 作 Agent 认证（持久稳定，不受服务器重启影响）
-NODE_TOKEN="${ADMIN_TOKEN}"
+# Agent 认证 token 优先级: ADMIN_TOKEN > ENROLL_TOKEN
+if [ -n "${ADMIN_TOKEN:-}" ]; then
+    NODE_TOKEN="${ADMIN_TOKEN}"
+else
+    NODE_TOKEN="${ENROLL_TOKEN}"
+    echo "      ⚠️ 未传入 ADMIN_TOKEN，Agent 使用 ENROLL_TOKEN（服务器重启后需重新初始化）"
+fi
 
 # 创建 agent 环境配置
 cat > /opt/gnb/bin/agent.env << AGENTEOF
