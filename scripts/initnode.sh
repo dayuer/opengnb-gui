@@ -60,17 +60,17 @@ fi
 if [ "$(uname)" = "Darwin" ]; then
     xcode-select --install 2>/dev/null || true
 elif command -v apt-get &>/dev/null; then
-    apt-get update -qq && apt-get install -y -qq build-essential curl
+    apt-get update -qq && apt-get install -y -qq build-essential curl git
 elif command -v dnf &>/dev/null; then
-    dnf install -y -q gcc make curl
+    dnf install -y -q gcc make curl git
 elif command -v yum &>/dev/null; then
-    yum install -y -q gcc make curl
+    yum install -y -q gcc make curl git
 elif command -v apk &>/dev/null; then
-    apk add -q build-base curl bash
+    apk add -q build-base curl bash git
 elif command -v pacman &>/dev/null; then
-    pacman -Sy --noconfirm base-devel curl >/dev/null
+    pacman -Sy --noconfirm base-devel curl git >/dev/null
 elif command -v zypper &>/dev/null; then
-    zypper install -y -n gcc make curl
+    zypper install -y -n gcc make curl git
 fi
 
 cd /tmp && rm -rf opengnb
