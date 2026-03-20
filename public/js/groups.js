@@ -25,7 +25,7 @@ const Groups = {
 
       if (groups.length === 0) { wrap.innerHTML = `<div class="text-text-muted text-sm text-center py-10">暂无分组，点击「创建分组」开始</div>`; return; }
 
-      let html = `<div class="bg-surface rounded-xl border border-border-default overflow-hidden">
+      let html = `<div class="bg-surface rounded-lg border border-border-default overflow-hidden">
         <table class="w-full text-sm"><thead><tr class="border-b border-border-default text-xs text-text-muted">
           <th class="text-left px-4 py-2.5 font-medium">颜色</th>
           <th class="text-left px-4 py-2.5 font-medium">名称</th>

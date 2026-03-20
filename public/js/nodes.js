@@ -26,7 +26,7 @@ const Nodes = {
     if (!sb) return;
     const ungrouped = App.allNodesRaw.filter(n => !n.groupId).length;
     const f = App.nodeFilter;
-    let html = `<div class="bg-surface rounded-xl border border-border-default p-3 space-y-1">
+    let html = `<div class="bg-surface rounded-lg border border-border-default p-3 space-y-1">
       <div class="text-xs font-medium text-text-muted mb-2 px-2">分组</div>
       <div class="flex items-center gap-2 px-2 py-1.5 rounded-lg text-sm cursor-pointer transition ${!f.groupId ? 'bg-primary/10 text-primary' : 'text-text-secondary hover:bg-elevated'}" onclick="Nodes.filterByGroup(null)">
         ${L('layers')} <span>全部</span> <span class="ml-auto text-xs text-text-muted">${App.allNodesRaw.length}</span>
@@ -97,7 +97,7 @@ const Nodes = {
 
     const allChecked = pageNodes.length > 0 && pageNodes.every(n => App.selectedIds.has(n.id));
 
-    let html = `<div class="bg-surface rounded-xl border border-border-default overflow-hidden">
+    let html = `<div class="bg-surface rounded-lg border border-border-default overflow-hidden">
     <table class="w-full text-sm">
       <thead><tr class="border-b border-border-default text-xs text-text-muted">
         <th class="w-8 px-3 py-2.5"><input type="checkbox" class="accent-primary cursor-pointer" ${allChecked ? 'checked' : ''} onchange="Nodes.toggleSelectAll(this.checked)"></th>
@@ -118,10 +118,10 @@ const Nodes = {
       const group = App.nodeGroups.find(g => g.id === node.groupId);
 
       let statusHtml;
-      if (isPending) statusHtml = `<span class="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-medium bg-warning/15 text-warning">待审批</span>`;
-      else if (isRejected) statusHtml = `<span class="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-medium bg-danger/15 text-danger">已拒绝</span>`;
-      else if (isOnline) statusHtml = `<span class="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-medium bg-success/15 text-success">在线</span>`;
-      else statusHtml = `<span class="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-medium bg-danger/15 text-danger">离线</span>`;
+      if (isPending) statusHtml = `<span class="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium bg-warning/15 text-warning">待审批</span>`;
+      else if (isRejected) statusHtml = `<span class="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium bg-danger/15 text-danger">已拒绝</span>`;
+      else if (isOnline) statusHtml = `<span class="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium bg-success/15 text-success">在线</span>`;
+      else statusHtml = `<span class="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium bg-danger/15 text-danger">离线</span>`;
 
       let actions = '';
       if (isPending) {
@@ -262,19 +262,19 @@ const Nodes = {
 
   _statCard(icon, label, value, color, sub) {
     return `<div class="bg-surface rounded-lg border border-border-subtle p-3">
-      <div class="flex items-center gap-1.5 mb-1"><span class="[&_svg]:w-3.5 [&_svg]:h-3.5 text-text-muted">${icon}</span><span class="text-[11px] text-text-muted">${label}</span></div>
+      <div class="flex items-center gap-1.5 mb-1"><span class="[&_svg]:w-3.5 [&_svg]:h-3.5 text-text-muted">${icon}</span><span class="text-xs text-text-muted">${label}</span></div>
       <div class="text-sm font-semibold ${color}">${value}</div>
-      ${sub ? `<div class="text-[10px] text-text-muted mt-0.5">${sub}</div>` : ''}
+      ${sub ? `<div class="text-xs text-text-muted mt-0.5">${sub}</div>` : ''}
     </div>`;
   },
 
   _gaugeCard(icon, label, value, pct, sub) {
     const c = pctBg(pct);
     return `<div class="bg-surface rounded-lg border border-border-subtle p-3">
-      <div class="flex items-center gap-1.5 mb-1"><span class="[&_svg]:w-3.5 [&_svg]:h-3.5 text-text-muted">${icon}</span><span class="text-[11px] text-text-muted">${label}</span></div>
+      <div class="flex items-center gap-1.5 mb-1"><span class="[&_svg]:w-3.5 [&_svg]:h-3.5 text-text-muted">${icon}</span><span class="text-xs text-text-muted">${label}</span></div>
       <div class="text-sm font-semibold ${pctColor(pct)}">${value}</div>
       ${pct > 0 ? `<div class="gauge-bar mt-1.5"><div class="gauge-fill ${c}" style="width:${Math.min(pct,100)}%"></div></div>` : ''}
-      ${sub ? `<div class="text-[10px] text-text-muted mt-0.5">${sub}</div>` : ''}
+      ${sub ? `<div class="text-xs text-text-muted mt-0.5">${sub}</div>` : ''}
     </div>`;
   },
 
@@ -309,7 +309,7 @@ const Nodes = {
       { key: 'sessions', icon: 'message-square', label: '会话' },
       { key: 'channels', icon: 'radio', label: '渠道' },
     ];
-    let html = `<div class="flex gap-1 mb-3">${subTabs.map(st => `<button class="px-2.5 py-1 text-[11px] rounded transition cursor-pointer ${subTab === st.key ? 'bg-primary/10 text-primary' : 'text-text-muted hover:text-text-primary hover:bg-elevated'}" onclick="Nodes.switchClawSubTab('${safeAttr(nodeId)}','${st.key}')">${L(st.icon)} ${st.label}</button>`).join('')}</div>
+    let html = `<div class="flex gap-1 mb-3">${subTabs.map(st => `<button class="px-2.5 py-1 text-xs rounded transition cursor-pointer ${subTab === st.key ? 'bg-primary/10 text-primary' : 'text-text-muted hover:text-text-primary hover:bg-elevated'}" onclick="Nodes.switchClawSubTab('${safeAttr(nodeId)}','${st.key}')">${L(st.icon)} ${st.label}</button>`).join('')}</div>
     <div id="claw-content-${safeAttr(nodeId)}" class="text-sm text-text-muted">${L('loader')} 加载中...</div>`;
     container.innerHTML = html;
     refreshIcons();

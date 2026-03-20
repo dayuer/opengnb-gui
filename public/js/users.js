@@ -20,7 +20,7 @@ const Users = {
     try {
       const res = await App.authFetch('/api/auth/users');
       const users = await res.json();
-      let html = `<div class="bg-surface rounded-xl border border-border-default overflow-hidden">
+      let html = `<div class="bg-surface rounded-lg border border-border-default overflow-hidden">
         <table class="w-full text-sm"><thead><tr class="border-b border-border-default text-xs text-text-muted">
           <th class="text-left px-4 py-2.5 font-medium">用户名</th>
           <th class="text-left px-4 py-2.5 font-medium">角色</th>
@@ -31,7 +31,7 @@ const Users = {
         const created = u.createdAt ? new Date(u.createdAt).toLocaleString() : '—';
         html += `<tr class="border-b border-border-subtle hover:bg-elevated/50 transition">
           <td class="px-4 py-2.5 font-medium">${escHtml(u.username)}</td>
-          <td class="px-4 py-2.5"><span class="inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-medium bg-primary/15 text-primary">${escHtml(u.role)}</span></td>
+          <td class="px-4 py-2.5"><span class="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium bg-primary/15 text-primary">${escHtml(u.role)}</span></td>
           <td class="px-4 py-2.5 text-text-secondary">${created}</td>
           <td class="px-4 py-2.5">
             <button class="p-1 rounded text-text-muted hover:text-danger hover:bg-danger/10 transition cursor-pointer" onclick="Users.deleteUser('${safeAttr(u.id)}','${safeAttr(u.username)}')" title="删除">${L('trash-2')}</button>

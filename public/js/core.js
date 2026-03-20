@@ -160,7 +160,7 @@ const App = {
             <span class="px-3 text-text-muted group-hover:text-primary">${L('copy')}</span>
           </div>
           <div class="mt-4">
-            <div class="text-[11px] text-text-muted mb-1">节点初始化命令:</div>
+            <div class="text-xs text-text-muted mb-1">节点初始化命令:</div>
             <div class="flex items-center bg-elevated border border-border-default rounded-lg cursor-pointer hover:border-primary transition group" onclick="navigator.clipboard.writeText(this.querySelector('code').textContent.trim());showToast('已复制')">
               <code class="flex-1 text-xs px-3 py-2.5 text-text-primary break-all leading-relaxed">curl -sSL https://${location.host}/api/enroll/init.sh | TOKEN=${escHtml(apiToken)} bash</code>
               <span class="px-3 text-text-muted group-hover:text-primary">${L('copy')}</span>

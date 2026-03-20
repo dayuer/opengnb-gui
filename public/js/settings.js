@@ -51,7 +51,7 @@ const Settings = {
   },
 
   _infoCard(icon, label, value, color) {
-    return `<div class="bg-surface rounded-xl border border-border-default p-4">
+    return `<div class="bg-surface rounded-lg border border-border-default p-4">
       <div class="flex items-center gap-1.5 text-text-muted mb-1.5"><span class="[&_svg]:w-3.5 [&_svg]:h-3.5">${icon}</span><span class="text-xs">${escHtml(label)}</span></div>
       <div class="text-sm font-semibold ${color}">${value}</div>
     </div>`;

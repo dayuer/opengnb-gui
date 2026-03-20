@@ -15,7 +15,7 @@ const WS = {
       this.retryDelay = 1000;
       const badge = $('#connection-status');
       if (badge) {
-        badge.className = 'inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-medium bg-success/15 text-success';
+        badge.className = 'inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium bg-success/15 text-success';
         badge.textContent = '已连接';
       }
       const authToken = App.getToken();
@@ -25,7 +25,7 @@ const WS = {
     this.ws.onclose = () => {
       const badge = $('#connection-status');
       if (badge) {
-        badge.className = 'inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-medium bg-danger/15 text-danger';
+        badge.className = 'inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium bg-danger/15 text-danger';
         badge.textContent = '断开';
       }
       setTimeout(() => this.connect(), this.retryDelay);

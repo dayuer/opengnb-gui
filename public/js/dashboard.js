@@ -76,7 +76,7 @@ const Dashboard = {
           gDisk = Math.round(onlineNodes.reduce((s, n) => s + (parseInt(n.sysInfo?.diskUsePct) || 0), 0) / onlineNodes.length);
         }
 
-        html += `<div class="bg-surface rounded-xl border border-border-default overflow-hidden">
+        html += `<div class="bg-surface rounded-lg border border-border-default overflow-hidden">
           <div class="flex items-center justify-between px-4 py-3 cursor-pointer hover:bg-elevated transition" onclick="Dashboard.toggleGroup('${safeAttr(gid)}')">
             <div class="flex items-center gap-2">
               <span class="w-2.5 h-2.5 rounded-full shrink-0" style="background:${escHtml(gColor)}"></span>
@@ -121,19 +121,19 @@ const Dashboard = {
   },
 
   _card(icon, title, value, color, sub) {
-    return `<div class="bg-surface rounded-xl border border-border-default p-4">
+    return `<div class="bg-surface rounded-lg border border-border-default p-4">
       <div class="flex items-center gap-2 text-text-muted mb-2"><span class="[&_svg]:w-4 [&_svg]:h-4">${icon}</span><span class="text-xs">${title}</span></div>
-      <div class="text-xl font-bold ${color}">${value}</div>
-      ${sub ? `<div class="text-[11px] text-text-muted mt-0.5">${sub}</div>` : ''}
+      <div class="text-2xl font-bold ${color}">${value}</div>
+      ${sub ? `<div class="text-xs text-text-muted mt-0.5">${sub}</div>` : ''}
     </div>`;
   },
 
   _alertCard(alerts, pending) {
     const hasAlert = alerts > 0 || pending > 0;
-    return `<div class="bg-surface rounded-xl border ${hasAlert ? 'border-warning/30' : 'border-border-default'} p-4">
+    return `<div class="bg-surface rounded-lg border ${hasAlert ? 'border-warning/30' : 'border-border-default'} p-4">
       <div class="flex items-center gap-2 text-text-muted mb-2"><span class="[&_svg]:w-4 [&_svg]:h-4">${L('bell')}</span><span class="text-xs">告警</span></div>
-      <div class="text-xl font-bold ${hasAlert ? 'text-warning' : 'text-success'}">${alerts > 0 ? alerts : '—'}</div>
-      <div class="text-[11px] text-text-muted mt-0.5">${pending > 0 ? `${pending} 待审批` : '无告警'}</div>
+      <div class="text-2xl font-bold ${hasAlert ? 'text-warning' : 'text-success'}">${alerts > 0 ? alerts : '—'}</div>
+      <div class="text-xs text-text-muted mt-0.5">${pending > 0 ? `${pending} 待审批` : '无告警'}</div>
     </div>`;
   },
 

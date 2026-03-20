@@ -114,11 +114,42 @@
 
 ## 屏幕清单
 
-| 屏幕 | 描述 |
-|------|------|
-| Cloud Cluster Login | 登录页（两版变体） |
-| Cloud Management Dashboard | 管理仪表盘（两版变体） |
-| Global Cluster Overview | 全局集群概览 |
-| Advanced Node Monitoring | 高级节点监控面板 |
-| Backend Node Operations | 后端节点操作（两版变体） |
-| Network & Security Control | 网络与安全控制（两版变体） |
+> 源自 Stitch 项目最新数据 (2026-03-20T19:55:46Z)
+
+| 屏幕 ID | 标题 | 尺寸 |
+|---------|------|------|
+| `f1c51f5f` | Cloud Cluster Login | 1376×768 |
+| `b425091b` | Cloud Cluster Login (变体) | 1376×768 |
+| `dc95e6ee` | CloudSuite Login Portal | 2560×2048 |
+| `cf6de39a` | Cloud Management Dashboard | 1376×768 |
+| `94734647` | Global Management Dashboard | 3072×2726 |
+| `36627364` | Advanced Node Monitoring | 1376×768 |
+| `171abfa7` | Node Operations Center | 3072×2048 |
+| `c4a90d27` | Backend Node Operations | 1376×768 |
+| `e9990d39` | Network & Security Control | 3072×2146 |
+| `514d0a70` | Network & Security Control (变体) | 1376×768 |
+| `bb307ac1` | Identity & Access Management | 2560×2118 |
+| `35431cbc` | Cluster Management | 2560×2380 |
+| `acc9703a` | System Settings | 2560×2594 |
+
+## Tailwind v4 映射
+
+上述设计 token 在 `index.html` 中通过 `@theme` 块直接映射：
+
+```css
+@theme {
+  --color-primary: #135bec;
+  --color-surface: #111118;
+  --color-elevated: #1a1a24;
+  --color-base: #0a0a0f;
+  --color-border-default: #2a2a3a;
+  --color-text-primary: #f0f0f5;
+  --color-text-secondary: #9898a8;
+  --color-text-muted: #5c5c6e;
+  --color-success: #3fb950;
+  --color-warning: #d29922;
+  --color-danger: #f85149;
+  --font-sans: 'Inter', sans-serif;
+  --font-mono: 'JetBrains Mono', monospace;
+}
+```
