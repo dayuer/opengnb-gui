@@ -416,6 +416,7 @@ class KeyManager {
     const node = this.store.findById(nodeId);
     if (!node) return { success: false, message: '节点不存在' };
     this.store.remove(nodeId);
+    this._writeFullGnbConf(); // 同步 address.conf
     if (this.onChange) this.onChange('reject', nodeId);
     return { success: true, message: `节点 ${nodeId} 已拒绝并删除` };
   }
@@ -426,6 +427,7 @@ class KeyManager {
    */
   removeNode(nodeId) {
     this.store.remove(nodeId);
+    this._writeFullGnbConf(); // 同步 address.conf
     if (this.onChange) this.onChange('remove', nodeId);
     return { success: true, message: `节点 ${nodeId} 已删除` };
   }
