@@ -9,6 +9,7 @@
 # --- 配置（由 systemd EnvironmentFile 注入） ---
 CONSOLE_URL="${CONSOLE_URL:-}"
 NODE_TOKEN="${NODE_TOKEN:-}"
+NODE_ID="${NODE_ID:-}"
 GNB_NODE_ID="${GNB_NODE_ID:-}"
 GNB_MAP_PATH="${GNB_MAP_PATH:-/opt/gnb/conf/${GNB_NODE_ID}/gnb.map}"
 GNB_CTL="${GNB_CTL:-gnb_ctl}"
@@ -81,7 +82,7 @@ HTTP_CODE=$(curl -s -o /dev/null -w '%{http_code}' \
   -H "Content-Type: application/json" \
   -H "Authorization: Bearer ${NODE_TOKEN}" \
   -d "$PAYLOAD" \
-  "${CONSOLE_URL}/api/monitor/report" \
+  "${CONSOLE_URL}/api/monitor/report?nodeId=${NODE_ID}" \
   -m 10 2>/dev/null || echo "000")
 
 if [ "$HTTP_CODE" != "200" ]; then

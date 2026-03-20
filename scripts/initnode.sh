@@ -420,13 +420,14 @@ curl -sSf "$API_BASE/api/enroll/node-agent.sh" -o /opt/gnb/bin/node-agent.sh 2>/
   || echo "      ⚠️ 从 Console 下载 agent 失败，跳过"
 chmod +x /opt/gnb/bin/node-agent.sh 2>/dev/null || true
 
-# 获取节点 token
-NODE_TOKEN="${PASSCODE}"
+# 使用 ADMIN_TOKEN 作 Agent 认证（持久稳定，不受服务器重启影响）
+NODE_TOKEN="${ADMIN_TOKEN}"
 
 # 创建 agent 环境配置
 cat > /opt/gnb/bin/agent.env << AGENTEOF
 CONSOLE_URL=$API_BASE
 NODE_TOKEN=$NODE_TOKEN
+NODE_ID=$NODE_ID
 GNB_NODE_ID=$GNB_NODE_ID
 GNB_MAP_PATH=/opt/gnb/conf/$GNB_NODE_ID/gnb.map
 GNB_CTL=gnb_ctl
