@@ -105,6 +105,24 @@ function createAuthRouter(store) {
     res.json({ apiToken, note: '旧 token 已失效' });
   });
 
+  // @alpha: 修改密码
+  router.post('/change-password', requireAuth, (req, res) => {
+    const { oldPassword, newPassword } = req.body || {};
+    if (!oldPassword || !newPassword) {
+      return res.status(400).json({ error: '请提供旧密码和新密码' });
+    }
+    if (newPassword.length < 8) {
+      return res.status(400).json({ error: '新密码长度至少 8 位' });
+    }
+    const user = store.findUserByName(req.user.username);
+    if (!user || !verifyPassword(oldPassword, user.passwordHash)) {
+      return res.status(401).json({ error: '旧密码错误' });
+    }
+    const newHash = hashPassword(newPassword);
+    store._stmts.updatePassword.run(newHash, user.id);
+    res.json({ success: true, message: '密码修改成功' });
+  });
+
   return router;
 }
 

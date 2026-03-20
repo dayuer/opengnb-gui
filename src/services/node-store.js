@@ -215,6 +215,7 @@ class NodeStore {
       removeUser: this.db.prepare('DELETE FROM users WHERE id = ?'),
       userCount: this.db.prepare('SELECT COUNT(*) AS cnt FROM users'),
       updateApiToken: this.db.prepare('UPDATE users SET apiToken = ? WHERE id = ?'),
+      updatePassword: this.db.prepare('UPDATE users SET passwordHash = ? WHERE id = ?'),
       // @alpha: 异步 job
       insertJob: this.db.prepare(
         `INSERT INTO jobs (id, nodeId, command, status, createdAt)

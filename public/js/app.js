@@ -117,6 +117,7 @@ const PAGE_TITLES = {
   monitor: '运维监控',
   nodes: '节点管理',
   users: '用户管理',
+  claw: 'OpenClaw',
   groups: '分组管理',
   settings: '系统设置',
 };
@@ -143,8 +144,9 @@ function renderPage(page) {
     case 'monitor':   renderMonitorPage(container); break;
     case 'nodes':     renderNodesPage(container); break;
     case 'users':     renderUsersPage(container); break;
-    case 'groups':    renderPlaceholder(container, L('folder'), '分组管理', '管理节点分组和策略路由（开发中）'); break;
-    case 'settings':  renderPlaceholder(container, L('settings'), '系统设置', '系统配置、证书管理和日志查看（开发中）'); break;
+    case 'claw':      renderClawPage(container); break;
+    case 'groups':    renderGroupsPage(container); break;
+    case 'settings':  renderSettingsPage(container); break;
     default:          renderPlaceholder(container, L('lock'), '未知页面', ''); break;
   }
 }
@@ -1566,6 +1568,509 @@ function toggleTheme() {
 
 function initTheme() {
   applyTheme(getTheme());
+}
+
+// ═══════════════════════════════════════
+// @alpha: OpenClaw 管理页面
+// ═══════════════════════════════════════
+
+let clawSelectedNodeId = null;
+let clawActiveTab = 'status';
+let clawTabCache = {};
+
+function renderClawPage(container) {
+  // 筛选有 clawToken 的节点
+  const clawNodes = nodesData.filter(n => n.clawToken);
+
+  // 自动选中第一个
+  if (!clawSelectedNodeId && clawNodes.length > 0) clawSelectedNodeId = clawNodes[0].id;
+  // 如果选中的节点不在列表中，重置
+  if (clawSelectedNodeId && !clawNodes.find(n => n.id === clawSelectedNodeId)) {
+    clawSelectedNodeId = clawNodes.length > 0 ? clawNodes[0].id : null;
+  }
+
+  if (clawNodes.length === 0) {
+    container.innerHTML = `
+      <div class="page-placeholder">
+        <div class="placeholder-icon">${L('bot')}</div>
+        <div class="placeholder-title">暂无已安装 OpenClaw 的节点</div>
+        <div class="placeholder-desc">在「运维监控」页面选择节点，使用 AI 面板执行「安装 openclaw」</div>
+      </div>`;
+    refreshIcons();
+    return;
+  }
+
+  container.innerHTML = `
+    <div class="claw-layout">
+      <aside class="claw-sidebar" id="claw-sidebar"></aside>
+      <div class="claw-main">
+        <div class="claw-tabs" id="claw-tabs"></div>
+        <div class="claw-detail" id="claw-detail"></div>
+      </div>
+    </div>`;
+
+  renderClawSidebar(clawNodes);
+  renderClawTabs();
+  loadClawTab(clawActiveTab);
+}
+
+function renderClawSidebar(clawNodes) {
+  const sb = $('#claw-sidebar');
+  if (!sb) return;
+  let html = `<div class="group-sidebar-header"><span class="group-sidebar-title">Claw 节点</span></div>`;
+  html += `<ul class="group-list">`;
+  for (const n of clawNodes) {
+    const monNode = nodesData.find(mn => mn.id === n.id);
+    const online = monNode?.online;
+    html += `<li class="group-item ${clawSelectedNodeId === n.id ? 'active' : ''}" onclick="selectClawNode('${safeAttr(n.id)}')">
+      <span class="node-dot ${online ? 'online' : 'offline'}"></span>
+      <span class="group-name">${escHtml(n.name || n.id)}</span>
+    </li>`;
+  }
+  html += `</ul>`;
+  sb.innerHTML = html;
+}
+
+function renderClawTabs() {
+  const tabs = $('#claw-tabs');
+  if (!tabs) return;
+  const tabList = [
+    { key: 'status', icon: 'activity', label: '状态' },
+    { key: 'models', icon: 'cpu', label: '模型' },
+    { key: 'config', icon: 'settings', label: '配置' },
+    { key: 'sessions', icon: 'message-square', label: '会话' },
+    { key: 'channels', icon: 'radio', label: '渠道' },
+  ];
+  tabs.innerHTML = tabList.map(t =>
+    `<button class="claw-tab-btn ${clawActiveTab === t.key ? 'active' : ''}" onclick="switchClawTab('${t.key}')">${L(t.icon)} ${t.label}</button>`
+  ).join('');
+  refreshIcons();
+}
+
+function selectClawNode(nodeId) {
+  clawSelectedNodeId = nodeId;
+  clawTabCache = {};
+  renderClawSidebar(nodesData.filter(n => n.clawToken));
+  loadClawTab(clawActiveTab);
+}
+
+function switchClawTab(tab) {
+  clawActiveTab = tab;
+  renderClawTabs();
+  loadClawTab(tab);
+}
+
+async function loadClawTab(tab) {
+  const detail = $('#claw-detail');
+  if (!detail || !clawSelectedNodeId) return;
+  const nodeId = clawSelectedNodeId;
+
+  // 节点离线检查
+  const monNode = nodesData.find(n => n.id === nodeId);
+  if (!monNode?.online) {
+    detail.innerHTML = `<div class="claw-offline">${L('zap')} 节点不可达 — 无法查询 OpenClaw 状态</div>`;
+    refreshIcons();
+    return;
+  }
+
+  detail.innerHTML = `<div class="claw-loading">${L('loader')} 加载中...</div>`;
+  refreshIcons();
+
+  try {
+    let endpoint = '';
+    switch (tab) {
+      case 'status': endpoint = 'status'; break;
+      case 'models': endpoint = 'models'; break;
+      case 'config': endpoint = 'config'; break;
+      case 'sessions': endpoint = 'sessions'; break;
+      case 'channels': endpoint = 'channels'; break;
+    }
+
+    const res = await authFetch(`/api/claw/${encodeURIComponent(nodeId)}/${endpoint}`);
+    const data = await res.json();
+
+    if (data.error) {
+      detail.innerHTML = `<div class="claw-error">${L('alert-circle')} ${escHtml(data.error)}</div>`;
+      refreshIcons();
+      return;
+    }
+
+    clawTabCache[tab] = data;
+
+    switch (tab) {
+      case 'status': renderClawStatus(detail, data); break;
+      case 'models': renderClawModels(detail, data); break;
+      case 'config': renderClawConfig(detail, data); break;
+      case 'sessions': renderClawSessions(detail, data); break;
+      case 'channels': renderClawChannels(detail, data); break;
+    }
+  } catch (err) {
+    detail.innerHTML = `<div class="claw-error">${L('alert-circle')} 请求失败: ${escHtml(err.message)}</div>`;
+    refreshIcons();
+  }
+}
+
+function renderClawStatus(detail, data) {
+  const version = data.runtimeVersion || data.version || '—';
+  const agent = data.heartbeat?.defaultAgentId || data.defaultAgentId || '—';
+  const sessions = data.sessions?.count ?? data.sessionCount ?? '—';
+  const uptime = data.uptime || '—';
+  const status = data.status || (data.runtimeVersion ? 'running' : '—');
+
+  let html = `<div class="claw-status-grid">`;
+  html += renderMetricCard(L('bot'), '版本', version, 'accent', '');
+  html += renderMetricCard(L('play'), '状态', status, status === 'running' ? 'green' : 'yellow', '');
+  html += renderMetricCard(L('user'), '默认 Agent', agent, 'accent', '');
+  html += renderMetricCard(L('message-square'), '会话数', String(sessions), 'accent', '');
+  html += renderMetricCard(L('clock'), '运行时长', String(uptime), '', '');
+  html += `</div>`;
+
+  // 原始数据
+  html += `<div class="claw-raw"><details><summary>原始数据</summary><pre>${escHtml(JSON.stringify(data, null, 2))}</pre></details></div>`;
+  detail.innerHTML = html;
+  refreshIcons();
+}
+
+function renderClawModels(detail, data) {
+  const models = data.data || data.models || (Array.isArray(data) ? data : []);
+  if (models.length === 0) {
+    detail.innerHTML = `<div class="claw-empty">${L('inbox')} 暂无模型数据</div>`;
+    refreshIcons();
+    return;
+  }
+
+  let html = `<table class="nodes-data-table"><thead><tr>
+    <th>模型 ID</th><th>类型</th><th>拥有者</th>
+  </tr></thead><tbody>`;
+  for (const m of models) {
+    html += `<tr>
+      <td><strong>${escHtml(m.id || '—')}</strong></td>
+      <td>${escHtml(m.object || m.type || '—')}</td>
+      <td>${escHtml(m.owned_by || m.owner || '—')}</td>
+    </tr>`;
+  }
+  html += `</tbody></table>`;
+  detail.innerHTML = html;
+}
+
+function renderClawConfig(detail, data) {
+  const raw = data.raw || data;
+  const jsonStr = typeof raw === 'string' ? raw : JSON.stringify(raw, null, 2);
+
+  detail.innerHTML = `
+    <div class="claw-config">
+      <div class="claw-config-toolbar">
+        <span class="claw-config-label">${L('file-code')} 配置文件</span>
+        <button class="toolbar-btn sm" id="claw-config-edit-btn" onclick="toggleClawConfigEdit()">${L('pencil')} 编辑</button>
+      </div>
+      <pre class="claw-config-view" id="claw-config-view">${escHtml(jsonStr)}</pre>
+      <div class="claw-config-editor" id="claw-config-editor" style="display:none">
+        <textarea id="claw-config-textarea" rows="20">${escHtml(jsonStr)}</textarea>
+        <div class="claw-config-actions">
+          <button class="toolbar-btn" onclick="cancelClawConfigEdit()">取消</button>
+          <button class="toolbar-btn primary" onclick="saveClawConfig()">保存</button>
+        </div>
+      </div>
+    </div>`;
+  refreshIcons();
+}
+
+function toggleClawConfigEdit() {
+  const view = $('#claw-config-view');
+  const editor = $('#claw-config-editor');
+  if (!view || !editor) return;
+  view.style.display = view.style.display === 'none' ? '' : 'none';
+  editor.style.display = editor.style.display === 'none' ? '' : 'none';
+}
+
+function cancelClawConfigEdit() {
+  const view = $('#claw-config-view');
+  const editor = $('#claw-config-editor');
+  if (view) view.style.display = '';
+  if (editor) editor.style.display = 'none';
+}
+
+async function saveClawConfig() {
+  if (!clawSelectedNodeId) return;
+  const textarea = $('#claw-config-textarea');
+  if (!textarea) return;
+  const patch = textarea.value;
+
+  try {
+    const res = await authFetch(`/api/claw/${encodeURIComponent(clawSelectedNodeId)}/config`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ patch }),
+    });
+    const data = await res.json();
+    if (data.error) {
+      showToast(`配置保存失败: ${data.error}`, 'error');
+    } else {
+      showToast('配置已保存');
+      cancelClawConfigEdit();
+      loadClawTab('config');
+    }
+  } catch (err) {
+    showToast(`保存失败: ${err.message}`, 'error');
+  }
+}
+
+function renderClawSessions(detail, data) {
+  const sessions = data.sessions || data.data || (Array.isArray(data) ? data : []);
+  if (!sessions.length && !data.count) {
+    detail.innerHTML = `<div class="claw-empty">${L('inbox')} 暂无会话数据</div>`;
+    refreshIcons();
+    return;
+  }
+
+  if (typeof data.count !== 'undefined' && !sessions.length) {
+    detail.innerHTML = `<div class="claw-status-grid">${renderMetricCard(L('message-square'), '活跃会话', String(data.count), 'accent', '')}</div>
+      <div class="claw-raw"><details><summary>原始数据</summary><pre>${escHtml(JSON.stringify(data, null, 2))}</pre></details></div>`;
+    refreshIcons();
+    return;
+  }
+
+  let html = `<table class="nodes-data-table"><thead><tr>
+    <th>会话 Key</th><th>创建时间</th><th>消息数</th>
+  </tr></thead><tbody>`;
+  for (const s of sessions) {
+    html += `<tr>
+      <td><code>${escHtml(s.key || s.sessionKey || s.id || '—')}</code></td>
+      <td>${s.createdAt ? new Date(s.createdAt).toLocaleString() : '—'}</td>
+      <td>${s.messageCount ?? s.messages ?? '—'}</td>
+    </tr>`;
+  }
+  html += `</tbody></table>`;
+  detail.innerHTML = html;
+}
+
+function renderClawChannels(detail, data) {
+  const channels = data.channels || data.data || (Array.isArray(data) ? data : []);
+  if (!channels.length) {
+    // 可能是对象格式
+    if (typeof data === 'object' && !Array.isArray(data) && Object.keys(data).length > 0 && !data.error) {
+      detail.innerHTML = `<div class="claw-raw"><pre>${escHtml(JSON.stringify(data, null, 2))}</pre></div>`;
+      return;
+    }
+    detail.innerHTML = `<div class="claw-empty">${L('inbox')} 暂无渠道数据</div>`;
+    refreshIcons();
+    return;
+  }
+
+  let html = `<table class="nodes-data-table"><thead><tr>
+    <th>渠道</th><th>类型</th><th>状态</th>
+  </tr></thead><tbody>`;
+  for (const c of channels) {
+    const statusColor = c.status === 'active' || c.connected ? 'green' : 'yellow';
+    html += `<tr>
+      <td><strong>${escHtml(c.name || c.id || '—')}</strong></td>
+      <td>${escHtml(c.type || '—')}</td>
+      <td class="${statusColor}">${escHtml(c.status || (c.connected ? '连接' : '断开') || '—')}</td>
+    </tr>`;
+  }
+  html += `</tbody></table>`;
+  detail.innerHTML = html;
+}
+
+// ═══════════════════════════════════════
+// @alpha: 分组管理页面
+// ═══════════════════════════════════════
+
+async function renderGroupsPage(container) {
+  container.innerHTML = `
+    <div class="page-users">
+      <div class="users-header">
+        <h3>分组管理</h3>
+        <button class="toolbar-btn primary" onclick="showGroupModal()">${L('plus')} 创建分组</button>
+      </div>
+      <div id="groups-table-wrap">加载中...</div>
+    </div>`;
+  refreshIcons();
+  await loadGroupsTable();
+}
+
+async function loadGroupsTable() {
+  const wrap = $('#groups-table-wrap');
+  if (!wrap) return;
+  try {
+    const res = await authFetch('/api/nodes/groups');
+    const data = await res.json();
+    const groups = data.groups || [];
+    nodeGroups = groups;
+
+    if (groups.length === 0) {
+      wrap.innerHTML = `<div class="table-empty">暂无分组，点击「创建分组」开始</div>`;
+      return;
+    }
+
+    let html = `<table class="nodes-data-table">
+      <thead><tr>
+        <th>颜色</th><th>名称</th><th>节点数</th><th>创建时间</th><th>操作</th>
+      </tr></thead><tbody>`;
+    for (const g of groups) {
+      const created = g.createdAt ? new Date(g.createdAt).toLocaleString() : '—';
+      html += `<tr>
+        <td><span class="group-color-dot lg" style="background:${escHtml(g.color)}"></span></td>
+        <td><strong>${escHtml(g.name)}</strong></td>
+        <td>${g.nodeCount ?? 0}</td>
+        <td>${created}</td>
+        <td>
+          <button class="btn-icon" onclick="showEditGroupModal('${safeAttr(g.id)}')" title="编辑">${L('pencil')}</button>
+          <button class="btn-icon" onclick="deleteGroupUI('${safeAttr(g.id)}')" title="删除">${L('trash-2')}</button>
+        </td>
+      </tr>`;
+    }
+    html += `</tbody></table>`;
+    wrap.innerHTML = html;
+    refreshIcons();
+  } catch (e) {
+    wrap.innerHTML = `<div class="table-empty">加载失败: ${escHtml(e.message)}</div>`;
+  }
+}
+
+function showEditGroupModal(groupId) {
+  const group = nodeGroups.find(g => g.id === groupId);
+  if (!group) return;
+  const overlay = $('#modal-overlay');
+  const content = $('#modal-content');
+  overlay.style.display = 'flex';
+  pickedColor = group.color || '#388bfd';
+  content.innerHTML = `
+    <div class="modal-header">编辑分组</div>
+    <div class="modal-body">
+      <label>分组名称</label>
+      <input type="text" id="edit-group-name" value="${escHtml(group.name)}" autofocus>
+      <label>颜色</label>
+      <div class="color-picker" id="color-picker">
+        ${['#388bfd','#3fb950','#f85149','#d29922','#a371f7','#f778ba','#79c0ff','#56d4dd'].map(c => `<span class="color-opt ${c === pickedColor ? 'active' : ''}" style="background:${c}" onclick="pickColor(this,'${c}')"></span>`).join('')}
+      </div>
+    </div>
+    <div class="modal-footer">
+      <button class="modal-btn cancel" onclick="closeModal()">取消</button>
+      <button class="modal-btn primary" onclick="updateGroupUI('${safeAttr(groupId)}')">保存</button>
+    </div>`;
+}
+
+async function updateGroupUI(groupId) {
+  const name = $('#edit-group-name')?.value?.trim();
+  if (!name) { alert('名称不能为空'); return; }
+  try {
+    const res = await authFetch(`/api/nodes/groups/${encodeURIComponent(groupId)}`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ name, color: pickedColor }),
+    });
+    if (!res.ok) {
+      const d = await res.json();
+      alert(d.message || d.error || '更新失败');
+      return;
+    }
+    closeModal();
+    await loadGroupsTable();
+  } catch (e) { alert(`更新失败: ${e.message}`); }
+}
+
+// ═══════════════════════════════════════
+// @alpha: 系统设置页面
+// ═══════════════════════════════════════
+
+async function renderSettingsPage(container) {
+  container.innerHTML = `
+    <div class="page-settings">
+      <div class="settings-section">
+        <h3>${L('info')} 系统信息</h3>
+        <div id="settings-health" class="settings-cards">加载中...</div>
+      </div>
+      <div class="settings-section">
+        <h3>${L('key-round')} 修改密码</h3>
+        <form id="change-pwd-form" class="settings-form" onsubmit="doChangePwd(event)">
+          <label class="form-label">当前密码</label>
+          <input class="form-input" type="password" id="pwd-old" required autocomplete="current-password">
+          <label class="form-label" style="margin-top:12px">新密码（至少 8 位）</label>
+          <input class="form-input" type="password" id="pwd-new" required minlength="8" autocomplete="new-password">
+          <label class="form-label" style="margin-top:12px">确认新密码</label>
+          <input class="form-input" type="password" id="pwd-confirm" required minlength="8" autocomplete="new-password">
+          <div id="pwd-error" style="color:var(--red);font-size:12px;margin-top:8px;display:none"></div>
+          <button type="submit" class="toolbar-btn primary" style="margin-top:16px" id="pwd-submit-btn">${L('check')} 修改密码</button>
+        </form>
+      </div>
+    </div>`;
+  refreshIcons();
+  await loadHealthInfo();
+}
+
+async function loadHealthInfo() {
+  const wrap = $('#settings-health');
+  if (!wrap) return;
+  try {
+    const res = await authFetch('/api/health');
+    const d = await res.json();
+    wrap.innerHTML = `<div class="settings-info-grid">
+      ${settingsInfoCard(L('activity'), '状态', d.status === 'ok' ? '正常运行' : d.status, d.status === 'ok' ? 'green' : 'red')}
+      ${settingsInfoCard(L('clock'), '运行时间', formatUptime(d.uptime), '')}
+      ${settingsInfoCard(L('globe'), '总节点', String(d.nodesTotal), 'accent')}
+      ${settingsInfoCard(L('check-circle'), '已审批', String(d.nodesApproved), 'green')}
+      ${settingsInfoCard(L('clock'), '待审批', String(d.nodesPending), d.nodesPending > 0 ? 'yellow' : '')}
+      ${settingsInfoCard(L('server'), '版本', 'v0.1.0', '')}
+    </div>`;
+    refreshIcons();
+  } catch (e) {
+    wrap.innerHTML = `<div class="table-empty">加载失败: ${escHtml(e.message)}</div>`;
+  }
+}
+
+function settingsInfoCard(icon, label, value, color) {
+  return `<div class="settings-info-card">
+    <div class="sic-label">${icon} ${escHtml(label)}</div>
+    <div class="sic-value ${color}">${value}</div>
+  </div>`;
+}
+
+function formatUptime(seconds) {
+  if (!seconds) return '—';
+  const d = Math.floor(seconds / 86400);
+  const h = Math.floor((seconds % 86400) / 3600);
+  const m = Math.floor((seconds % 3600) / 60);
+  if (d > 0) return `${d} 天 ${h} 小时`;
+  if (h > 0) return `${h} 小时 ${m} 分钟`;
+  return `${m} 分钟`;
+}
+
+async function doChangePwd(e) {
+  e.preventDefault();
+  const oldPwd = $('#pwd-old')?.value;
+  const newPwd = $('#pwd-new')?.value;
+  const confirm = $('#pwd-confirm')?.value;
+  const errEl = $('#pwd-error');
+  const btn = $('#pwd-submit-btn');
+
+  if (newPwd !== confirm) {
+    if (errEl) { errEl.textContent = '两次输入的新密码不一致'; errEl.style.display = 'block'; }
+    return;
+  }
+
+  if (btn) { btn.disabled = true; btn.textContent = '提交中...'; }
+  if (errEl) errEl.style.display = 'none';
+
+  try {
+    const res = await authFetch('/api/auth/change-password', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ oldPassword: oldPwd, newPassword: newPwd }),
+    });
+    const data = await res.json();
+    if (!res.ok) {
+      if (errEl) { errEl.textContent = data.error || '修改失败'; errEl.style.display = 'block'; }
+    } else {
+      showToast('密码修改成功');
+      if ($('#pwd-old')) $('#pwd-old').value = '';
+      if ($('#pwd-new')) $('#pwd-new').value = '';
+      if ($('#pwd-confirm')) $('#pwd-confirm').value = '';
+    }
+  } catch (err) {
+    if (errEl) { errEl.textContent = '网络错误: ' + err.message; errEl.style.display = 'block'; }
+  }
+  if (btn) { btn.disabled = false; btn.textContent = '修改密码'; }
 }
 
 // 启动
