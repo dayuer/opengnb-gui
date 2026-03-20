@@ -27,6 +27,20 @@ if [ -z "$CONSOLE_URL" ] || [ -z "$TOKEN" ]; then
   exit 1
 fi
 
+# --- 自更新机制：每 360 次运行（~1小时）自动拉取最新 agent ---
+SELF_PATH="/opt/gnb/bin/node-agent.sh"
+UPDATE_COUNTER="/tmp/.agent_update_counter"
+COUNT=$(cat "$UPDATE_COUNTER" 2>/dev/null || echo 0)
+COUNT=$((COUNT + 1))
+echo "$COUNT" > "$UPDATE_COUNTER"
+if [ $((COUNT % 360)) -eq 0 ]; then
+  NEW_SCRIPT=$(curl -sf -m 5 "${CONSOLE_URL}/api/enroll/node-agent.sh" 2>/dev/null || true)
+  if [ -n "$NEW_SCRIPT" ] && echo "$NEW_SCRIPT" | head -1 | grep -q "^#!/"; then
+    echo "$NEW_SCRIPT" | sudo tee "$SELF_PATH" > /dev/null 2>&1
+    sudo chmod +x "$SELF_PATH" 2>/dev/null
+  fi
+fi
+
 START_MS=$(($(date +%s%N 2>/dev/null || echo "0") / 1000000))
 
 # --- 1. GNB 状态 ---
