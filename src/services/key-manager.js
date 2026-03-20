@@ -738,6 +738,7 @@ class KeyManager {
         gnbCtlPath: n.gnbCtlPath,
         clawToken: n.clawToken || '',
         clawPort: n.clawPort || 18789,
+        groupId: n.groupId || '',
       }));
   }
 

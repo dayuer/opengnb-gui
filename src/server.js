@@ -313,6 +313,7 @@ async function boot() {
         ...s,
         clawToken: cfg?.clawToken ? cfg.clawToken.substring(0, 8) + '...' : '',
         clawPort: cfg?.clawPort || 0,
+        groupId: cfg?.groupId || s.groupId || '',
       };
     });
   }

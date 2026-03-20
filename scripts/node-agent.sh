@@ -55,9 +55,15 @@ CLAW_RUNNING="false"
 CLAW_PID=""
 CLAW_CONFIG=""
 
-# 检测 openclaw-gateway 进程
-CLAW_PID=$(pgrep -f 'openclaw-gateway' 2>/dev/null | head -1 || true)
-if [ -n "$CLAW_PID" ]; then
+# 检测 openclaw 进程（gateway 进程名为 openclaw，不是 openclaw-gateway）
+CLAW_PID=$(pgrep -f 'openclaw gateway' 2>/dev/null | head -1 || true)
+if [ -z "$CLAW_PID" ]; then
+  CLAW_PID=$(pgrep -x 'openclaw' 2>/dev/null | head -1 || true)
+fi
+if [ -z "$CLAW_PID" ] && systemctl is-active openclaw-gateway.service >/dev/null 2>&1; then
+  CLAW_PID=$(systemctl show openclaw-gateway.service --property=MainPID --value 2>/dev/null || true)
+fi
+if [ -n "$CLAW_PID" ] && [ "$CLAW_PID" != "0" ]; then
   CLAW_RUNNING="true"
 fi
 
