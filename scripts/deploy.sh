@@ -1,5 +1,5 @@
 #!/bin/bash
-# GNB Console — 部署脚本
+# SynonClaw Console — 部署脚本
 # 将 opengnb-gui 部署到远程服务器
 #
 # 用法:
@@ -22,7 +22,7 @@ PORT="${DEPLOY_PORT:-3000}"
 
 echo ""
 echo "  ╔══════════════════════════════════════╗"
-echo "  ║  GNB Console — 部署到 $DOMAIN  ║"
+echo "  ║  SynonClaw Console — 部署到 $DOMAIN  ║"
 echo "  ╚══════════════════════════════════════╝"
 echo ""
 echo "  Server: $SSH_USER@$SERVER"
@@ -94,7 +94,7 @@ echo "      使用 Node: \$NODE_BIN (\$(node -v))"
 # systemd 服务
 cat > /etc/systemd/system/gnb-console.service << EOF
 [Unit]
-Description=GNB Console Management Platform
+Description=SynonClaw Console Management Platform
 After=network.target
 
 [Service]

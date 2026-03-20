@@ -1,5 +1,5 @@
 #!/bin/bash
-# GNB Console — 一键安装脚本 (多 OS 适配)
+# SynonClaw Console — 一键安装脚本 (多 OS 适配)
 #
 # 支持: Debian/Ubuntu, CentOS/RHEL/Rocky/Alma, Fedora, Alpine, openSUSE, Arch, macOS
 #
@@ -191,7 +191,7 @@ setup_service() {
     if command -v systemctl &>/dev/null; then
         cat > /etc/systemd/system/gnb-console.service << EOF
 [Unit]
-Description=GNB Console Management Platform
+Description=SynonClaw Console Management Platform
 After=network.target
 
 [Service]
@@ -218,7 +218,7 @@ EOF
         cat > /etc/init.d/gnb-console << 'INITEOF'
 #!/sbin/openrc-run
 name="gnb-console"
-description="GNB Console Management Platform"
+description="SynonClaw Console Management Platform"
 command="/usr/bin/node"
 command_args="APP_DIR_PLACEHOLDER/src/server.js"
 command_background=true
@@ -273,7 +273,7 @@ PLISTEOF
 # ============================================
 echo ""
 echo "  ╔══════════════════════════════════════════╗"
-echo "  ║  GNB Console — 一键安装 v0.2.0           ║"
+echo "  ║  SynonClaw Console — 一键安装 v0.2.0           ║"
 echo "  ╚══════════════════════════════════════════╝"
 echo ""
 
@@ -591,7 +591,7 @@ fi
 # 完成
 echo ""
 echo "  ╔══════════════════════════════════════════╗"
-echo "  ║  ✅ GNB Console 安装完成                  ║"
+echo "  ║  ✅ SynonClaw Console 安装完成                  ║"
 echo "  ╠══════════════════════════════════════════╣"
 echo "  ║  Dashboard: https://$DOMAIN              ║"
 echo "  ║  Health:    https://$DOMAIN/api/health   ║"

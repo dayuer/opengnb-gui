@@ -1,5 +1,5 @@
 #!/bin/bash
-# GNB Console — 节点初始化脚本
+# SynonClaw Console — 节点初始化脚本
 #
 # 流程：
 #   1. 安装 GNB（编译或已安装跳过）
@@ -35,7 +35,7 @@ json_val() { python3 -c "import sys,json; print(json.load(sys.stdin).get('$1',''
 
 echo ""
 echo "  ╔══════════════════════════════════════╗"
-echo "  ║  GNB Console — 节点初始化 v0.5.0     ║"
+echo "  ║  SynonClaw Console — 节点初始化 v0.5.0     ║"
 echo "  ╚══════════════════════════════════════╝"
 echo ""
 echo "  Console:  $CONSOLE ($API_BASE)"

@@ -1,6 +1,6 @@
 'use strict';
 
-/* GNB Console — 前端应用逻辑（含页面路由） */
+/* SynonClaw Console — 前端应用逻辑（含页面路由） */
 
 const $ = (sel) => document.querySelector(sel);
 const $$ = (sel) => document.querySelectorAll(sel);

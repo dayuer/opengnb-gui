@@ -334,14 +334,14 @@ async function boot() {
 
   // --- 启动 ---
   server.listen(PORT, () => {
-    console.log(`\n  ╔══════════════════════════════════════╗`);
-    console.log(`  ║   GNB Console — Management Platform  ║`);
-    console.log(`  ╠══════════════════════════════════════╣`);
-    console.log(`  ║  HTTP:  http://localhost:${PORT}        ║`);
-    console.log(`  ║  WS:    ws://localhost:${PORT}/ws       ║`);
-    console.log(`  ║  Auth:  Bearer Token ✓                ║`);
-    console.log(`  ║  Nodes: ${approvedNodes.length} approved / ${keyManager.getPendingNodes().length} pending   ║`);
-    console.log(`  ╚══════════════════════════════════════╝\n`);
+    console.log(`\n  ╔═══════════════════════════════════════════╗`);
+    console.log(`  ║  SynonClaw Console — Management Platform  ║`);
+    console.log(`  ╠═══════════════════════════════════════════╣`);
+    console.log(`  ║  HTTP:  http://localhost:${PORT}             ║`);
+    console.log(`  ║  WS:    ws://localhost:${PORT}/ws            ║`);
+    console.log(`  ║  Auth:  Bearer Token ✓                     ║`);
+    console.log(`  ║  Nodes: ${approvedNodes.length} approved / ${keyManager.getPendingNodes().length} pending        ║`);
+    console.log(`  ╚═══════════════════════════════════════════╝\n`);
     console.log(`  节点初始化:`);
     console.log(`  curl -sSL http://<TUN_IP>:${PORT}/api/enroll/init.sh | \\`);
     console.log(`    CONSOLE=<TUN_IP>:${PORT} NODE_ID=<ID> TUN_ADDR=<IP> bash\n`);

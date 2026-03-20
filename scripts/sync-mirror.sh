@@ -1,5 +1,5 @@
 #!/bin/bash
-# GNB Console — 软件镜像同步脚本
+# SynonClaw Console — 软件镜像同步脚本
 #
 # 从 GitHub 下载 GNB 和 OpenClaw 发布包到本地 mirror 目录
 # 供无法访问 GitHub 的终端节点通过 Console API 下载

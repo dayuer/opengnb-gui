@@ -1,4 +1,4 @@
-# GNB Console — 节点管理中台
+# SynonClaw Console — 节点管理中台
 
 基于 Node.js 的 GNB P2P VPN 节点远程管理平台。通过 GNB 建立底层安全的内网隧道，再通过 SSH 远程执行 `gnb_ctl` 采集状态，由 Claude 作为"智能运维工程师"进行远程配置。
 
