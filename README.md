@@ -1,134 +1,241 @@
 # SynonClaw Console — 节点管理中台
 
-基于 Node.js 的 GNB P2P VPN 节点远程管理平台。通过 GNB 建立底层安全的内网隧道，节点 Agent 主动推送状态到 Console，由 Claude 作为"智能运维工程师"进行远程配置。
+基于 Node.js 的 GNB P2P VPN 节点远程管理平台。通过 GNB 建立底层安全的内网隧道，节点 Agent 主动推送状态到 Console，支持 Claude 智能运维。
 
 ## 架构
 
 ```
-Console Server (Node.js @ :3000)
-  │
-  ├── KeyManager: ED25519 密钥对 + 审批制注册 + ownerId 多租户隔离
-  ├── SSHManager: SSH 连接池 (通过 GNB TUN 内网)
-  ├── GnbMonitor: 推模式 — 被动接收节点 Agent 上报，60s 无上报判定离线
-  ├── NodeAgent:  节点端 Agent (systemd timer 每 10s 推送 GNB/系统/OpenClaw 状态)
-  ├── Provisioner: 审批后自动安装 OpenClaw（远程推送，不在 initnode 中安装）
-  ├── AiOps: Claude 智能运维 (安全门控)
-  └── Web Dashboard: 暗色主题 + WebSocket 实时 + 待审批 badge 可点击
+                    ┌─────────────────────────────────────────────┐
+                    │        Console Server (Node.js :3000)       │
+                    │                                             │
+                    │  ┌─────────────┐    ┌──────────────┐        │
+                    │  │ KeyManager  │    │  SSHManager   │        │
+                    │  │ 密钥+审批   │    │  SSH 连接池   │        │
+                    │  └──────┬──────┘    └──────┬───────┘        │
+                    │         │                  │                │
+                    │  ┌──────┴──────┐    ┌──────┴───────┐        │
+                    │  │ GnbMonitor  │    │ Provisioner   │        │
+                    │  │ 推模式监控  │    │ 远程部署      │        │
+                    │  └─────────────┘    └──────────────┘        │
+                    │                                             │
+                    │  ┌─────────────┐    ┌──────────────┐        │
+                    │  │   AiOps     │    │  JobManager   │        │
+                    │  │ Claude 运维 │    │  异步任务     │        │
+                    │  └─────────────┘    └──────────────┘        │
+                    │                                             │
+                    │  ┌─────────────────────────────────┐        │
+                    │  │  Web Dashboard (暗色/亮色 + WS)  │        │
+                    │  └─────────────────────────────────┘        │
+                    └───────────────┬─────────────────────────────┘
+                                   │ GNB TUN (10.1.0.0/8)
+                    ┌──────────────┬┴──────────────┐
+                    │              │               │
+               ┌────┴────┐  ┌────┴────┐    ┌────┴────┐
+               │ Node A  │  │ Node B  │    │ Node N  │
+               │ Agent   │  │ Agent   │    │ Agent   │
+               │ 10s 上报│  │ 10s 上报│    │ 10s 上报│
+               └─────────┘  └─────────┘    └─────────┘
 ```
+
+## 功能特性
+
+### 节点管理
+- **审批制注册** — passcode 一次性码 + enrollToken 认证 + 管理员审批
+- **在线编辑** — 修改节点 name/tunAddr/sshPort/sshUser，支持远程 GNB 同步
+- **分组管理** — 创建/编辑/删除分组，颜色标记，CIDR 网段过滤
+- **批量操作** — 多选节点批量审批/拒绝/删除/移组
+- **分页系统** — 每页 50 条，支持大规模节点管理
+
+### 监控（推模式）
+- **Agent 推送** — 节点每 10s 主动上报 GNB/系统/OpenClaw 状态
+- **离线检测** — 60s 无上报自动判定离线
+- **指标存储** — 时序数据持久化 + 趋势聚合
+- **实时仪表盘** — WebSocket 推送 + sparkline 趋势图
+
+### 安全
+- **enrollToken** — 注册成功签发，绑定 nodeId，防跨节点访问
+- **passcode TTL** — 30 分钟有效期，过期自动失效
+- **文件权限** — agent.env / 私钥 chmod 600
+- **命令白名单** — SSH 命令安全门控
+
+### 运维
+- **Claude AI 运维** — 智能诊断 + 安全门控
+- **异步命令框架** — SSH 投递 + nohup 后台执行 + HTTP 回调
+- **远程部署** — 审批通过后自动推送 OpenClaw
+- **主题切换** — 深色 ↔ 亮色模式，`localStorage` 持久化
 
 ## 快速开始
 
 ```bash
-npm install
-npm run dev
-# 访问 http://localhost:3000
+# 开发环境
+npm install && npm run dev    # http://localhost:3000
+
+# 生产部署（一键安装）
+curl -sSL https://api.synonclaw.com/api/enroll/setup-console.sh | bash
 ```
 
 ## 节点接入
 
-在目标节点以 root 执行：
-
 ```bash
-# 方式 1: TOKEN 自动获取 passcode（推荐）
 curl -sSL https://api.synonclaw.com/api/enroll/init.sh | TOKEN=xxx bash
-
-# 方式 2: 手动传入 passcode
-curl -sSL https://api.synonclaw.com/api/enroll/init.sh | PASSCODE=xxx bash
 ```
+
+> TOKEN 在 Console Web UI →「API Token」弹窗中获取，点击 📋 复制。
 
 ### 初始化流程（10 步）
 
-| 步骤 | 内容 | 说明 |
-|------|------|------|
-| 1 | 安装 GNB | 优先 Console 镜像，GitHub fallback |
-| 2 | 注册 | 获取 passcode → 提交注册 → 返回 enrollToken |
-| 3 | 等待审批 | 轮询（enrollToken + TOKEN 双认证） |
-| 4 | 配置 GNB | Ed25519 密钥生成 + 公钥交换 + systemd |
-| 5 | 启动 GNB | TUN 接口 + **隧道连通验证**（ping Console TUN） |
-| 6 | 创建用户 | `synon` 用户 + sudo 免密 |
-| 7 | 安装 Node.js | v22+（OpenClaw 由 Console 远程推送安装） |
-| 8 | SSH 公钥 | 下载 Console 公钥 → `authorized_keys` |
-| 9 | Agent 安装 | 监控 Agent（TOKEN 认证，每 10s 上报） |
-| 10 | 通知就绪 | Console 触发 OpenClaw 远程安装 |
-
-> **TUN 地址段**: 从 `10.1.0.2` 开始分配，跳过 `10.0.x.x` 避免与云厂商内网冲突。
-
-### 节点审批
-
-- **同意** → 自动分配 TUN 地址 + GNB 节点 ID → 脚本继续
-- **拒绝** → 直接删除节点记录 + 同步 `address.conf` → 脚本退出
-
-## 监控架构（推模式）
-
 ```
-Node                          Console
-┌──────────┐   POST /api/monitor/report   ┌──────────────┐
-│ Agent.sh │ ──────────────────────────→   │ GnbMonitor   │
-│ (10s)    │   TOKEN + nodeId             │  .ingest()   │
-└──────────┘                              │  → latestState│
-                                          │  → metricsStore│
-                                          └──────────────┘
+TOKEN=xxx bash initnode.sh
+  │
+  ├─ [1]  安装 GNB         Console 镜像优先，GitHub fallback
+  ├─ [2]  注册              TOKEN → passcode → enrollToken
+  ├─ [3]  等待审批          管理员在 Web UI 操作
+  ├─ [4]  配置 GNB          Ed25519 密钥生成 + 公钥交换
+  ├─ [5]  启动 GNB          TUN 接口 + ping 隧道连通验证
+  ├─ [6]  创建 synon 用户   sudo 免密
+  ├─ [7]  安装 Node.js      v22+
+  ├─ [8]  SSH 公钥          Console 公钥 → authorized_keys
+  ├─ [9]  Agent 安装        systemd timer 每 10s 上报
+  └─ [10] 通知就绪          Console 远程安装 OpenClaw
 ```
 
-Agent 采集 3 类数据：GNB 状态（`gnb_ctl -s/-a`）、系统信息、OpenClaw 状态。
+- **TUN 地址段**: `10.1.0.x`（跳过 `10.0.x.x` 避免云厂商内网冲突）
+- **审批通过** → 分配 TUN + GNB ID → 脚本继续
+- **审批拒绝** → 删除节点 + 同步 address.conf → 脚本退出
+
+## 监控架构
+
+```
+  Node                                           Console
+  ┌────────────────┐                              ┌──────────────────┐
+  │  node-agent.sh │──── POST /api/monitor/report ──→ GnbMonitor     │
+  │  每 10s        │     TOKEN + nodeId            │   .ingest()     │
+  │                │                               │   → latestState │
+  │  采集:         │                               │   → metricsStore│
+  │  · gnb_ctl -s  │     60s 无上报 → 判定离线      │   → WebSocket   │
+  │  · 系统信息    │                               │   → alerting    │
+  │  · OpenClaw    │                               │                 │
+  └────────────────┘                              └──────────────────┘
+```
 
 ## 项目结构
 
 ```
 opengnb-gui/
 ├── scripts/
-│   ├── setup-console.sh           # Console 一键安装
-│   ├── initnode.sh                # 节点初始化（10 步）
-│   ├── node-agent.sh              # 节点监控 Agent（推模式）
-│   ├── deploy.sh                  # 部署脚本
-│   └── sync-mirror.sh             # 镜像同步
+│   ├── initnode.sh                 # 节点初始化（10 步）
+│   ├── node-agent.sh               # 节点监控 Agent（推模式）
+│   ├── setup-console.sh            # Console 一键部署
+│   ├── deploy.sh                   # 增量部署
+│   ├── sync-mirror.sh              # GNB/OpenClaw 镜像同步
+│   └── migrate-data.js             # 数据迁移工具
+│
 ├── src/
-│   ├── server.js                  # Express + WebSocket 入口
+│   ├── server.js                   # Express + WebSocket 入口
 │   ├── services/
-│   │   ├── node-store.js          # SQLite (nodes/groups/metrics/audit/users)
-│   │   ├── key-manager.js         # 密钥管理 + 审批 + 分组 + ownerId 隔离
-│   │   ├── gnb-monitor.js         # 推模式监控（被动接收上报）
-│   │   ├── metrics-store.js       # 指标时序存储
-│   │   ├── audit-logger.js        # 审计日志
-│   │   ├── ssh-manager.js         # SSH 连接池
-│   │   ├── provisioner.js         # 远程安装 OpenClaw
-│   │   ├── data-paths.js          # 路径管理
-│   │   └── ai-ops.js              # Claude AI 运维
+│   │   ├── node-store.js           # SQLite (nodes/groups/metrics/audit/users)
+│   │   ├── key-manager.js          # 密钥 + 审批 + 分组 + address.conf 同步
+│   │   ├── gnb-monitor.js          # 推模式监控（被动接收 Agent 上报）
+│   │   ├── gnb-parser.js           # GNB 状态解析器
+│   │   ├── metrics-store.js        # 指标时序存储 + 趋势聚合
+│   │   ├── ssh-manager.js          # SSH 连接池（通过 GNB TUN）
+│   │   ├── provisioner.js          # 远程部署 OpenClaw
+│   │   ├── job-manager.js          # 异步任务（投递+回调+超时）
+│   │   ├── claw-rpc.js             # OpenClaw RPC 客户端
+│   │   ├── ai-ops.js               # Claude 智能运维（安全门控）
+│   │   ├── audit-logger.js         # 操作审计日志
+│   │   └── data-paths.js           # 集中路径管理
 │   └── routes/
-│       ├── enroll.js              # 注册审批 API（flexAuth 双认证）
-│       ├── nodes.js               # 节点管理 API
-│       ├── mirror.js              # 镜像下载 API
-│       └── ai.js                  # AI 运维 API
+│       ├── enroll.js               # 注册审批（enrollToken + flexAuth）
+│       ├── nodes.js                # 节点管理（编辑 + 远程 TUN 同步）
+│       ├── auth.js                 # 登录认证
+│       ├── jobs.js                 # 异步 Job（回调 + clawToken 校验）
+│       ├── claw.js                 # OpenClaw 管理
+│       ├── groups.js               # 节点分组 CRUD
+│       ├── mirror.js               # 软件镜像下载
+│       └── ai.js                   # AI 运维 API
+│
 ├── data/
-│   ├── registry/nodes.db          # SQLite 主库
-│   ├── security/ssh/              # Console ED25519 密钥对
-│   ├── logs/ops/                  # 运维日志
-│   └── mirror/                    # 软件镜像
-└── public/                        # Web Dashboard
-    ├── index.html
-    ├── css/style.css
-    └── js/app.js
+│   ├── registry/nodes.db           # SQLite 主库
+│   ├── security/ssh/               # Console ED25519 密钥对
+│   ├── logs/ops/                   # 运维终端日志
+│   └── mirror/                     # GNB/OpenClaw 二进制镜像
+│
+├── public/                         # Web Dashboard
+│   ├── index.html                  # SPA 入口
+│   ├── css/style.css               # 暗色/亮色主题
+│   └── js/app.js                   # 前端逻辑 + WebSocket
+│
+└── team/                           # 团队协作文档
+    ├── requirements.md             # 当前需求
+    ├── ba-scenarios.md             # 业务场景矩阵
+    ├── changelog.md                # 变更日志
+    └── archive/                    # 已归档 Sprint
 ```
 
-## 认证机制
+## 认证
 
-| 场景 | Token 类型 | 说明 |
-|------|-----------|------|
-| 管理员登录 | JWT | `/api/auth/login` 签发 |
-| API Token | apiToken (10 字符) | 管理员操作 / Agent 上报 / WS 认证 |
-| 节点注册 | passcode (一次性) | TTL 有效期内单次使用 |
-| 注册后操作 | enrollToken | 绑定 nodeId，服务器重启后失效 |
-| 节点初始化 | TOKEN | `curl ... \| TOKEN=xxx bash` |
+统一使用 `TOKEN`。
+
+| 场景 | 说明 |
+|------|------|
+| 节点初始化 | `curl ... \| TOKEN=xxx bash` |
+| Agent 上报 | `TOKEN` + `nodeId` 查询参数 |
+| Web 登录 | 用户名密码 → JWT |
+| API 访问 | JWT 或 apiToken（10 字符）|
+| WS 连接 | JWT / apiToken / ADMIN_TOKEN |
+
+> report 端点接受 apiToken、ADMIN_TOKEN、JWT — 任何有效管理员凭证均可。
 
 ## 环境变量
 
 | 变量 | 默认值 | 说明 |
 |------|--------|------|
 | `PORT` | 3000 | HTTP 端口 |
-| `DATA_DIR` | ./data | 数据目录 |
-| `ADMIN_TOKEN` | — | 管理员 token（服务端环境变量） |
-| `GNB_INDEX_NODES` | — | Index Node 地址 |
-| `GNB_CONF_DIR` | /opt/gnb/conf/1001 | GNB 配置目录 |
+| `DATA_DIR` | `./data` | 数据目录 |
+| `ADMIN_TOKEN` | — | 管理员 token（服务端） |
+| `GNB_CONF_DIR` | `/opt/gnb/conf/1001` | Console GNB 配置目录 |
+| `GNB_INDEX_NODES` | — | Index Node 公网地址 |
+| `PASSCODE_TTL` | 600 | 注册码有效期（秒） |
+
+## API
+
+| 路由 | 认证 | 说明 |
+|------|------|------|
+| `POST /api/auth/login` | — | 登录，返回 JWT |
+| `POST /api/monitor/report` | TOKEN | Agent 状态上报 |
+| `GET /api/enroll/init.sh` | — | 下载 initnode 脚本 |
+| `POST /api/enroll` | passcode | 节点注册 |
+| `GET /api/enroll/status/:id` | enrollToken | 注册状态 |
+| `POST /api/enroll/:id/approve` | ADMIN_TOKEN | 审批通过 |
+| `GET /api/enroll/pubkey` | — | Console SSH 公钥 |
+| `GET /api/nodes` | JWT/apiToken | 节点列表 |
+| `PUT /api/nodes/:id` | JWT/apiToken | 编辑节点 + 远程同步 |
+| `GET/POST /api/groups` | JWT/apiToken | 分组管理 |
+| `POST /api/jobs` | JWT/apiToken | 创建异步任务 |
+| `POST /api/jobs/:id/callback` | clawToken | Job 回调 |
+| `GET /api/mirror/*` | — | 软件镜像下载 |
+
+## 测试
+
+```bash
+npm test    # 169 tests, 100% pass
+```
+
+## 版本演进
+
+| 日期 | 里程碑 | 说明 |
+|------|--------|------|
+| 03-17 | Console 可行性 | GNB 架构调研 + Sidecar 方案评估 |
+| 03-18 | 全量测试覆盖 | 77 测试用例，11 个测试文件 |
+| 03-19 | 节点编辑 | 在线编辑 + address.conf 联动 |
+| 03-19 | 主题切换 | 深色 ↔ 亮色模式 |
+| 03-19 | 节点分组管理 | 分组 + CIDR 过滤 + 批量操作 |
+| 03-20 | 16M 架构审查 | 7 个瓶颈识别 + 分级路线图 |
+| 03-20 | IP 远程同步 | 编辑 TUN 地址 → SSH 远程同步 GNB |
+| 03-20 | Enroll 安全加固 | enrollToken + passcode TTL + nodeId 绑定 |
+| 03-20 | Agent 推模式 | 节点 Agent 每 10s 推送 → 取代 SSH 轮询 |
+| 03-20 | TOKEN 统一 | 认证命名统一为 TOKEN |
 
 ## License
 
