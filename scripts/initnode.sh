@@ -111,10 +111,22 @@ echo "      GNB 编译安装完成"
 echo "[2/9] 提交注册..."
 
 if [ -z "${PASSCODE:-}" ]; then
-    # 无外部传入 → 从 API 获取（需管理员提前生成并传入）
-    echo "      [失败] 未传入 PASSCODE 环境变量"
-    echo "      请在 Console 管理端获取 passcode 后通过 PASSCODE=xxx 传入"
-    exit 1
+    # 未传入 PASSCODE → 使用 ADMIN_TOKEN 自动获取
+    if [ -z "${ADMIN_TOKEN:-}" ]; then
+        echo "      [失败] 未传入 PASSCODE 或 ADMIN_TOKEN"
+        echo "      用法: curl ... | ADMIN_TOKEN=<token> bash"
+        exit 1
+    fi
+    echo "      自动获取 passcode..."
+    PC_RESP=$(curl -sS "$API_BASE/api/enroll/passcode" \
+      -H "Authorization: Bearer $ADMIN_TOKEN")
+    PASSCODE=$(echo "$PC_RESP" | json_val passcode)
+    if [ -z "$PASSCODE" ]; then
+        echo "      [失败] 无法获取 passcode（Token 无效？）"
+        echo "      响应: $PC_RESP"
+        exit 1
+    fi
+    echo "      ✅ passcode 已自动生成"
 fi
 
 ENROLL_RESP=$(curl -sS -X POST "$API_BASE/api/enroll" \
