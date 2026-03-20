@@ -114,7 +114,6 @@ let nodePagination = { page: 1, pageSize: 50 };
 
 const PAGE_TITLES = {
   dashboard: '仪表盘',
-  monitor: '运维监控',
   nodes: '节点管理',
   users: '用户管理',
   claw: 'OpenClaw',
@@ -141,7 +140,6 @@ function renderPage(page) {
   const container = $('#main-content');
   switch (page) {
     case 'dashboard': renderDashboardPage(container); break;
-    case 'monitor':   renderMonitorPage(container); break;
     case 'nodes':     renderNodesPage(container); break;
     case 'users':     renderUsersPage(container); break;
     case 'claw':      renderClawPage(container); break;
@@ -293,68 +291,7 @@ function dashCard(icon, title, value, color, sub) {
   `;
 }
 
-// ═══════════════════════════════════════
-// 运维监控页面（节点详情 + AI 面板）
-// ═══════════════════════════════════════
 
-function renderMonitorPage(container) {
-  // 如果没有选中节点，选第一个在线节点
-  if (!selectedNodeId && nodesData.length > 0) {
-    const online = nodesData.find(n => n.online);
-    selectedNodeId = online ? online.id : nodesData[0].id;
-  }
-
-  container.innerHTML = `
-    <div class="page-monitor">
-      <div class="monitor-main" id="monitor-detail"></div>
-      <aside class="ai-panel">
-        <div class="panel-header">
-          <h2>运维控制台</h2>
-          <span class="badge accent">指令</span>
-        </div>
-        <div class="ai-messages" id="ai-messages"></div>
-        <div class="ai-quick-actions" id="ai-quick-actions">
-          <button class="quick-btn" data-cmd="安装 openclaw">${L('package')} 安装 OpenClaw</button>
-          <button class="quick-btn" data-cmd="状态">${L('bar-chart-3')} 状态</button>
-          <button class="quick-btn" data-cmd="重启 gnb">${L('refresh-cw')} 重启 GNB</button>
-          <button class="quick-btn" data-cmd="重启 openclaw">${L('refresh-cw')} 重启 Claw</button>
-          <button class="quick-btn" data-cmd="日志">${L('file-text')} 日志</button>
-        </div>
-        <div class="ai-input-area">
-          <input type="text" class="ai-input" id="ai-input" placeholder="输入运维指令..." autocomplete="off">
-          <button class="ai-send-btn" id="ai-send">发送</button>
-        </div>
-      </aside>
-    </div>
-  `;
-
-  // 绑定 AI 事件
-  bindAiEvents();
-  refreshIcons();
-
-  // 渲染详情
-  if (selectedNodeId) {
-    renderNodeDetail(selectedNodeId);
-    loadNodeOpsLog(selectedNodeId);
-  }
-}
-
-function bindAiEvents() {
-  const sendBtn = $('#ai-send');
-  const input = $('#ai-input');
-  if (sendBtn) sendBtn.addEventListener('click', sendAiMessage);
-  if (input) input.addEventListener('keydown', (e) => { if (e.key === 'Enter') sendAiMessage(); });
-
-  // 快捷按钮
-  $$('.quick-btn').forEach(btn => {
-    btn.addEventListener('click', () => {
-      let cmd = btn.dataset.cmd;
-      if (selectedNodeId && !cmd.includes(selectedNodeId)) cmd += ` ${selectedNodeId}`;
-      $('#ai-input').value = cmd;
-      sendAiMessage();
-    });
-  });
-}
 
 // ═══════════════════════════════════════
 // @alpha: 节点管理页面（完整重构）
@@ -629,14 +566,18 @@ function renderInlineDetail(panel, node) {
   refreshIcons();
 }
 
-/** 内联 AI 指令 → 跳转到运维监控页面执行 */
-function inlineAiCmd(nodeId, cmd) {
-  selectedNodeId = nodeId;
-  switchPage('monitor');
-  setTimeout(() => {
-    const input = $('#ai-input');
-    if (input) { input.value = `${cmd} ${nodeId}`; sendAiMessage(); }
-  }, 200);
+/** 内联 AI 指令 — 直接通过 API 发送 */
+async function inlineAiCmd(nodeId, cmd) {
+  const fullCmd = `${cmd} ${nodeId}`;
+  try {
+    const res = await authFetch('/api/ai/chat', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ message: fullCmd, nodeId }),
+    });
+    const data = await res.json();
+    alert(data.response || '指令已发送');
+  } catch (e) { alert(`指令发送失败: ${e.message}`); }
 }
 
 // --- 分页 ---
@@ -935,11 +876,7 @@ function isValidCidr(cidr) {
 function selectNode(nodeId) {
   selectedNodeId = nodeId;
   if (currentPage === 'nodes') {
-    renderNodeList();
-    renderNodeDetail(nodeId);
-  } else if (currentPage === 'monitor') {
-    renderNodeDetail(nodeId);
-    loadNodeOpsLog(nodeId);
+    renderNodesTable();
   }
 }
 
@@ -1004,139 +941,7 @@ function renderSysCard(icon, title, value, color, sub, barPct) {
 
 function pctColor(pct) { return pct > 90 ? 'red' : pct > 70 ? 'yellow' : 'green'; }
 
-function renderNodeDetail(nodeId) {
-  const node = nodesData.find(n => n.id === nodeId);
-  if (!node) return;
 
-  const detailTitle = $('#detail-title');
-  const content = currentPage === 'monitor' ? $('#monitor-detail') : $('#detail-content');
-  if (!content) return;
-  if (detailTitle) detailTitle.textContent = `${node.name || node.id} — ${node.tunAddr}`;
-
-  if (!node.online) {
-    content.innerHTML = `
-      <div class="monitor-dashboard">
-        <div class="monitor-topbar">
-          <div class="monitor-title-area">
-            <h3>◈ ${escHtml(node.name || node.id)}</h3>
-            <span class="status-badge offline">离线</span>
-          </div>
-          <span class="monitor-time">${node.lastUpdate ? new Date(node.lastUpdate).toLocaleString() : '—'}</span>
-        </div>
-        <div class="monitor-hero">
-          ${renderHealthRing(false, -1)}
-          <div class="offline-placeholder">
-            <div class="offline-icon">${L('zap')}</div>
-            <div class="offline-title">节点不可达</div>
-            <div class="offline-detail">${escHtml(node.error || 'SSH 连接超时，请检查 GNB 隧道状态')}</div>
-            <button class="confirm-btn" onclick="provisionNode('${safeAttr(nodeId)}')">重新配置下发</button>
-          </div>
-        </div>
-      </div>
-    `;
-    refreshIcons();
-    return;
-  }
-
-  const si = node.sysInfo || {};
-  const peers = node.nodes || [];
-  let memPct = 0;
-  if (si.memTotalMB > 0) memPct = Math.round((si.memUsedMB / si.memTotalMB) * 100);
-  const diskPct = si.diskUsePct ? parseInt(si.diskUsePct) : 0;
-  const totalPeers = peers.length;
-  const directPeers = peers.filter(n => n.status === 'Direct').length;
-  const directRate = totalPeers > 0 ? Math.round((directPeers / totalPeers) * 100) : 0;
-  const totalIn = peers.reduce((s, n) => s + (n.inBytes || 0), 0);
-  const totalOut = peers.reduce((s, n) => s + (n.outBytes || 0), 0);
-  const clawStatus = node.clawToken ? '已配置' : '未安装';
-  const clawColor = node.clawToken ? 'green' : 'yellow';
-
-  let html = `<div class="monitor-dashboard">`;
-
-  html += `
-    <div class="monitor-topbar">
-      <div class="monitor-title-area">
-        <h3>◈ ${escHtml(node.name || node.id)}</h3>
-        <span class="status-badge online">在线</span>
-      </div>
-      <div style="display:flex;align-items:center;gap:12px">
-        <span class="monitor-time">刷新: ${node.lastUpdate ? new Date(node.lastUpdate).toLocaleTimeString() : '—'}</span>
-        <div class="monitor-actions">
-          <button onclick="fetchClawStatus('${safeAttr(nodeId)}')">${L('search')} OpenClaw</button>
-        </div>
-      </div>
-    </div>
-  `;
-
-  html += `<div class="monitor-hero">`;
-  html += renderHealthRing(true, node.sshLatencyMs);
-  html += `<div class="monitor-realtime-area">`;
-
-  html += `
-    <div class="realtime-bar">
-      <div class="realtime-item">
-        <span class="ri-label">SSH 延迟</span>
-        <span class="ri-value ${node.sshLatencyMs > 500 ? 'red' : node.sshLatencyMs > 200 ? 'yellow' : 'green'}">${node.sshLatencyMs}ms</span>
-      </div>
-      <div class="realtime-item">
-        <span class="ri-label">P2P 节点</span>
-        <span class="ri-value accent">${totalPeers}</span>
-      </div>
-      <div class="realtime-item">
-        <span class="ri-label">直连率</span>
-        <span class="ri-value ${directRate >= 80 ? 'green' : directRate >= 50 ? 'yellow' : 'red'}">${directRate}%</span>
-      </div>
-      <div class="realtime-item">
-        <span class="ri-label">运行时长</span>
-        <span class="ri-value">${escHtml(si.uptime || '—')}</span>
-      </div>
-    </div>
-  `;
-
-  html += `<div class="metric-grid">`;
-  html += renderMetricCard(L('link'), 'P2P 直连', `${directPeers}/${totalPeers}`,
-    directRate >= 80 ? 'green' : directRate >= 50 ? 'yellow' : 'red',
-    `<div class="mc-detail-row"><span>直连率</span><span>${directRate}%</span></div>`,
-    { text: directRate >= 80 ? '健康' : '注意', color: directRate >= 80 ? 'green' : 'yellow' });
-  html += renderMetricCard(L('download'), '总流入', formatBytes(totalIn), 'accent',
-    `<div class="mc-detail-row"><span>所有节点</span><span>累计</span></div>`);
-  html += renderMetricCard(L('upload'), '总流出', formatBytes(totalOut), 'accent',
-    `<div class="mc-detail-row"><span>所有节点</span><span>累计</span></div>`);
-  html += renderMetricCard(L('bot'), 'OpenClaw', clawStatus, clawColor,
-    node.clawToken
-      ? `<div class="mc-detail-row"><span>端口</span><span>${node.clawPort || 18789}</span></div><div class="mc-detail-row"><span>Token</span><span>${escHtml(node.clawToken)}</span></div>`
-      : `<button class="confirm-btn" style="margin-top:4px;font-size:11px" onclick="document.querySelector('#ai-input').value='安装 openclaw ${safeAttr(nodeId)}';sendAiMessage()">安装</button>`,
-    { text: node.clawToken ? '正常' : '缺失', color: clawColor });
-  const coreKeys = node.core ? Object.keys(node.core) : [];
-  html += renderMetricCard(L('globe'), 'GNB 核心', coreKeys.length > 0 ? '运行中' : '—',
-    coreKeys.length > 0 ? 'green' : 'red',
-    coreKeys.slice(0, 3).map(k => `<div class="mc-detail-row"><span>${escHtml(k)}</span><span>${escHtml(String(node.core[k]))}</span></div>`).join(''));
-  html += `</div></div></div>`;
-
-  html += `<div class="sys-grid">`;
-  html += renderSysCard(L('cpu'), 'CPU', si.cpuCores ? `${si.cpuCores} 核` : '—', 'accent', `负载 ${escHtml(si.loadAvg || '—')}`);
-  html += renderSysCard(L('memory-stick'), '内存', memPct > 0 ? `${memPct}%` : '—', pctColor(memPct),
-    si.memTotalMB > 0 ? `${si.memUsedMB} / ${si.memTotalMB} MB` : '—', memPct > 0 ? memPct : undefined);
-  html += renderSysCard(L('hard-drive'), '磁盘', diskPct > 0 ? `${diskPct}%` : '—', pctColor(diskPct),
-    si.diskTotal ? `${escHtml(si.diskUsed)} / ${escHtml(si.diskTotal)}` : '—', diskPct > 0 ? diskPct : undefined);
-  html += renderSysCard(L('monitor'), '系统', escHtml(si.hostname || '—'), 'accent', escHtml(si.os || '—'));
-  html += renderSysCard(L('wrench'), '内核', escHtml(si.kernel || '—'), '', escHtml(si.arch || '—'));
-  html += `</div>`;
-
-  if (peers.length) {
-    html += `<div class="monitor-section-title">GNB 节点 (${peers.length})</div>`;
-    html += `<table class="sub-node-table"><thead><tr><th>UUID</th><th>TUN</th><th>状态</th><th>延迟</th><th>流入</th><th>流出</th></tr></thead><tbody>`;
-    for (const sn of peers) {
-      const sc = sn.status === 'Direct' ? 'green' : sn.status === 'Detecting' ? 'yellow' : 'red';
-      html += `<tr><td>${escHtml(sn.uuid64||'—')}</td><td>${escHtml(sn.tunAddr4||'—')}</td><td class="${sc}">${escHtml(sn.status||'—')}</td><td>${sn.latency4Usec ? `${(sn.latency4Usec/1000).toFixed(1)}ms` : '—'}</td><td>${formatBytes(sn.inBytes||0)}</td><td>${formatBytes(sn.outBytes||0)}</td></tr>`;
-    }
-    html += `</tbody></table>`;
-  }
-
-  html += `</div>`;
-  content.innerHTML = html;
-  refreshIcons();
-}
 
 // ═══════════════════════════════════════
 // OpenClaw 状态
@@ -1344,13 +1149,9 @@ function connectWS() {
           renderNodesTable();
           renderPagination();
         }
-        if (currentPage === 'monitor' && selectedNodeId) renderNodeDetail(selectedNodeId);
       }
       if (msg.type === 'chat_history') {
         opsLogsCache = msg.logs || {};
-        if (selectedNodeId && opsLogsCache[selectedNodeId] && currentPage === 'monitor') {
-          loadNodeOpsLog(selectedNodeId);
-        }
       }
       if (msg.type === 'provision_log') {
         appendAiMsg('assistant', `[${msg.nodeId}] ${msg.message}`);
