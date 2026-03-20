@@ -275,6 +275,13 @@ class NodeStore {
         // 保留旧 id 为 name（如果 name 为空或等于 id）
         const name = (node.name && node.name !== oldId) ? node.name : oldId;
 
+        // 更新 metrics 和 jobs 外键（在删除旧记录前）
+        this.db.prepare('UPDATE metrics SET nodeId = ? WHERE nodeId = ?').run(newId, oldId);
+        this.db.prepare('UPDATE jobs SET nodeId = ? WHERE nodeId = ?').run(newId, oldId);
+
+        // 先删除旧记录（避免 tunAddr UNIQUE 约束冲突）
+        this.db.prepare('DELETE FROM nodes WHERE id = ?').run(oldId);
+
         // 插入新 ID 记录
         this.db.prepare(`
           INSERT INTO nodes (id, name, tunAddr, gnbNodeId, status, sshUser, sshPort,
@@ -286,13 +293,6 @@ class NodeStore {
         `).run({
           ...node, id: newId, name, ready: node.ready ? 1 : 0,
         });
-
-        // 更新 metrics 和 jobs 外键
-        this.db.prepare('UPDATE metrics SET nodeId = ? WHERE nodeId = ?').run(newId, oldId);
-        this.db.prepare('UPDATE jobs SET nodeId = ? WHERE nodeId = ?').run(newId, oldId);
-
-        // 删除旧记录
-        this.db.prepare('DELETE FROM nodes WHERE id = ?').run(oldId);
 
         console.log(`[NodeStore] 迁移: ${oldId} → ${newId} (name: ${name})`);
       }
