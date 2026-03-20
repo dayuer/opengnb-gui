@@ -96,9 +96,9 @@ try:
 except: pass
 
 claw_obj = {
-    'running': $CLAW_RUNNING,
-    'pid': "${CLAW_PID}" or None,
-    'configPath': "${CLAW_CONFIG_PATH:-}" or None,
+    'running': "$CLAW_RUNNING" == "true",
+    'pid': "${CLAW_PID}" if "${CLAW_PID}" else None,
+    'configPath': "${CLAW_CONFIG_PATH:-}" if "${CLAW_CONFIG_PATH:-}" else None,
     'config': claw_config
 }
 
