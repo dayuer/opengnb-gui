@@ -1324,12 +1324,12 @@ function showApiKey() {
                 style="flex:1;font-family:var(--font-mono);font-size:14px;letter-spacing:1px">
               <button class="toolbar-btn" onclick="copyApiKey()">复制</button>
             </div>
-            <div style="font-size:11px;color:var(--text-muted);margin-top:8px">
-              节点初始化命令:
-            </div>
-            <div style="position:relative;margin-top:4px">
-              <code id="init-cmd" style="display:block;font-size:11px;padding:8px 32px 8px 8px;background:var(--bg-tertiary);border-radius:4px;word-break:break-all">curl -sSL https://${location.host}/api/enroll/init.sh | TOKEN=${escHtml(apiToken)} bash</code>
-              <span onclick="navigator.clipboard.writeText(document.getElementById('init-cmd').textContent.trim()).then(()=>{this.textContent='✓';setTimeout(()=>this.textContent='📋',1500)})" style="position:absolute;top:6px;right:6px;cursor:pointer;font-size:14px;opacity:0.6" title="复制命令">📋</span>
+            <div style="margin-top:12px">
+              <div style="font-size:11px;color:var(--text-muted);margin-bottom:4px">节点初始化命令:</div>
+              <div id="init-cmd-wrap" style="display:flex;align-items:center;gap:0;background:var(--bg-tertiary);border:1px solid var(--border);border-radius:6px;padding:0;cursor:pointer;transition:border-color .2s" onclick="navigator.clipboard.writeText(this.querySelector('code').textContent.trim()).then(()=>{const b=this.querySelector('.copy-icon');b.innerHTML='✓';b.style.color='var(--accent)';setTimeout(()=>{b.innerHTML='<svg width=\\'14\\' height=\\'14\\' viewBox=\\'0 0 24 24\\' fill=\\'none\\' stroke=\\'currentColor\\' stroke-width=\\'2\\'><rect x=\\'9\\' y=\\'9\\' width=\\'13\\' height=\\'13\\' rx=\\'2\\'/><path d=\\'M5 15H4a2 2 0 01-2-2V4a2 2 0 012-2h9a2 2 0 012 2v1\\'/></svg>';b.style.color=''},1500)})" onmouseenter="this.style.borderColor='var(--accent)'" onmouseleave="this.style.borderColor='var(--border)'">
+                <code style="flex:1;display:block;font-size:12px;padding:10px 12px;word-break:break-all;color:var(--text-primary);line-height:1.5">curl -sSL https://${location.host}/api/enroll/init.sh | TOKEN=${escHtml(apiToken)} bash</code>
+                <span class="copy-icon" style="padding:0 12px;color:var(--text-muted);flex-shrink:0;display:flex;align-items:center"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 01-2-2V4a2 2 0 012-2h9a2 2 0 012 2v1"/></svg></span>
+              </div>
             </div>
           </div>
           <div class="modal-footer">
