@@ -540,7 +540,8 @@ class KeyManager {
    */
   getNodesByOwner(ownerId) {
     if (!ownerId) return this.store.all();
-    return this.store.all().filter(n => n.ownerId === ownerId);
+    // 空 ownerId 节点（旧数据）对所有用户可见
+    return this.store.all().filter(n => !n.ownerId || n.ownerId === ownerId);
   }
 
   /**

@@ -94,7 +94,7 @@
           <h1 id="page-title">仪表盘</h1>
         </div>
         <div class="header-right">
-          <span id="pending-badge" class="badge accent" style="display:none">待审批 <span id="pending-count">0</span></span>
+          <span id="pending-badge" class="badge accent" style="display:none;cursor:pointer" onclick="switchPage('nodes');setTimeout(()=>{const s=document.getElementById('filter-status');if(s){s.value='pending';s.dispatchEvent(new Event('change'))}},100)">待审批 <span id="pending-count">0</span></span>
           <!-- 用户菜单 -->
           <div class="user-menu" id="user-menu">
             <button class="user-menu-trigger" id="user-menu-trigger" onclick="toggleUserMenu()">
