@@ -7,6 +7,22 @@ const $$ = (sel) => document.querySelectorAll(sel);
 const L = (name) => `<i data-lucide="${name}"></i>`;
 function refreshIcons() { if (window.lucide) lucide.createIcons(); }
 
+/** @alpha: 轻量 Toast 通知 */
+function showToast(msg, type = 'success') {
+  const el = document.createElement('div');
+  el.className = `toast toast-${type}`;
+  el.textContent = msg;
+  Object.assign(el.style, {
+    position: 'fixed', top: '16px', right: '16px', zIndex: '9999',
+    padding: '10px 20px', borderRadius: '8px', fontSize: '13px', fontWeight: '500',
+    color: '#fff', background: type === 'error' ? '#f85149' : '#3fb950',
+    boxShadow: '0 4px 12px rgba(0,0,0,.3)', opacity: '0', transition: 'opacity .3s',
+  });
+  document.body.appendChild(el);
+  requestAnimationFrame(() => el.style.opacity = '1');
+  setTimeout(() => { el.style.opacity = '0'; setTimeout(() => el.remove(), 300); }, 3000);
+}
+
 /** 安全转义字符串用于 HTML 属性中的 onclick 等场景，防止 XSS */
 function safeAttr(str) { return String(str).replace(/[&'"<>]/g, c => ({'&':'&amp;',"'":'&#39;','"':'&quot;','<':'&lt;','>':'&gt;'}[c])); }
 
@@ -1044,25 +1060,53 @@ async function fetchClawStatus(nodeId) {
 // ═══════════════════════════════════════
 
 async function approveNode(nodeId) {
+  // @alpha: 按钮即时反馈
+  event?.target?.closest('button')?.setAttribute('disabled', '');
   try {
-    const res = await authFetch(`/api/enroll/${encodeURIComponent(nodeId)}/approve`, { method: 'POST' });
+    const res = await authFetch(`/api/enroll/${encodeURIComponent(nodeId)}/approve`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({}),
+    });
     const data = await res.json();
-    appendAiMsg('assistant', `审批: ${data.message}`);
     if (data.success) {
-      appendAiMsg('assistant',
-        `节点 ${escHtml(nodeId)} 已通过审批。<button class="confirm-btn" onclick="provisionNode('${safeAttr(nodeId)}')">开始配置下发</button>`, true);
+      // 即时更新前端数据
+      const node = allNodesRaw.find(n => n.id === nodeId);
+      if (node) {
+        node.status = 'approved';
+        node.tunAddr = data.tunAddr || node.tunAddr;
+      }
+      pendingNodes = pendingNodes.filter(n => n.id !== nodeId);
+      renderGroupSidebar();
+      renderNodesTable();
+      renderPagination();
+      showToast(`✅ 节点 ${nodeId} 已审批通过`);
+    } else {
+      showToast(`❌ 审批失败: ${data.message || '未知错误'}`, 'error');
     }
   } catch (e) {
-    appendAiMsg('assistant', `审批失败: ${e.message}`);
+    showToast(`❌ 审批失败: ${e.message}`, 'error');
   }
 }
 
 async function rejectNode(nodeId) {
+  event?.target?.closest('button')?.setAttribute('disabled', '');
   try {
-    await authFetch(`/api/enroll/${encodeURIComponent(nodeId)}/reject`, { method: 'POST' });
-    appendAiMsg('assistant', `节点 ${escHtml(nodeId)} 已拒绝`);
+    const res = await authFetch(`/api/enroll/${encodeURIComponent(nodeId)}/reject`, { method: 'POST' });
+    const data = await res.json();
+    if (data.success) {
+      const node = allNodesRaw.find(n => n.id === nodeId);
+      if (node) node.status = 'rejected';
+      pendingNodes = pendingNodes.filter(n => n.id !== nodeId);
+      renderGroupSidebar();
+      renderNodesTable();
+      renderPagination();
+      showToast(`节点 ${nodeId} 已拒绝`);
+    } else {
+      showToast(`❌ 拒绝失败: ${data.message}`, 'error');
+    }
   } catch (e) {
-    appendAiMsg('assistant', `拒绝失败: ${e.message}`);
+    showToast(`❌ 拒绝失败: ${e.message}`, 'error');
   }
 }
 
