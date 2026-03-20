@@ -1660,6 +1660,100 @@ html, body {
 }
 
 /* ═══════════════════════════════════════
+   @alpha: 仪表盘分组区块
+   ═══════════════════════════════════════ */
+
+.group-section {
+  margin-bottom: 12px;
+}
+
+.group-section-header {
+  display: flex; justify-content: space-between; align-items: center;
+  padding: 10px 16px;
+  background: var(--bg-secondary);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  cursor: pointer;
+  transition: all var(--transition);
+  margin-bottom: 4px;
+}
+
+.group-section-header:hover {
+  border-color: var(--accent);
+  background: linear-gradient(90deg, rgba(56,139,253,0.04) 0%, var(--bg-secondary) 100%);
+}
+
+.gsh-left {
+  display: flex; align-items: center; gap: 10px;
+}
+
+.gsh-name {
+  font-size: 14px; font-weight: 600; color: var(--text-primary);
+}
+
+.gsh-count {
+  font-size: 12px; color: var(--text-muted); font-family: var(--font-mono);
+}
+
+.gsh-right {
+  display: flex; align-items: center; gap: 16px;
+}
+
+.gsh-stat {
+  font-size: 12px; font-family: var(--font-mono); font-weight: 500;
+}
+
+.gsh-chevron {
+  transition: transform 0.25s ease; color: var(--text-muted); display: flex;
+}
+
+.gsh-chevron svg { width: 16px; height: 16px; }
+
+.group-accordion {
+  overflow: hidden;
+  max-height: 0;
+  transition: max-height 0.3s ease;
+}
+
+.group-accordion.open {
+  max-height: 5000px;
+}
+
+/* ═══════════════════════════════════════
+   @alpha: 节点管理增强面板
+   ═══════════════════════════════════════ */
+
+.inline-monitor {
+  display: flex; flex-direction: column; gap: 12px;
+  padding: 4px 0;
+}
+
+.inline-hero {
+  display: grid;
+  grid-template-columns: 140px 1fr;
+  gap: 12px;
+  align-items: start;
+}
+
+.inline-realtime { flex: 1; }
+
+.inline-actions {
+  display: flex; flex-wrap: wrap; gap: 6px;
+  padding-top: 8px;
+  border-top: 1px solid var(--border);
+}
+
+.node-expand-row td {
+  padding: 0 !important;
+}
+
+.node-expand-panel {
+  padding: 16px;
+  background: var(--bg-primary);
+  border-top: 1px solid var(--border);
+}
+
+/* ═══════════════════════════════════════
    @alpha: OpenClaw 管理页面
    ═══════════════════════════════════════ */
 
