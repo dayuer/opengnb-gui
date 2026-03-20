@@ -549,6 +549,7 @@ function renderOverviewTab(node) {
   const si = node.sysInfo || {};
   const memPct = si.memTotalMB > 0 ? Math.round(si.memUsedMB / si.memTotalMB * 100) : 0;
   const diskPct = si.diskUsePct ? parseInt(si.diskUsePct) : 0;
+  const cpuPct = si.cpuUsage ?? 0;
   const peers = node.nodes || [];
   const totalPeers = peers.length;
   const directP = peers.filter(p => p.status === 'Direct').length;
@@ -556,54 +557,81 @@ function renderOverviewTab(node) {
   const totalIn = peers.reduce((s, n) => s + (n.inBytes || 0), 0);
   const totalOut = peers.reduce((s, n) => s + (n.outBytes || 0), 0);
 
-  // OpenClaw 状态（从 agent 上报获取）
   const oc = node.openclaw || {};
   const clawRunning = oc.running === true;
-  const clawColor = clawRunning ? 'green' : 'yellow';
-  const clawLabel = clawRunning ? '运行中' : '未运行';
 
-  let html = `<div class="inline-monitor">`;
-  // 健康环 + 实时指标
-  html += `<div class="inline-hero">`;
-  html += renderHealthRing(true, node.sshLatencyMs);
-  html += `<div class="inline-realtime">
-    <div class="realtime-bar">
-      <div class="realtime-item"><span class="ri-label">采集延迟</span><span class="ri-value ${node.sshLatencyMs > 500 ? 'red' : node.sshLatencyMs > 200 ? 'yellow' : 'green'}">${node.sshLatencyMs}ms</span></div>
-      <div class="realtime-item"><span class="ri-label">P2P 节点</span><span class="ri-value accent">${totalPeers}</span></div>
-      <div class="realtime-item"><span class="ri-label">直连率</span><span class="ri-value ${directRate >= 80 ? 'green' : directRate >= 50 ? 'yellow' : 'red'}">${directRate}%</span></div>
-      <div class="realtime-item"><span class="ri-label">运行时长</span><span class="ri-value">${escHtml(si.uptime || '—')}</span></div>
-    </div>
-  </div>`;
-  html += `</div>`;
+  let html = `<div class="ov-dashboard">`;
 
-  // 指标卡片
-  html += `<div class="metric-grid">`;
-  html += renderMetricCard(L('cpu'), 'CPU', si.cpuCores ? `${si.cpuUsage ?? 0}%` : '—', pctColor(si.cpuUsage || 0),
-    si.cpuCores ? `${si.cpuCores} 核 · ${escHtml(si.loadAvg || '—')}` : '');
-  html += renderMetricCard(L('memory-stick'), '内存', memPct > 0 ? `${memPct}%` : '—', pctColor(memPct),
-    si.memTotalMB > 0 ? `${si.memUsedMB} / ${si.memTotalMB} MB` : '');
-  html += renderMetricCard(L('hard-drive'), '磁盘', diskPct > 0 ? `${diskPct}%` : '—', pctColor(diskPct),
-    si.diskTotal ? `${escHtml(si.diskUsed)} / ${escHtml(si.diskTotal)}` : '');
-  html += renderMetricCard(L('bot'), 'OpenClaw', clawLabel, clawColor,
-    clawRunning ? `PID ${oc.pid || '—'}` : '');
-  html += renderMetricCard(L('link'), 'P2P', `${directP}/${totalPeers}`, directRate >= 80 ? 'green' : 'yellow',
-    `流入 ${formatBytes(totalIn)} · 流出 ${formatBytes(totalOut)}`);
-  html += renderMetricCard(L('monitor'), '系统', escHtml(si.hostname || '—'), 'accent',
-    `${escHtml(si.os || '—')} · ${escHtml(si.kernel || '—')}`);
-  html += `</div>`;
+  // ── 运行状态 Section ──
+  html += `<div class="ov-section">
+    <div class="ov-section-title accent">运行状态</div>
+    <div class="ov-stat-grid">`;
+  html += ovStatCard(L('activity'), '采集延迟', `${node.sshLatencyMs || 0}ms`, node.sshLatencyMs > 500 ? 'red' : node.sshLatencyMs > 200 ? 'yellow' : 'green');
+  html += ovStatCard(L('clock'), '运行时长', escHtml(si.uptime || '—'), '');
+  html += ovStatCard(L('bot'), 'OpenClaw', clawRunning ? '运行中' : '未运行', clawRunning ? 'green' : 'yellow', clawRunning ? `PID ${oc.pid || '—'}` : '');
+  html += ovStatCard(L('monitor'), '系统', escHtml(si.hostname || '—'), 'accent', `${escHtml(si.os || '—')}`);
+  html += `</div></div>`;
 
-  // GNB 节点表
+  // ── 资源使用 Section ──
+  html += `<div class="ov-section">
+    <div class="ov-section-title green">资源使用</div>
+    <div class="ov-stat-grid">`;
+  html += ovGaugeCard(L('cpu'), 'CPU', si.cpuCores ? `${cpuPct}%` : '—', cpuPct, si.cpuCores ? `${si.cpuCores} 核 · 负载 ${escHtml(si.loadAvg || '—')}` : '');
+  html += ovGaugeCard(L('memory-stick'), '内存', memPct > 0 ? `${memPct}%` : '—', memPct, si.memTotalMB > 0 ? `${si.memUsedMB} / ${si.memTotalMB} MB` : '');
+  html += ovGaugeCard(L('hard-drive'), '磁盘', diskPct > 0 ? `${diskPct}%` : '—', diskPct, si.diskTotal ? `${escHtml(si.diskUsed)} / ${escHtml(si.diskTotal)}` : '');
+  html += ovStatCard(L('wrench'), '内核', escHtml(si.kernel || '—'), '', escHtml(si.arch || '—'));
+  html += `</div></div>`;
+
+  // ── 网络 Section ──
+  html += `<div class="ov-section">
+    <div class="ov-section-title purple">P2P 网络</div>
+    <div class="ov-stat-grid">`;
+  html += ovStatCard(L('link'), '节点数', `${totalPeers}`, 'accent', `直连 ${directP}`);
+  html += ovStatCard(L('zap'), '直连率', `${directRate}%`, directRate >= 80 ? 'green' : directRate >= 50 ? 'yellow' : 'red');
+  html += ovStatCard(L('download'), '总流入', formatBytes(totalIn), 'accent');
+  html += ovStatCard(L('upload'), '总流出', formatBytes(totalOut), 'orange');
+  html += `</div></div>`;
+
+  // ── GNB 节点表 ──
   if (peers.length) {
-    html += `<div class="monitor-section-title">GNB 节点 (${peers.length})</div>`;
+    html += `<div class="ov-section">
+      <div class="ov-section-title">GNB 节点 (${peers.length})</div>`;
     html += `<table class="sub-node-table"><thead><tr><th>UUID</th><th>TUN</th><th>状态</th><th>延迟</th><th>流入</th><th>流出</th></tr></thead><tbody>`;
     for (const sn of peers) {
       const sc = sn.status === 'Direct' ? 'green' : sn.status === 'Detecting' ? 'yellow' : 'red';
       html += `<tr><td>${escHtml(sn.uuid64||'—')}</td><td>${escHtml(sn.tunAddr4||'—')}</td><td class="${sc}">${escHtml(sn.status||'—')}</td><td>${sn.latency4Usec ? `${(sn.latency4Usec/1000).toFixed(1)}ms` : '—'}</td><td>${formatBytes(sn.inBytes||0)}</td><td>${formatBytes(sn.outBytes||0)}</td></tr>`;
     }
-    html += `</tbody></table>`;
+    html += `</tbody></table></div>`;
   }
+
   html += `</div>`;
   return html;
+}
+
+/** 参考图片风格 stat 卡片 — 大号彩色数值 + 小灰标签 + icon */
+function ovStatCard(icon, label, value, color, sub) {
+  return `<div class="ov-stat-card">
+    <div class="ov-stat-icon">${icon}</div>
+    <div class="ov-stat-body">
+      <span class="ov-stat-label">${label}</span>
+      <span class="ov-stat-value ${color || ''}">${value}</span>
+      ${sub ? `<span class="ov-stat-sub">${sub}</span>` : ''}
+    </div>
+  </div>`;
+}
+
+/** 带进度条的资源卡片 */
+function ovGaugeCard(icon, label, value, pct, sub) {
+  const c = pct > 90 ? 'red' : pct > 70 ? 'yellow' : 'green';
+  return `<div class="ov-stat-card">
+    <div class="ov-stat-icon">${icon}</div>
+    <div class="ov-stat-body">
+      <span class="ov-stat-label">${label}</span>
+      <span class="ov-stat-value ${c}">${value}</span>
+      ${pct > 0 ? `<div class="ov-gauge"><div class="ov-gauge-fill ${c}" style="width:${Math.min(pct, 100)}%"></div></div>` : ''}
+      ${sub ? `<span class="ov-stat-sub">${sub}</span>` : ''}
+    </div>
+  </div>`;
 }
 
 // --- Tab 2: OpenClaw (子 Tab) ---

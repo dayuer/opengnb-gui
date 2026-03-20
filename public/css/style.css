@@ -19,6 +19,10 @@
   --red-bg: #f8514920;
   --yellow: #d29922;
   --yellow-bg: #d2992220;
+  --orange: #e3752e;
+  --orange-bg: #e3752e20;
+  --purple: #a371f7;
+  --purple-bg: #a371f720;
   --font-sans: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
   --font-mono: 'JetBrains Mono', 'Menlo', monospace;
   --radius: 8px;
@@ -49,6 +53,10 @@
   --red-bg: #dc262615;
   --yellow: #ca8a04;
   --yellow-bg: #ca8a0415;
+  --orange: #ea580c;
+  --orange-bg: #ea580c15;
+  --purple: #7c3aed;
+  --purple-bg: #7c3aed15;
   --shadow: 0 2px 12px rgba(0,0,0,.08);
 }
 
@@ -1702,8 +1710,111 @@ html, body {
 .inline-tab-btn svg { width: 14px; height: 14px; }
 
 .inline-tab-content {
+  padding: 0 2px;
+
   min-height: 200px;
 }
+
+/* --- 概览 Dashboard (参照参考图片风格) --- */
+.ov-dashboard {
+  display: flex; flex-direction: column; gap: 16px;
+}
+
+.ov-section {
+  display: flex; flex-direction: column; gap: 10px;
+}
+
+.ov-section-title {
+  font-size: 14px; font-weight: 700;
+  color: var(--text-secondary);
+  padding-bottom: 6px;
+  border-bottom: 1px solid var(--border);
+  display: flex; align-items: center; gap: 6px;
+}
+
+.ov-section-title.accent { color: var(--accent); }
+.ov-section-title.green { color: var(--green); }
+.ov-section-title.orange { color: var(--orange); }
+.ov-section-title.purple { color: var(--purple); }
+
+.ov-stat-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: 10px;
+}
+
+.ov-stat-card {
+  display: flex; align-items: flex-start; gap: 12px;
+  background: var(--bg-secondary);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 14px 16px;
+  transition: border-color var(--transition), box-shadow var(--transition);
+  position: relative;
+  overflow: hidden;
+}
+
+.ov-stat-card:hover {
+  border-color: var(--accent);
+  box-shadow: 0 2px 12px rgba(56, 139, 253, 0.08);
+}
+
+.ov-stat-icon {
+  flex-shrink: 0;
+  width: 32px; height: 32px;
+  display: flex; align-items: center; justify-content: center;
+  background: var(--bg-tertiary);
+  border-radius: 8px;
+  color: var(--text-muted);
+}
+
+.ov-stat-icon svg { width: 18px; height: 18px; }
+
+.ov-stat-body {
+  flex: 1; display: flex; flex-direction: column; gap: 2px;
+  min-width: 0;
+}
+
+.ov-stat-label {
+  font-size: 12px; font-weight: 500; color: var(--text-muted);
+  text-transform: uppercase; letter-spacing: .3px;
+}
+
+.ov-stat-value {
+  font-size: 24px; font-weight: 700;
+  font-family: var(--font-mono);
+  line-height: 1.15;
+  color: var(--text-primary);
+}
+
+.ov-stat-value.green { color: var(--green); }
+.ov-stat-value.red { color: var(--red); }
+.ov-stat-value.yellow { color: var(--yellow); }
+.ov-stat-value.accent { color: var(--accent); }
+.ov-stat-value.orange { color: var(--orange); }
+.ov-stat-value.purple { color: var(--purple); }
+
+.ov-stat-sub {
+  font-size: 11px; color: var(--text-muted);
+  font-family: var(--font-mono);
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+
+/* 进度条 gauge */
+.ov-gauge {
+  height: 4px; background: var(--bg-tertiary);
+  border-radius: 2px; overflow: hidden;
+  margin-top: 4px;
+}
+
+.ov-gauge-fill {
+  height: 100%; border-radius: 2px;
+  transition: width 0.6s ease;
+}
+
+.ov-gauge-fill.green { background: var(--green); }
+.ov-gauge-fill.yellow { background: var(--yellow); }
+.ov-gauge-fill.red { background: var(--red); }
 
 /* --- OpenClaw 子 Tab --- */
 .inline-claw-subtabs {
