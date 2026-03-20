@@ -187,38 +187,35 @@ async function boot() {
 
   // --- API 路由 ---
 
-  // V3 推模式：节点 agent 上报（支持多种 token 认证）
+  // V3 推模式：节点 agent 上报（统一认证 — ADMIN_TOKEN / apiToken / JWT）
   app.post('/api/monitor/report', express.json({ limit: '64kb' }), (req, res) => {
     const token = (req.headers.authorization || '').replace('Bearer ', '').trim();
     if (!token) return res.status(401).json({ error: '缺少认证' });
 
-    const allNodes = keyManager.getAllNodes();
-    let node = null;
+    // 统一管理员认证（与 WS 一致）
+    let isAdmin = false;
+    if (adminToken && token === adminToken) {
+      isAdmin = true;
+    } else if (store && token.length <= 20) {
+      const user = store._stmts.findUserByApiToken?.get(token);
+      if (user) isAdmin = true;
+    } else {
+      const payload = verifyJwt(token);
+      if (payload) isAdmin = true;
+    }
 
-    // 策略 1: clawToken 匹配（远程安装后的标准路径）
-    node = allNodes.find(n => n.status === 'approved' && n.clawToken && n.clawToken === token);
-
-    // 策略 2: enrollToken 匹配（initnode 阶段 Agent 使用 passcode）
-    if (!node) {
-      const enrollResult = keyManager.verifyEnrollToken(token);
-      if (enrollResult.valid) {
-        node = allNodes.find(n => n.id === enrollResult.nodeId && n.status === 'approved');
+    // 管理员 + nodeId → 定位节点
+    const nodeId = req.query.nodeId || req.body.nodeId;
+    if (isAdmin && nodeId) {
+      const allNodes = keyManager.getAllNodes();
+      const node = allNodes.find(n => n.id === nodeId && n.status === 'approved');
+      if (node) {
+        monitor.ingest(node.id, req.body);
+        return res.json({ success: true, nodeId: node.id });
       }
     }
 
-    // 策略 3: nodeId 查询参数 + ADMIN_TOKEN（管理员调试）
-    if (!node && req.query.nodeId) {
-      // 此分支仅当 token 是有效的管理员 token 时才匹配
-      const isAdmin = token === process.env.ADMIN_TOKEN;
-      if (isAdmin) {
-        node = allNodes.find(n => n.id === req.query.nodeId && n.status === 'approved');
-      }
-    }
-
-    if (!node) return res.status(403).json({ error: '无效 token 或节点未审批' });
-
-    monitor.ingest(node.id, req.body);
-    res.json({ success: true, nodeId: node.id });
+    return res.status(403).json({ error: '无效 token 或节点未找到' });
   });
 
   // 认证路由（login 公开，其余需认证）— @alpha: login 独立限速防暴力破解
