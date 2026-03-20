@@ -67,7 +67,8 @@ else
 fi
 
 cd $APP_DIR
-npm install --production
+npm install --omit=dev
+npm rebuild
 mkdir -p data
 
 # 清理生产环境不需要的文件
@@ -86,8 +87,12 @@ echo "[4/5] 配置服务..."
 ssh "$SSH_USER@$SERVER" << REMOTE_CONFIG
 set -e
 
+# 检测 Node.js 实际路径（兼容 nvm/fnm/系统安装）
+NODE_BIN=\$(command -v node)
+echo "      使用 Node: \$NODE_BIN (\$(node -v))"
+
 # systemd 服务
-cat > /etc/systemd/system/gnb-console.service << 'EOF'
+cat > /etc/systemd/system/gnb-console.service << EOF
 [Unit]
 Description=GNB Console Management Platform
 After=network.target
@@ -96,7 +101,7 @@ After=network.target
 Type=simple
 User=root
 WorkingDirectory=$APP_DIR
-ExecStart=/usr/bin/node $APP_DIR/src/server.js
+ExecStart=\$NODE_BIN $APP_DIR/src/server.js
 Restart=always
 RestartSec=5
 EnvironmentFile=-$APP_DIR/.env
