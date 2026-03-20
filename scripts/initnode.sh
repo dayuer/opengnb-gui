@@ -111,8 +111,7 @@ echo "      GNB 编译安装完成"
 # ============================================
 echo "[2/10] 提交注册..."
 
-# 统一用 TOKEN（兼容旧的 ADMIN_TOKEN）
-TOKEN="${TOKEN:-${ADMIN_TOKEN:-}}"
+TOKEN="${TOKEN:-}"
 
 if [ -z "${PASSCODE:-}" ]; then
     if [ -z "$TOKEN" ]; then

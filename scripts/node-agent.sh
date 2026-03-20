@@ -15,7 +15,7 @@ if [ -z "${CONSOLE_URL:-}" ] && [ -f "$AGENT_ENV" ]; then
 fi
 
 CONSOLE_URL="${CONSOLE_URL:-}"
-TOKEN="${TOKEN:-${NODE_TOKEN:-}}"
+TOKEN="${TOKEN:-}"
 NODE_ID="${NODE_ID:-}"
 GNB_NODE_ID="${GNB_NODE_ID:-}"
 GNB_MAP_PATH="${GNB_MAP_PATH:-/opt/gnb/conf/${GNB_NODE_ID}/gnb.map}"
