@@ -346,18 +346,22 @@ NODE_MAJOR=$(echo "$NODE_VER" | cut -d. -f1)
 
 if [ "$NODE_MAJOR" -lt 22 ] 2>/dev/null; then
     echo "      Node.js ${NODE_VER:-未安装}, 需要 >= 22"
-    # 安装 n 版本管理器并升级到 v22
     export N_PREFIX=/usr/local
     export PATH="/usr/local/bin:$PATH"
-    if command -v npm &>/dev/null; then
-        npm install -g n 2>/dev/null || true
-        n 22 2>&1 | tail -3
-    else
-        # n 自举模式：直接下载 n 并安装 Node.js 22
+
+    if ! command -v npm &>/dev/null; then
+        # npm 不存在 — 先用 n 自举安装 Node.js 22（自带 npm）
+        echo "      npm 未安装，通过 n 自举安装 Node.js 22..."
         curl -fsSL https://raw.githubusercontent.com/tj/n/master/bin/n | bash -s 22
+        hash -r 2>/dev/null
     fi
+
+    # 此时 npm 必定可用，用 npm 安装 n 版本管理器
+    npm install -g n 2>/dev/null || true
     hash -r 2>/dev/null
-    echo "      Node.js $(node --version) 已安装"
+    n 22 2>&1 | tail -3
+    hash -r 2>/dev/null
+    echo "      Node.js $(node --version) + npm $(npm --version) 已安装"
 else
     echo "      Node.js v${NODE_VER} ✓"
 fi
