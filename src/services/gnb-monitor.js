@@ -103,7 +103,10 @@ class GnbMonitor extends EventEmitter {
    */
   getAllStatus() {
     const result = [];
+    // @alpha: 已有配置的节点 ID 集合 — 过滤掉已删除/迁移的旧 key
+    const validIds = new Set(this.nodesConfig.map(n => n.id));
     for (const [id, state] of this.latestState) {
+      if (!validIds.has(id)) continue; // 跳过孤立缓存（已删除/已迁移节点）
       const config = this.nodesConfig.find(n => n.id === id);
       result.push({
         id,
