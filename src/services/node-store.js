@@ -102,6 +102,14 @@ class NodeStore {
         detail_json TEXT DEFAULT '{}'
       );
       CREATE INDEX IF NOT EXISTS idx_audit_ts_action ON audit_logs(ts, action);
+
+      CREATE TABLE IF NOT EXISTS users (
+        id TEXT PRIMARY KEY,
+        username TEXT NOT NULL UNIQUE,
+        passwordHash TEXT NOT NULL,
+        role TEXT DEFAULT 'admin',
+        createdAt TEXT
+      );
     `);
   }
 
@@ -168,6 +176,15 @@ class NodeStore {
       queryAuditByAction: this.db.prepare(
         'SELECT * FROM audit_logs WHERE action = ? ORDER BY id DESC LIMIT ? OFFSET ?'
       ),
+      // 用户
+      insertUser: this.db.prepare(
+        'INSERT INTO users (id, username, passwordHash, role, createdAt) VALUES (@id, @username, @passwordHash, @role, @createdAt)'
+      ),
+      findUserByName: this.db.prepare('SELECT * FROM users WHERE username = ?'),
+      findUserById: this.db.prepare('SELECT * FROM users WHERE id = ?'),
+      allUsers: this.db.prepare('SELECT id, username, role, createdAt FROM users ORDER BY createdAt'),
+      removeUser: this.db.prepare('DELETE FROM users WHERE id = ?'),
+      userCount: this.db.prepare('SELECT COUNT(*) AS cnt FROM users'),
     };
   }
 
@@ -503,6 +520,40 @@ class NodeStore {
   /** 删除早于指定时间的审计日志 */
   deleteAuditBefore(ts) {
     return this._stmts.deleteAuditBefore.run(ts);
+  }
+
+  // ═══════════════════════════════════════
+  //  用户管理
+  // ═══════════════════════════════════════
+
+  /** 插入用户 */
+  insertUser({ id, username, passwordHash, role = 'admin' }) {
+    this._stmts.insertUser.run({ id, username, passwordHash, role, createdAt: new Date().toISOString() });
+  }
+
+  /** 按用户名查找 */
+  findUserByName(username) {
+    return this._stmts.findUserByName.get(username) || null;
+  }
+
+  /** 按 ID 查找 */
+  findUserById(id) {
+    return this._stmts.findUserById.get(id) || null;
+  }
+
+  /** 全部用户（脱敏） */
+  allUsers() {
+    return this._stmts.allUsers.all();
+  }
+
+  /** 删除用户 */
+  deleteUser(id) {
+    return this._stmts.removeUser.run(id);
+  }
+
+  /** 用户总数 */
+  userCount() {
+    return this._stmts.userCount.get().cnt;
   }
 }
 

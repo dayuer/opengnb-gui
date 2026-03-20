@@ -15,10 +15,55 @@ function getToken() { return localStorage.getItem('gnb_admin_token') || ''; }
 function setToken(token) { localStorage.setItem('gnb_admin_token', token); }
 
 function promptToken() {
-  const token = prompt('请输入管理员 Token (ADMIN_TOKEN):');
-  if (token && token.trim()) {
-    setToken(token.trim());
+  showLoginModal();
+}
+
+/** @beta: 登录弹窗 */
+function showLoginModal() {
+  const overlay = $('#modal-overlay');
+  const content = $('#modal-content');
+  if (!overlay || !content) return;
+  overlay.style.display = 'flex';
+  content.innerHTML = `
+    <div class="modal-header">登录 GNB Console</div>
+    <div class="modal-body">
+      <label>用户名</label>
+      <input type="text" id="login-username" placeholder="admin" autofocus>
+      <label>密码</label>
+      <input type="password" id="login-password" placeholder="输入密码...">
+      <div id="login-error" style="color:var(--red);font-size:12px;margin-top:4px;display:none"></div>
+    </div>
+    <div class="modal-footer">
+      <button class="modal-btn primary" onclick="doLogin()">登录</button>
+    </div>
+  `;
+  setTimeout(() => {
+    const pwdInput = $('#login-password');
+    if (pwdInput) pwdInput.addEventListener('keydown', e => { if (e.key === 'Enter') doLogin(); });
+  }, 50);
+}
+
+async function doLogin() {
+  const username = $('#login-username')?.value?.trim();
+  const password = $('#login-password')?.value;
+  if (!username || !password) return;
+  const errEl = $('#login-error');
+  try {
+    const res = await fetch('/api/auth/login', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ username, password }),
+    });
+    const data = await res.json();
+    if (!res.ok) {
+      if (errEl) { errEl.textContent = data.error || '登录失败'; errEl.style.display = 'block'; }
+      return;
+    }
+    setToken(data.token);
+    closeModal();
     location.reload();
+  } catch (e) {
+    if (errEl) { errEl.textContent = '网络错误'; errEl.style.display = 'block'; }
   }
 }
 
@@ -26,7 +71,7 @@ async function authFetch(url, options = {}) {
   const token = getToken();
   options.headers = { ...options.headers, ...(token ? { 'Authorization': `Bearer ${token}` } : {}) };
   const res = await fetch(url, options);
-  if (res.status === 401) { promptToken(); throw new Error('认证失败'); }
+  if (res.status === 401) { showLoginModal(); throw new Error('认证失败'); }
   return res;
 }
 
@@ -78,7 +123,7 @@ function renderPage(page) {
     case 'dashboard': renderDashboardPage(container); break;
     case 'monitor':   renderMonitorPage(container); break;
     case 'nodes':     renderNodesPage(container); break;
-    case 'users':     renderPlaceholder(container, L('users'), '用户管理', '管理 VPN 用户账号和权限（开发中）'); break;
+    case 'users':     renderUsersPage(container); break;
     case 'groups':    renderPlaceholder(container, L('folder'), '分组管理', '管理节点分组和策略路由（开发中）'); break;
     case 'settings':  renderPlaceholder(container, L('settings'), '系统设置', '系统配置、证书管理和日志查看（开发中）'); break;
     default:          renderPlaceholder(container, L('lock'), '未知页面', ''); break;
@@ -1199,44 +1244,154 @@ function logout() {
 
 function showApiKey() {
   closeUserMenu();
-  const token = getToken();
-  if (!token) { alert('未设置 Token'); return; }
-  const masked = token.length > 8
-    ? token.slice(0, 4) + '••••' + token.slice(-4)
-    : '••••••••';
-  // 复用项目已有的弹窗组件
-  const overlay = $('#modal-overlay');
-  const content = $('#modal-content');
-  if (overlay && content) {
-    overlay.style.display = 'flex';
-    content.innerHTML = `
-      <div class="modal-header">API 密钥</div>
-      <div class="modal-body">
-        <label>当前 Admin Token</label>
-        <div style="display:flex;gap:8px;align-items:center">
-          <input type="text" id="api-key-display" value="${escHtml(masked)}" readonly
-            style="flex:1;font-family:var(--font-mono);font-size:13px;letter-spacing:1px">
-          <button class="toolbar-btn" onclick="copyApiKey()">复制</button>
-        </div>
-        <div style="font-size:11px;color:var(--text-muted);margin-top:4px">
-          Token 用于所有 API 请求的 Authorization 头。请妥善保管。
-        </div>
-      </div>
-      <div class="modal-footer">
-        <button class="modal-btn cancel" onclick="closeModal()">关闭</button>
-      </div>
-    `;
-  }
+  // @beta: 从后端获取新 JWT
+  authFetch('/api/auth/token')
+    .then(r => r.json())
+    .then(data => {
+      const token = data.token || getToken();
+      const overlay = $('#modal-overlay');
+      const content = $('#modal-content');
+      if (overlay && content) {
+        overlay.style.display = 'flex';
+        content.innerHTML = `
+          <div class="modal-header">API Token（节点初始化用）</div>
+          <div class="modal-body">
+            <label>当前 Token（24h 有效）</label>
+            <div style="display:flex;gap:8px;align-items:center">
+              <input type="text" id="api-key-display" value="${escHtml(token)}" readonly
+                style="flex:1;font-family:var(--font-mono);font-size:12px">
+              <button class="toolbar-btn" onclick="copyApiKey()">复制</button>
+            </div>
+            <div style="font-size:11px;color:var(--text-muted);margin-top:8px">
+              节点初始化命令:
+            </div>
+            <code style="display:block;font-size:11px;padding:8px;background:var(--bg-tertiary);border-radius:4px;word-break:break-all;margin-top:4px">
+              curl -sSL https://${location.host}/api/enroll/init.sh | ADMIN_TOKEN=${escHtml(token)} bash
+            </code>
+          </div>
+          <div class="modal-footer">
+            <button class="modal-btn cancel" onclick="closeModal()">关闭</button>
+          </div>
+        `;
+      }
+    })
+    .catch(() => {});
 }
 
 function copyApiKey() {
-  const token = getToken();
-  if (navigator.clipboard) {
-    navigator.clipboard.writeText(token).then(() => {
+  const input = $('#api-key-display');
+  if (input && navigator.clipboard) {
+    navigator.clipboard.writeText(input.value).then(() => {
       const btn = document.querySelector('#modal-content .toolbar-btn');
       if (btn) { btn.textContent = '已复制'; setTimeout(() => { btn.textContent = '复制'; }, 1500); }
     });
   }
+}
+
+// ═══════════════════════════════════════
+// @beta: 用户管理页面
+// ═══════════════════════════════════════
+
+async function renderUsersPage(container) {
+  container.innerHTML = `
+    <div class="page-users">
+      <div class="users-header">
+        <h3>用户管理</h3>
+        <button class="toolbar-btn primary" onclick="showCreateUserModal()">${L('user-plus')} 创建用户</button>
+      </div>
+      <div id="users-table-wrap">加载中...</div>
+    </div>
+  `;
+  refreshIcons();
+  await loadUsersTable();
+}
+
+async function loadUsersTable() {
+  const wrap = $('#users-table-wrap');
+  if (!wrap) return;
+  try {
+    const res = await authFetch('/api/auth/users');
+    const users = await res.json();
+    let html = `<table class="nodes-data-table">
+      <thead><tr>
+        <th>用户名</th>
+        <th>角色</th>
+        <th>创建时间</th>
+        <th>操作</th>
+      </tr></thead><tbody>`;
+    for (const u of users) {
+      const created = u.createdAt ? new Date(u.createdAt).toLocaleString() : '—';
+      html += `<tr>
+        <td><strong>${escHtml(u.username)}</strong></td>
+        <td><span class="badge accent">${escHtml(u.role)}</span></td>
+        <td>${created}</td>
+        <td>
+          <button class="btn-icon" onclick="deleteUserUI('${safeAttr(u.id)}', '${safeAttr(u.username)}')" title="删除">${L('trash-2')}</button>
+        </td>
+      </tr>`;
+    }
+    html += `</tbody></table>`;
+    wrap.innerHTML = html;
+    refreshIcons();
+  } catch (e) {
+    wrap.innerHTML = `<div class="table-empty">加载失败: ${escHtml(e.message)}</div>`;
+  }
+}
+
+function showCreateUserModal() {
+  const overlay = $('#modal-overlay');
+  const content = $('#modal-content');
+  overlay.style.display = 'flex';
+  content.innerHTML = `
+    <div class="modal-header">创建用户</div>
+    <div class="modal-body">
+      <label>用户名</label>
+      <input type="text" id="new-username" placeholder="输入用户名" autofocus>
+      <label>密码（至少 8 位）</label>
+      <input type="password" id="new-password" placeholder="输入密码">
+      <div id="create-user-error" style="color:var(--red);font-size:12px;margin-top:4px;display:none"></div>
+    </div>
+    <div class="modal-footer">
+      <button class="modal-btn cancel" onclick="closeModal()">取消</button>
+      <button class="modal-btn primary" onclick="createUserUI()">创建</button>
+    </div>
+  `;
+}
+
+async function createUserUI() {
+  const username = $('#new-username')?.value?.trim();
+  const password = $('#new-password')?.value;
+  const errEl = $('#create-user-error');
+  if (!username || !password) return;
+  try {
+    const res = await authFetch('/api/auth/register', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ username, password }),
+    });
+    const data = await res.json();
+    if (!res.ok) {
+      if (errEl) { errEl.textContent = data.error || '创建失败'; errEl.style.display = 'block'; }
+      return;
+    }
+    closeModal();
+    await loadUsersTable();
+  } catch (e) {
+    if (errEl) { errEl.textContent = e.message; errEl.style.display = 'block'; }
+  }
+}
+
+async function deleteUserUI(id, username) {
+  if (!confirm(`确认删除用户 "${username}"？`)) return;
+  try {
+    const res = await authFetch(`/api/auth/users/${encodeURIComponent(id)}`, { method: 'DELETE' });
+    if (res.status === 400) {
+      const data = await res.json();
+      alert(data.error || '删除失败');
+      return;
+    }
+    await loadUsersTable();
+  } catch (e) { alert(`删除失败: ${e.message}`); }
 }
 
 // ═══════════════════════════════════════

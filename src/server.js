@@ -18,8 +18,9 @@ const createAiRouter = require('./routes/ai');
 const createEnrollRouter = require('./routes/enroll');
 const createMirrorRouter = require('./routes/mirror');
 const createClawRouter = require('./routes/claw');
+const createAuthRouter = require('./routes/auth');
 const ClawRPC = require('./services/claw-rpc');
-const { requireAuth, initToken, getAdminToken } = require('./middleware/auth');
+const { requireAuth, initToken, getAdminToken, setJwtSecret, hashPassword } = require('./middleware/auth');
 const { createRateLimit } = require('./middleware/rate-limit');
 const { errorHandler } = require('./middleware/error-handler');
 const { resolvePaths, ensureDataDirs } = require('./services/data-paths');
@@ -74,12 +75,33 @@ function loadAllOpsLogs() {
 }
 
 async function boot() {
-  // 初始化认证 Token
+  // 初始化认证 Token（向后兼容）
   const adminToken = initToken();
 
   // 初始化审计日志（共享 NodeStore SQLite 实例，需在 keyManager.init 后）
   await keyManager.init();
-  const audit = new AuditLogger({ store: keyManager.store });
+
+  // @alpha: JWT secret — 用 Console 私钥的哈希
+  const jwtSecret = require('crypto')
+    .createHash('sha256')
+    .update(keyManager.getPrivateKey())
+    .digest('hex');
+  setJwtSecret(jwtSecret);
+
+  // @alpha: 首次启动自动创建 admin 用户
+  const store = keyManager.store;
+  if (store.userCount() === 0) {
+    const crypto = require('crypto');
+    const tempPwd = crypto.randomBytes(8).toString('hex');
+    const id = crypto.randomBytes(8).toString('hex');
+    store.insertUser({ id, username: 'admin', passwordHash: hashPassword(tempPwd) });
+    console.log(`\n  👤 首次启动，已创建管理员账号:`);
+    console.log(`     用户名: admin`);
+    console.log(`     密码:   ${tempPwd}`);
+    console.log(`     ⚠️  请登录后及时修改密码\n`);
+  }
+
+  const audit = new AuditLogger({ store });
 
   // 已审批节点配置
   const approvedNodes = keyManager.getApprovedNodesConfig();
@@ -152,6 +174,9 @@ async function boot() {
     monitor.ingest(node.id, req.body);
     res.json({ success: true, nodeId: node.id });
   });
+
+  // 认证路由（login 公开，其余需认证）
+  app.use('/api/auth', express.json(), createAuthRouter(store));
 
   // 需认证 + 审计的管理路由
   app.use('/api/nodes', requireAuth, audit.middleware('nodes'), createNodesRouter(monitor, sshManager, monitor.nodesConfig, keyManager, metricsStore));
