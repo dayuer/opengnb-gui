@@ -32,7 +32,7 @@ const Modal = {
 
   // @alpha: 颜色选择器
   pickedColor: '#135bec',
-  COLORS: ['#135bec','#3fb950','#f85149','#d29922','#58a6ff','#a371f7','#f778ba','#56d4dd'],
+  COLORS: ['#135bec','#006c4a','#ba1a1a','#4b41e1','#bb0112','#a371f7','#f778ba','#56d4dd'],
 
   renderColorPicker(selected) {
     this.pickedColor = selected || this.COLORS[0];

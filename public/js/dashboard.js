@@ -64,7 +64,7 @@ const Dashboard = {
         if (!nodes || nodes.length === 0) continue;
         const group = nodeGroups.find(g => g.id === gid);
         const gName = group ? group.name : '未分组';
-        const gColor = group ? group.color : '#5c5c6e';
+        const gColor = group ? group.color : '#767586';
         const gOnline = nodes.filter(n => n.online).length;
         const gTotal = nodes.length;
 
