@@ -301,6 +301,17 @@ const Nodes = {
     }
 
     html += `</div>`;
+
+    // 保存已展开面板的 DOM，避免 innerHTML 销毁终端日志等有状态内容
+    let savedPanel = null;
+    if (App.selectedNodeId) {
+      const existingPanel = wrap.querySelector('.inline-panel');
+      if (existingPanel && existingPanel.children.length > 0) {
+        savedPanel = existingPanel;
+        existingPanel.remove(); // 从 DOM 分离但保留引用
+      }
+    }
+
     wrap.innerHTML = html;
     refreshIcons();
     this.updateBatchToolbar();
@@ -309,10 +320,25 @@ const Nodes = {
     if (App.selectedNodeId) {
       const panel = wrap.querySelector('.inline-panel');
       if (panel) {
-        const monitorNode = App.nodesData.find(n => n.id === App.selectedNodeId);
-        if (monitorNode) this.renderInlineDetail(panel, monitorNode);
-        else panel.innerHTML = `<div class="text-sm text-text-muted flex items-center gap-2">${L('zap')} 无监控数据</div>`;
-        refreshIcons();
+        if (savedPanel) {
+          // 复用已有面板 — 保留终端日志、OpenClaw 状态等
+          panel.replaceWith(savedPanel);
+          // 概览 Tab 需要实时更新 CPU/内存数据
+          const ts = this._getTabState(App.selectedNodeId);
+          if (ts.tab === 'overview') {
+            const monitorNode = App.nodesData.find(n => n.id === App.selectedNodeId);
+            if (monitorNode) {
+              const contentEl = savedPanel.querySelector(`#inline-tab-content-${App.selectedNodeId}`);
+              if (contentEl) { contentEl.innerHTML = this._renderOverview(monitorNode); refreshIcons(); }
+            }
+          }
+        } else {
+          // 首次展开 — 完整渲染
+          const monitorNode = App.nodesData.find(n => n.id === App.selectedNodeId);
+          if (monitorNode) this.renderInlineDetail(panel, monitorNode);
+          else panel.innerHTML = `<div class="text-sm text-text-muted flex items-center gap-2">${L('zap')} 无监控数据</div>`;
+          refreshIcons();
+        }
       }
     }
   },
