@@ -436,7 +436,7 @@ const Nodes = {
         <span class="text-xs text-text-muted mr-1 [&_svg]:w-3 [&_svg]:h-3 flex items-center gap-1">${L('zap')} 快捷</span>
         ${shortcuts.map(s => `<button class="px-2 py-0.5 text-xs rounded-md border border-border-subtle hover:border-primary/40 hover:bg-primary/10 text-text-secondary hover:text-primary transition cursor-pointer flex items-center gap-1 [&_svg]:w-3 [&_svg]:h-3" onclick="Nodes.quickCmd('${safeAttr(node.id)}','${safeAttr(s.cmd)}')">${L(s.icon)} ${s.label}</button>`).join('')}
       </div>
-      <div class="max-h-60 overflow-y-auto p-3 font-mono text-xs flex flex-col-reverse gap-1" id="terminal-output-${safeAttr(node.id)}">`;
+      <div class="max-h-60 overflow-y-auto p-3 font-mono text-xs flex flex-col gap-1" id="terminal-output-${safeAttr(node.id)}">`;
     if (logs.length === 0) {
       html += `<div class="text-text-muted">点击上方快捷按钮或输入自定义指令</div>`;
     } else {
