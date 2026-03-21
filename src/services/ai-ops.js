@@ -346,10 +346,11 @@ class AiOps {
     const args = [
       '-p', prompt,
       '--output-format', 'stream-json',
+      '--verbose',
       '--bare',
       '--append-system-prompt', systemCtx,
       '--allowedTools', 'Bash',
-      '--permission-mode', 'bypassPermissions',
+      '--permission-mode', 'auto',
       '--max-budget-usd', '0.5',
     ];
 
@@ -358,6 +359,9 @@ class AiOps {
       env: { ...process.env, NO_COLOR: '1', PATH: `${extraPaths}:${process.env.PATH || ''}` },
       stdio: ['pipe', 'pipe', 'pipe'],
     });
+
+    // 立即关闭 stdin — 避免 Claude 等待 3s stdin 超时
+    child.stdin.end();
 
     let buf = '';
     child.stdout.on('data', (data) => {
