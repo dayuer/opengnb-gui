@@ -430,6 +430,7 @@ const Nodes = {
       { cmd: '磁盘', icon: 'hard-drive', label: '磁盘' },
       { cmd: '性能', icon: 'gauge', label: '性能' },
       { cmd: '安装 openclaw', icon: 'download', label: '安装 OpenClaw' },
+      { cmd: '@claude ', icon: 'bot', label: 'AI 助手' },
     ];
     let html = `<div class="bg-base rounded-lg border border-border-default overflow-hidden">
       <div class="flex items-center gap-1.5 px-3 py-2 border-b border-border-subtle bg-elevated/30 flex-wrap">
@@ -685,7 +686,13 @@ const Nodes = {
 
   quickCmd(nodeId, cmd) {
     const input = document.getElementById(`terminal-input-${nodeId}`);
-    if (input) input.value = cmd;
+    if (!input) return;
+    input.value = cmd;
+    // @claude 前缀只填入不执行，等用户补充 prompt
+    if (cmd.startsWith('@claude ')) {
+      input.focus();
+      return;
+    }
     this.execCmd(nodeId);
   },
 

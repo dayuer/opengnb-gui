@@ -1,5 +1,7 @@
 'use strict';
 
+const { execFile } = require('node:child_process');
+
 /**
  * AI 运维服务 — 内置命令路由器
  *
@@ -129,6 +131,12 @@ class AiOps {
     // 性能
     if (/性能|perf|performance|负载|load/i.test(msg)) {
       return this._handlePerformance(nodeId);
+    }
+
+    // Claude Code AI 助手: "@claude <prompt>" 或 "claude <prompt>"
+    if (/^@?claude\s+/i.test(msg)) {
+      const prompt = msg.replace(/^@?claude\s+/i, '').trim();
+      return this._handleClaude(prompt, nodeId);
     }
 
     // 执行自定义命令: "exec <nodeId> <command>"
@@ -262,6 +270,49 @@ class AiOps {
   }
 
   /**
+   * 调用 Claude Code CLI
+   */
+  async _handleClaude(prompt, nodeId) {
+    if (!prompt) return { response: '用法: @claude <你的问题或任务>', commands: [] };
+
+    // 拼接节点上下文
+    let systemCtx = '你是服务器运维 AI 助手。当前工作目录: /opt/gnb-console。';
+    const nodeConfig = this._resolveNode(nodeId) || this._resolveNode(null);
+    if (nodeConfig) {
+      systemCtx += ` 当前节点: ${nodeConfig.name || nodeConfig.id} (${nodeConfig.host || 'unknown'})。`;
+    }
+
+    const args = [
+      '-p', prompt,
+      '--bare',
+      '--append-system-prompt', systemCtx,
+      '--allowedTools', 'Bash(ls:*) Bash(cat:*) Bash(grep:*) Bash(find:*) Bash(head:*) Bash(tail:*) Bash(wc:*) Bash(df:*) Bash(du:*) Bash(free:*) Bash(uptime:*) Bash(top:*) Bash(ps:*) Bash(netstat:*) Bash(ss:*) Bash(systemctl:*) Bash(journalctl:*) Bash(ip:*) Bash(ping:*) Bash(curl:*) Read',
+    ];
+
+    return new Promise((resolve) => {
+      execFile('claude', args, {
+        cwd: '/opt/gnb-console',
+        timeout: 120_000,
+        maxBuffer: 1024 * 512,
+        env: { ...process.env, NO_COLOR: '1' },
+      }, (err, stdout, stderr) => {
+        if (err) {
+          const msg = err.killed
+            ? '❌ Claude 执行超时（2 分钟）'
+            : `❌ Claude 执行失败: ${err.message}`;
+          return resolve({ response: msg, commands: [] });
+        }
+        const output = (stdout || '').trim() || '(空输出)';
+        resolve({
+          response: `🤖 Claude:\n${output}`,
+          commands: [],
+          targetNodeId: nodeConfig?.id,
+        });
+      });
+    });
+  }
+
+  /**
    * 直接执行 Linux 命令（落底处理）
    */
   async _handleDirectCmd(cmd, nodeId) {
@@ -341,6 +392,7 @@ class AiOps {
 • help — 显示此帮助
 
 💻 也可直接输入 Linux 命令（如 ls, cat, top, netstat 等）
+🤖 @claude <问题> — 调用 AI 助手分析和执行运维任务
 ⚠️ 危险指令已被黑名单拦截（rm -rf, shutdown, reboot, mkfs 等）`,
       commands: [],
     };
