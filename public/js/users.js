@@ -1,17 +1,32 @@
 'use strict';
 // @alpha: 团队设置 — Stitch "Team Settings" 风格 (水平标签: 成员/角色/团队/邀请)
+// @alpha: _cachedUsers 缓存 + _renderSeq 渲染锁 — 消除 Tab 切换 429
 
 let teamTab = 'members';
+let _cachedUsers = null;
+let _renderSeq = 0;
 
 function switchTeamTab(tab) {
+  if (tab === teamTab) return;
   teamTab = tab;
-  Users.render($('#main-content'));
+  if (_cachedUsers !== null) {
+    Users._renderContent($('#main-content'), _cachedUsers);
+  } else {
+    Users.render($('#main-content'));
+  }
 }
 
 const Users = {
   async render(container) {
+    const seq = ++_renderSeq;
     const usersRes = await App.authFetch('/api/auth/users').catch(() => null);
+    if (seq !== _renderSeq) return; // 被更新的调用取代
     const users = usersRes ? await usersRes.json() : [];
+    _cachedUsers = users;
+    this._renderContent(container, users);
+  },
+
+  _renderContent(container, users) {
 
     const tabs = [
       { id: 'members', icon: 'users', label: '团队成员' },
@@ -55,6 +70,7 @@ const Users = {
     </div>`;
     refreshIcons();
   },
+  // ---- 以下为 _renderContent 的闭合，实际内容区在上方 ----
 
   // ── 团队成员 ──
   _membersSection(users) {
@@ -296,6 +312,7 @@ const Users = {
       const data = await res.json();
       if (!res.ok) { if (errEl) { errEl.textContent = data.error || '邀请失败'; errEl.classList.remove('hidden'); } return; }
       App.closeModal();
+      _cachedUsers = null;
       await Users.render($('#main-content'));
     } catch (e) { if (errEl) { errEl.textContent = e.message; errEl.classList.remove('hidden'); } }
   },
@@ -309,6 +326,7 @@ const Users = {
       });
       if (!res.ok) { const data = await res.json(); showToast(data.error || '角色修改失败', 'danger'); return; }
       showToast(`角色已更新为 ${newRole}`);
+      _cachedUsers = null;
       await Users.render($('#main-content'));
     } catch (e) { showToast(`角色修改失败: ${e.message}`, 'danger'); }
   },
@@ -318,6 +336,7 @@ const Users = {
     try {
       const res = await App.authFetch(`/api/auth/users/${encodeURIComponent(id)}`, { method: 'DELETE' });
       if (res.status === 400) { const data = await res.json(); alert(data.error || '移除失败'); return; }
+      _cachedUsers = null;
       await Users.render($('#main-content'));
     } catch (e) { alert(`移除失败: ${e.message}`); }
   },
