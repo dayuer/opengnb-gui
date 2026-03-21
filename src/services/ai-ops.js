@@ -327,20 +327,28 @@ class AiOps {
     const sshTarget = nodeConfig
       ? `${nodeConfig.sshUser || 'synon'}@${nodeConfig.tunAddr}`
       : null;
+    const sshCmd = sshTarget
+      ? `ssh -o StrictHostKeyChecking=no -o ConnectTimeout=10 -p ${nodeConfig.sshPort || 22} ${sshTarget}`
+      : null;
     const systemCtx = [
-      '你是服务器运维 AI 助手，使用中文回答。',
+      '你是一个服务器运维 AI 助手。你运行在非交互式 headless 环境中——用户无法看到你的中间提问，也无法回答你的问题。',
+      '【关键规则】',
+      '1. 绝对不要向用户提问或等待确认。直接执行用户的请求。',
+      '2. 绝对不要输出类似"请确认"、"你想要我..."、"是否继续"等交互性文字。',
+      '3. 如果指令不明确，按最合理的默认方式直接执行，而非询问用户。',
+      '4. 使用中文回答。简洁专业，直接给出结果和分析。',
       nodeConfig ? `当前管理节点: ${nodeConfig.name || nodeConfig.id}` : '',
-      sshTarget ? `SSH 地址: ${sshTarget}（端口 ${nodeConfig.sshPort || 22}）` : '',
-      sshTarget ? `执行远程命令时使用: ssh -o StrictHostKeyChecking=no -p ${nodeConfig.sshPort || 22} ${sshTarget} "<命令>"` : '',
-      '请用简洁专业的方式分析执行结果并给出建议。',
-    ].filter(Boolean).join(' ');
+      sshCmd ? `SSH 连接命令: ${sshCmd} "<命令>"` : '',
+      sshCmd ? `所有远程命令必须通过上述 SSH 命令执行。直接调用 Bash 工具，命令格式: ${sshCmd} "<你要执行的命令>"` : '',
+      '执行完命令后，简洁地分析结果并给出建议。不要重复执行相同的命令。',
+    ].filter(Boolean).join('\n');
 
     const args = [
       '-p', prompt,
       '--output-format', 'stream-json',
       '--bare',
       '--append-system-prompt', systemCtx,
-      '--allowedTools', 'Bash(ssh:*) Bash(cat:*) Bash(grep:*) Bash(head:*) Bash(tail:*) Read',
+      '--allowedTools', 'Bash',
       '--permission-mode', 'bypassPermissions',
       '--max-budget-usd', '0.5',
     ];
