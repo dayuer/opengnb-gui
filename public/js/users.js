@@ -92,10 +92,12 @@ const Users = {
               </div>
             </div>
             <div class="flex items-center gap-3">
-              <span class="px-3 py-1 ${isAdmin ? 'bg-secondary-container text-success' : 'bg-elevated text-text-secondary border border-border-default'} rounded-full text-xs font-bold flex items-center gap-1.5">
-                <span class="w-1.5 h-1.5 rounded-full ${isAdmin ? 'bg-success' : 'bg-text-muted'}"></span>
-                ${escHtml(u.role)}
-              </span>
+              ${isOwner ? `<span class="px-3 py-1 bg-secondary-container text-success rounded-full text-xs font-bold flex items-center gap-1.5">
+                <span class="w-1.5 h-1.5 rounded-full bg-success"></span>admin
+              </span>` : `<select class="px-3 py-1.5 ${isAdmin ? 'bg-secondary-container text-success' : 'bg-elevated text-text-secondary border border-border-default'} rounded-full text-xs font-bold cursor-pointer outline-none appearance-none pr-6 bg-no-repeat bg-right" style="background-image: url('data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 width=%2212%22 height=%2212%22 viewBox=%220 0 24 24%22 fill=%22none%22 stroke=%22currentColor%22 stroke-width=%222%22><polyline points=%226 9 12 15 18 9%22/></svg>'); background-position: right 8px center;" onchange="Users.changeRole('${safeAttr(u.id)}', this.value)">
+                <option value="admin" ${isAdmin ? 'selected' : ''}>admin</option>
+                <option value="member" ${!isAdmin ? 'selected' : ''}>member</option>
+              </select>`}
               <span class="px-2.5 py-1 text-[10px] font-bold uppercase tracking-wider text-success bg-success/10 rounded-full">Active</span>
               ${!isOwner ? `<button class="p-2 rounded-lg text-text-muted hover:text-danger hover:bg-danger/10 transition cursor-pointer opacity-0 group-hover:opacity-100 [&_svg]:w-4 [&_svg]:h-4" onclick="Users.deleteUser('${safeAttr(u.id)}','${safeAttr(u.username)}')" title="移除成员">${L('trash-2')}</button>` : ''}
             </div>
@@ -219,14 +221,9 @@ const Users = {
   // ── 邀请管理 ──
   _invitationsSection() {
     return `<div class="space-y-8">
-      <div class="flex flex-col md:flex-row md:items-start justify-between gap-6">
-        <div>
-          <h2 class="text-xl font-bold font-headline mb-1">邀请管理</h2>
-          <p class="text-sm text-text-muted">管理团队邀请链接和待处理邀请。</p>
-        </div>
-        <button class="px-5 py-2.5 signature-gradient text-white rounded-xl font-bold text-sm shadow-lg shadow-primary/20 hover:scale-[1.02] active:scale-95 transition-all flex items-center gap-2 cursor-pointer [&_svg]:w-4 [&_svg]:h-4" onclick="Users.showCreateModal()">
-          ${L('send')}<span>发送邀请</span>
-        </button>
+      <div>
+        <h2 class="text-xl font-bold font-headline mb-1">邀请管理</h2>
+        <p class="text-sm text-text-muted">管理团队邀请链接和待处理邀请。</p>
       </div>
 
       <!-- 邀请链接 -->
@@ -241,9 +238,9 @@ const Users = {
                 <p class="text-xs text-text-muted">分享此链接以邀请新成员加入团队</p>
               </div>
             </div>
-            <button class="px-3 py-1.5 text-xs font-bold text-primary bg-primary/10 rounded-lg hover:bg-primary/20 transition cursor-pointer flex items-center gap-1 [&_svg]:w-3.5 [&_svg]:h-3.5" onclick="navigator.clipboard.writeText('${location.origin}/invite/team');showToast('已复制邀请链接')">${L('copy')} 复制</button>
+            <button class="px-3 py-1.5 text-xs font-bold text-primary bg-primary/10 rounded-lg hover:bg-primary/20 transition cursor-pointer flex items-center gap-1 [&_svg]:w-3.5 [&_svg]:h-3.5" onclick="navigator.clipboard.writeText('${location.origin}/invite/team_synonclaw');showToast('已复制邀请链接')">${L('copy')} 复制</button>
           </div>
-          <pre class="px-4 py-3 bg-base rounded-lg text-xs font-mono text-text-secondary overflow-x-auto border border-border-subtle">${location.origin}/invite/team</pre>
+          <pre class="px-4 py-3 bg-base rounded-lg text-xs font-mono text-text-secondary overflow-x-auto border border-border-subtle">${location.origin}/invite/team_synonclaw</pre>
         </div>
       </div>
 
@@ -253,7 +250,7 @@ const Users = {
         <div class="bg-elevated rounded-xl border border-border-default p-12 text-center">
           <div class="flex justify-center mb-4 [&_svg]:w-12 [&_svg]:h-12 text-text-muted/30">${L('inbox')}</div>
           <p class="text-sm font-bold font-headline text-text-secondary mb-1">暂无待处理邀请</p>
-          <p class="text-xs text-text-muted">点击"发送邀请"创建新的团队成员。</p>
+          <p class="text-xs text-text-muted">点击页面顶部「邀请成员」创建新的团队成员。</p>
         </div>
       </div>
     </div>`;
@@ -271,6 +268,14 @@ const Users = {
           <label class="block text-sm font-medium">初始密码（至少 8 位）</label>
           <input type="password" id="new-password" placeholder="输入密码" class="w-full bg-elevated border border-border-default rounded-xl px-4 py-3 text-sm outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary transition-all">
         </div>
+        <div class="space-y-2">
+          <label class="block text-sm font-medium">角色权限</label>
+          <select id="new-role" class="w-full bg-elevated border border-border-default rounded-xl px-4 py-3 text-sm outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary transition-all cursor-pointer">
+            <option value="member">Member — 普通成员（只读权限）</option>
+            <option value="admin">Admin — 管理员（管理权限）</option>
+          </select>
+          <p class="text-xs text-text-muted">成员加入后也可在成员列表中修改角色</p>
+        </div>
         <div id="create-user-error" class="hidden text-danger text-xs"></div>
       </div>
       <div class="flex justify-end gap-3 mt-6">
@@ -283,15 +288,29 @@ const Users = {
   async createUser() {
     const username = $('#new-username')?.value?.trim();
     const password = $('#new-password')?.value;
+    const role = $('#new-role')?.value || 'member';
     const errEl = $('#create-user-error');
     if (!username || !password) return;
     try {
-      const res = await App.authFetch('/api/auth/register', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ username, password }) });
+      const res = await App.authFetch('/api/auth/register', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ username, password, role }) });
       const data = await res.json();
       if (!res.ok) { if (errEl) { errEl.textContent = data.error || '邀请失败'; errEl.classList.remove('hidden'); } return; }
       App.closeModal();
       await Users.render($('#main-content'));
     } catch (e) { if (errEl) { errEl.textContent = e.message; errEl.classList.remove('hidden'); } }
+  },
+
+  async changeRole(id, newRole) {
+    try {
+      const res = await App.authFetch(`/api/auth/users/${encodeURIComponent(id)}/role`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ role: newRole }),
+      });
+      if (!res.ok) { const data = await res.json(); showToast(data.error || '角色修改失败', 'danger'); return; }
+      showToast(`角色已更新为 ${newRole}`);
+      await Users.render($('#main-content'));
+    } catch (e) { showToast(`角色修改失败: ${e.message}`, 'danger'); }
   },
 
   async deleteUser(id, username) {

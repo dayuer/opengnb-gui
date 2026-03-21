@@ -220,6 +220,7 @@ class NodeStore {
       userCount: this.db.prepare('SELECT COUNT(*) AS cnt FROM users'),
       updateApiToken: this.db.prepare('UPDATE users SET apiToken = ? WHERE id = ?'),
       updatePassword: this.db.prepare('UPDATE users SET passwordHash = ? WHERE id = ?'),
+      updateUserRole: this.db.prepare('UPDATE users SET role = ? WHERE id = ?'),
       // @alpha: 异步 job
       insertJob: this.db.prepare(
         `INSERT INTO jobs (id, nodeId, command, status, createdAt)
@@ -653,6 +654,11 @@ class NodeStore {
   /** 删除用户 */
   deleteUser(id) {
     return this._stmts.removeUser.run(id);
+  }
+
+  /** 更新用户角色 */
+  updateUserRole(id, role) {
+    return this._stmts.updateUserRole.run(role, id);
   }
 
   /** 用户总数 */

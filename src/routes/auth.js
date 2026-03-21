@@ -98,6 +98,22 @@ function createAuthRouter(store) {
     res.status(204).end();
   });
 
+  /** PATCH /api/auth/users/:id/role — 修改用户角色 */
+  router.patch('/users/:id/role', requireAuth, (req, res) => {
+    const { id } = req.params;
+    const { role } = req.body || {};
+    if (!role || !['admin', 'member'].includes(role)) {
+      return res.status(400).json({ error: '角色必须是 admin 或 member' });
+    }
+    const user = store.findUserById(id);
+    if (!user) return res.status(404).json({ error: '用户不存在' });
+    if (user.username === 'admin') {
+      return res.status(400).json({ error: '不能修改系统管理员角色' });
+    }
+    store.updateUserRole(id, role);
+    res.json({ id, role });
+  });
+
   /** POST /api/auth/api-token/refresh — 重新生成 apiToken */
   router.post('/api-token/refresh', requireAuth, (req, res) => {
     const apiToken = crypto.randomBytes(5).toString('hex');
