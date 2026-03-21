@@ -424,6 +424,92 @@ async function boot() {
     });
   });
 
+  // --- Web SSH 终端 WebSocket ---
+  const wssSsh = new WebSocketServer({ server, path: '/ws/ssh' });
+
+  wssSsh.on('connection', async (ws, req) => {
+    const url = new URL(req.url, 'http://localhost');
+    const token = url.searchParams.get('token');
+    const nodeId = url.searchParams.get('nodeId');
+    const cols = parseInt(url.searchParams.get('cols')) || 80;
+    const rows = parseInt(url.searchParams.get('rows')) || 24;
+
+    // 认证
+    if (!token || !_resolveWsToken(token).valid) {
+      ws.close(4001, '认证失败');
+      return;
+    }
+
+    // 查找节点配置
+    if (!nodeId) {
+      ws.close(4003, '缺少 nodeId');
+      return;
+    }
+    const configs = keyManager.getApprovedNodesConfig();
+    const nodeConfig = configs.find(c => c.id === nodeId);
+    if (!nodeConfig) {
+      ws.close(4004, '节点不存在');
+      return;
+    }
+
+    console.log(`[SSH-WS] 建立连接: 节点 ${nodeConfig.name || nodeId}`);
+
+    let sshStream = null;
+    try {
+      sshStream = await sshManager.shell(nodeConfig, { cols, rows });
+    } catch (err) {
+      console.error(`[SSH-WS] SSH Shell 创建失败: ${err.message}`);
+      ws.send(`\r\n\x1b[31m连接失败: ${err.message}\x1b[0m\r\n`);
+      ws.close(4005, 'SSH 连接失败');
+      return;
+    }
+
+    // SSH stdout → WebSocket
+    sshStream.on('data', (data) => {
+      if (ws.readyState === 1) ws.send(data);
+    });
+
+    sshStream.stderr.on('data', (data) => {
+      if (ws.readyState === 1) ws.send(data);
+    });
+
+    sshStream.on('close', () => {
+      console.log(`[SSH-WS] SSH Stream 关闭: ${nodeId}`);
+      if (ws.readyState === 1) ws.close(1000, 'SSH 会话结束');
+    });
+
+    // WebSocket → SSH stdin
+    ws.on('message', (msg) => {
+      if (!sshStream || sshStream.destroyed) return;
+
+      // 检查是否是控制消息（JSON）
+      if (typeof msg === 'string' || (msg instanceof Buffer && msg[0] === 0x7b)) {
+        try {
+          const ctrl = JSON.parse(msg.toString());
+          if (ctrl.type === 'resize' && ctrl.cols && ctrl.rows) {
+            sshStream.setWindow(ctrl.rows, ctrl.cols, 0, 0);
+            return;
+          }
+        } catch (_) { /* 不是 JSON，当作普通输入 */ }
+      }
+
+      sshStream.write(msg);
+    });
+
+    ws.on('close', () => {
+      console.log(`[SSH-WS] WebSocket 断开: ${nodeId}`);
+      if (sshStream && !sshStream.destroyed) {
+        sshStream.end();
+        sshStream.destroy();
+      }
+    });
+
+    ws.on('error', (err) => {
+      console.error(`[SSH-WS] WebSocket 错误: ${err.message}`);
+      if (sshStream && !sshStream.destroyed) sshStream.destroy();
+    });
+  });
+
   // 监控更新 + 待审批推送
   monitor.on('update', (allStatus) => {
     const payload = JSON.stringify({

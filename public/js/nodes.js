@@ -2,7 +2,7 @@
 // @alpha: 节点管理 — Stitch "Cluster Management" 风格
 
 let nodeTabStates = {};
-let terminalLogs = {};
+let _xtermSessions = {}; // nodeId → { term, ws, fitAddon }
 
 const Nodes = {
   render(container) {
@@ -446,6 +446,7 @@ const Nodes = {
     refreshIcons();
 
     if (ts.tab === 'claw') this._loadClawTab(node.id, ts.clawSubTab);
+    if (ts.tab === 'terminal') this._initXterm(node.id);
   },
 
   _renderOverview(node) {
@@ -520,37 +521,102 @@ const Nodes = {
   },
 
   _renderTerminal(node) {
-    const logs = terminalLogs[node.id] || [];
     const shortcuts = [
-      { cmd: '状态', icon: 'activity', label: '状态' },
-      { cmd: '重启 gnb', icon: 'refresh-cw', label: '重启 GNB' },
-      { cmd: '日志', icon: 'file-text', label: '日志' },
-      { cmd: '磁盘', icon: 'hard-drive', label: '磁盘' },
-      { cmd: '性能', icon: 'gauge', label: '性能' },
-      { cmd: '安装 openclaw', icon: 'download', label: '安装 OpenClaw' },
-      { cmd: '@claude ', icon: 'bot', label: 'AI 助手' },
+      { cmd: 'systemctl status gnb openclaw-gateway', icon: 'activity', label: '状态' },
+      { cmd: 'sudo systemctl restart gnb', icon: 'refresh-cw', label: '重启 GNB' },
+      { cmd: 'journalctl -u gnb -u openclaw-gateway --no-pager -n 30', icon: 'file-text', label: '日志' },
+      { cmd: 'df -h', icon: 'hard-drive', label: '磁盘' },
+      { cmd: 'top -bn1 | head -15', icon: 'gauge', label: '性能' },
+      { cmd: 'free -h', icon: 'cpu', label: '内存' },
     ];
-    let html = `<div class="bg-base rounded-lg border border-border-default overflow-hidden">
+    return `<div class="bg-base rounded-lg border border-border-default overflow-hidden">
       <div class="flex items-center gap-1.5 px-3 py-2 border-b border-border-subtle bg-elevated/30 flex-wrap">
         <span class="text-xs text-text-muted mr-1 [&_svg]:w-3 [&_svg]:h-3 flex items-center gap-1">${L('zap')} 快捷</span>
         ${shortcuts.map(s => `<button class="px-2 py-0.5 text-xs rounded-md border border-border-subtle hover:border-primary/40 hover:bg-primary/10 text-text-secondary hover:text-primary transition cursor-pointer flex items-center gap-1 [&_svg]:w-3 [&_svg]:h-3" onclick="Nodes.quickCmd('${safeAttr(node.id)}','${safeAttr(s.cmd)}')">${L(s.icon)} ${s.label}</button>`).join('')}
       </div>
-      <div class="max-h-60 overflow-y-auto p-3 font-mono text-xs space-y-1" id="terminal-output-${safeAttr(node.id)}">`;
-    if (logs.length === 0) {
-      html += `<div class="text-text-muted">点击上方快捷按钮或输入自定义指令</div>`;
-    } else {
-      for (const log of logs) {
-        const cls = log.role === 'user' ? 'text-primary' : log.role === 'error' ? 'text-danger' : 'text-text-secondary';
-        html += `<div class="${cls}">${log.role === 'user' ? '❯ ' : ''}${escHtml(log.text)}</div>`;
-      }
-    }
-    html += `</div>
-      <div class="flex border-t border-border-default">
-        <input type="text" class="flex-1 bg-transparent px-3 py-2 text-sm placeholder:text-text-muted outline-none font-mono" id="terminal-input-${safeAttr(node.id)}" placeholder="输入运维指令..." autocomplete="off" onkeydown="if(event.key==='Enter')Nodes.execCmd('${safeAttr(node.id)}')">
-        <button class="px-4 text-xs text-primary hover:bg-primary/10 transition cursor-pointer [&_svg]:w-3.5 [&_svg]:h-3.5" onclick="Nodes.execCmd('${safeAttr(node.id)}')">${L('send')} 执行</button>
-      </div>
+      <div id="xterm-${safeAttr(node.id)}" style="height:320px"></div>
     </div>`;
-    return html;
+  },
+
+  /** 初始化 xterm.js 并通过 WebSocket 连接到 SSH */
+  _initXterm(nodeId) {
+    // 复用已有会话
+    if (_xtermSessions[nodeId]) return;
+
+    const container = document.getElementById(`xterm-${nodeId}`);
+    if (!container) return;
+
+    const term = new Terminal({
+      fontSize: 13,
+      fontFamily: 'JetBrains Mono, Menlo, Monaco, monospace',
+      cursorBlink: true,
+      cursorStyle: 'bar',
+      allowProposedApi: true,
+      theme: {
+        background: '#0f1117',
+        foreground: '#e0e0e0',
+        cursor: '#e0e0e0',
+        selectionBackground: 'rgba(99, 102, 241, 0.3)',
+        black: '#1a1b26', red: '#f7768e', green: '#9ece6a', yellow: '#e0af68',
+        blue: '#7aa2f7', magenta: '#bb9af7', cyan: '#7dcfff', white: '#a9b1d6',
+      },
+    });
+
+    const fitAddon = new FitAddon.FitAddon();
+    term.loadAddon(fitAddon);
+    try { term.loadAddon(new WebLinksAddon.WebLinksAddon()); } catch (_) {}
+
+    term.open(container);
+    fitAddon.fit();
+
+    // 连接 WebSocket
+    const proto = location.protocol === 'https:' ? 'wss' : 'ws';
+    const token = App.getToken();
+    const ws = new WebSocket(`${proto}://${location.host}/ws/ssh?token=${encodeURIComponent(token)}&nodeId=${encodeURIComponent(nodeId)}&cols=${term.cols}&rows=${term.rows}`);
+    ws.binaryType = 'arraybuffer';
+
+    ws.onopen = () => {
+      term.writeln('\x1b[32m✓ SSH 连接已建立\x1b[0m\r');
+    };
+
+    ws.onmessage = (e) => {
+      const data = e.data instanceof ArrayBuffer ? new Uint8Array(e.data) : e.data;
+      term.write(data);
+    };
+
+    ws.onerror = () => {
+      term.writeln('\r\n\x1b[31m✗ WebSocket 连接错误\x1b[0m');
+    };
+
+    ws.onclose = (e) => {
+      term.writeln(`\r\n\x1b[33m⚡ 连接已断开 (${e.code})\x1b[0m`);
+    };
+
+    // xterm → SSH
+    term.onData((data) => {
+      if (ws.readyState === 1) ws.send(data);
+    });
+
+    // resize
+    term.onResize(({ cols, rows }) => {
+      if (ws.readyState === 1) ws.send(JSON.stringify({ type: 'resize', cols, rows }));
+    });
+
+    // 窗口 resize → fit
+    const onResize = () => { try { fitAddon.fit(); } catch (_) {} };
+    window.addEventListener('resize', onResize);
+
+    _xtermSessions[nodeId] = { term, ws, fitAddon, onResize };
+  },
+
+  /** 销毁 xterm 会话 */
+  _destroyXterm(nodeId) {
+    const s = _xtermSessions[nodeId];
+    if (!s) return;
+    if (s.onResize) window.removeEventListener('resize', s.onResize);
+    if (s.ws && s.ws.readyState <= 1) s.ws.close();
+    s.term.dispose();
+    delete _xtermSessions[nodeId];
   },
 
   async _loadClawTab(nodeId, subTab) {
@@ -614,7 +680,14 @@ const Nodes = {
   filterByGroup(gid) { App.nodeFilter.groupId = gid; App.nodePagination.page = 1; App.selectedIds.clear(); this.renderSidebar(); this.renderTable(); this.renderPagination(); },
   onSearch(v) { App.nodeFilter.keyword = v; App.nodePagination.page = 1; this.renderTable(); this.renderPagination(); },
   onStatusFilter(v) { App.nodeFilter.status = v; App.nodePagination.page = 1; this.renderToolbar(); this.renderTable(); this.renderPagination(); },
-  expandRow(id) { App.selectedNodeId = App.selectedNodeId === id ? null : id; this.renderTable(); },
+  expandRow(id) {
+    const prev = App.selectedNodeId;
+    App.selectedNodeId = prev === id ? null : id;
+    // 收起旧节点的 xterm 会话
+    if (prev && prev !== id) this._destroyXterm(prev);
+    if (prev === id) this._destroyXterm(id);
+    this.renderTable();
+  },
 
   goPage(p) { App.nodePagination.page = p; App.selectedIds.clear(); this.renderTable(); this.renderPagination(); },
   toggleSelectAll(checked) {
@@ -782,49 +855,12 @@ const Nodes = {
     try { await App.authFetch(`/api/enroll/${encodeURIComponent(id)}/group`, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ groupId: gid }) }); App.closeModal(); } catch (e) { showToast(`移动失败: ${e.message}`, 'error'); }
   },
 
+  /** 快捷按钮 — 直接向 SSH 会话写入命令 */
   quickCmd(nodeId, cmd) {
-    const input = document.getElementById(`terminal-input-${nodeId}`);
-    if (!input) return;
-    input.value = cmd;
-    // @claude 前缀只填入不执行，等用户补充 prompt
-    if (cmd.startsWith('@claude ')) {
-      input.focus();
-      return;
-    }
-    this.execCmd(nodeId);
-  },
-
-  async execCmd(nodeId) {
-    const input = document.getElementById(`terminal-input-${nodeId}`);
-    const output = document.getElementById(`terminal-output-${nodeId}`);
-    if (!input || !input.value.trim()) return;
-    const cmd = input.value.trim();
-    input.value = '';
-    if (!terminalLogs[nodeId]) terminalLogs[nodeId] = [];
-    terminalLogs[nodeId].push({ role: 'user', text: cmd });
-    output.innerHTML += `<div class="text-primary">❯ ${escHtml(cmd)}</div><div class="text-text-muted" id="terminal-pending-${nodeId}">⏳ 执行中...</div>`;
-    output.scrollTop = output.scrollHeight;
-    try {
-      const res = await App.authFetch('/api/ai/chat', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ message: cmd, nodeId }) });
-      if (!res.ok) {
-        const text = await res.text().catch(() => '');
-        throw new Error(`请求失败 (${res.status}): ${text.slice(0, 120)}`);
-      }
-      const ct = res.headers.get('content-type') || '';
-      if (!ct.includes('json')) {
-        const text = await res.text().catch(() => '');
-        throw new Error(`非 JSON 响应: ${text.slice(0, 120)}`);
-      }
-      const data = await res.json();
-      const response = data.response || '(无响应)';
-      terminalLogs[nodeId].push({ role: 'assistant', text: response });
-      document.getElementById(`terminal-pending-${nodeId}`)?.remove();
-      output.innerHTML += `<div class="text-text-secondary whitespace-pre-wrap">${escHtml(response)}</div>`;
-    } catch (e) {
-      terminalLogs[nodeId].push({ role: 'error', text: `错误: ${e.message}` });
-      document.getElementById(`terminal-pending-${nodeId}`)?.remove();
-      output.innerHTML += `<div class="text-danger">❌ ${escHtml(e.message)}</div>`;
-    }
-    output.scrollTop = output.scrollHeight;
+    const s = _xtermSessions[nodeId];
+    if (!s || !s.ws || s.ws.readyState !== 1) return;
+    // 写入命令 + 回车
+    s.ws.send(cmd + '\n');
+    s.term.focus();
   },
 };

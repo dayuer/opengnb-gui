@@ -138,6 +138,24 @@ class SSHManager {
   }
 
   /**
+   * 创建交互式 SSH Shell（用于 Web SSH 终端）
+   * @param {object} nodeConfig - 节点配置
+   * @param {object} [ptyOpts] - PTY 选项 {cols, rows, term}
+   * @returns {Promise<import('ssh2').ClientChannel>} 可读写的双工 stream
+   */
+  async shell(nodeConfig, ptyOpts = {}) {
+    const client = await this.getConnection(nodeConfig);
+    const { cols = 80, rows = 24, term = 'xterm-256color' } = ptyOpts;
+
+    return new Promise((resolve, reject) => {
+      client.shell({ term, cols, rows }, (err, stream) => {
+        if (err) return reject(err);
+        resolve(stream);
+      });
+    });
+  }
+
+  /**
    * @alpha: 异步执行命令 — 投递到 Node 后台，立即返回
    *
    * 命令被包装为 nohup 后台脚本，执行完毕后 curl 回调 Console。
