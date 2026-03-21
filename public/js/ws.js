@@ -49,9 +49,18 @@ const WS = {
           // 刷新当前页面
           if (App.currentPage === 'dashboard') Dashboard.render($('#main-content'));
           if (App.currentPage === 'nodes') {
-            Nodes.renderSidebar();
-            Nodes.renderTable();
-            Nodes.renderPagination();
+            // 增量更新 — 只 patch 数值，不重建 DOM（消除闪动、保留焦点）
+            const prevCount = App._prevNodeCount;
+            const currCount = (msg.allNodes || App.allNodesRaw || []).length;
+            if (prevCount !== undefined && prevCount === currCount) {
+              Nodes.updateMetrics();
+            } else {
+              // 节点列表结构变化时完整重渲染
+              Nodes.renderSidebar();
+              Nodes.renderTable();
+              Nodes.renderPagination();
+            }
+            App._prevNodeCount = currCount;
           }
         }
         if (msg.type === 'chat_history') App.opsLogsCache = msg.logs || {};

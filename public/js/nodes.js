@@ -27,8 +27,8 @@ const Nodes = {
           <div class="relative z-10">
             <p class="text-xs font-bold text-text-muted uppercase tracking-widest mb-4">节点总数</p>
             <div class="flex items-baseline gap-3">
-              <span class="text-4xl font-extrabold font-headline">${allNodes.length}</span>
-              ${pending > 0 ? `<span class="text-warning text-sm font-bold flex items-center gap-1">${L('clock')} ${pending} 待审批</span>` : `<span class="text-success text-sm font-bold flex items-center gap-1">${L('check-circle')} 全部已审批</span>`}
+              <span id="summary-total" class="text-4xl font-extrabold font-headline">${allNodes.length}</span>
+              <span id="summary-pending">${pending > 0 ? `<span class="text-warning text-sm font-bold flex items-center gap-1">${L('clock')} ${pending} 待审批</span>` : `<span class="text-success text-sm font-bold flex items-center gap-1">${L('check-circle')} 全部已审批</span>`}</span>
             </div>
           </div>
           <div class="absolute -right-4 -bottom-4 opacity-[0.04] group-hover:opacity-[0.08] transition-opacity [&_svg]:w-24 [&_svg]:h-24">${L('server')}</div>
@@ -37,8 +37,8 @@ const Nodes = {
           <div class="relative z-10">
             <p class="text-xs font-bold text-text-muted uppercase tracking-widest mb-4">在线率</p>
             <div class="flex items-baseline gap-3">
-              <span class="text-4xl font-extrabold font-headline">${allNodes.length > 0 ? Math.round(online / Math.max(1, allNodes.filter(n => n.status === 'approved').length) * 100) : 0}%</span>
-              <span class="text-text-muted text-sm">${online} 在线</span>
+              <span id="summary-online-pct" class="text-4xl font-extrabold font-headline">${allNodes.length > 0 ? Math.round(online / Math.max(1, allNodes.filter(n => n.status === 'approved').length) * 100) : 0}%</span>
+              <span id="summary-online-count" class="text-text-muted text-sm">${online} 在线</span>
             </div>
           </div>
           <div class="absolute -right-4 -bottom-4 opacity-[0.04] group-hover:opacity-[0.08] transition-opacity [&_svg]:w-24 [&_svg]:h-24">${L('activity')}</div>
@@ -51,9 +51,9 @@ const Nodes = {
                 ${online > 0 ? `<div class="w-3 h-3 rounded-full bg-secondary-container ring-4 ring-surface"></div>` : ''}
                 ${offline > 0 ? `<div class="w-3 h-3 rounded-full bg-danger/40 ring-4 ring-surface"></div>` : ''}
               </div>
-              <span class="text-lg font-bold">${offline === 0 && pending === 0 ? '全部健康' : '需关注'}</span>
+              <span id="summary-health-label" class="text-lg font-bold">${offline === 0 && pending === 0 ? '全部健康' : '需关注'}</span>
             </div>
-            <p class="text-xs text-text-muted mt-4">${online} 健康 / ${offline} 离线 / ${pending} 待审批</p>
+            <p id="summary-health-detail" class="text-xs text-text-muted mt-4">${online} 健康 / ${offline} 离线 / ${pending} 待审批</p>
           </div>
           <div class="absolute -right-4 -bottom-4 opacity-[0.04] group-hover:opacity-[0.08] transition-opacity [&_svg]:w-24 [&_svg]:h-24">${L('shield')}</div>
         </div>
@@ -225,7 +225,7 @@ const Nodes = {
           <button class="p-2 rounded-lg hover:bg-elevated text-text-muted hover:text-primary transition cursor-pointer [&_svg]:w-4 [&_svg]:h-4" onclick="event.stopPropagation();Nodes.showMoveModal('${safeAttr(node.id)}')" title="移动">${L('folder-input')}</button>`;
       }
 
-      html += `<div class="bg-surface rounded-xl p-5 shadow-ambient border border-border-default hover:bg-elevated/40 transition-colors cursor-pointer group ${isCritical && !isPending ? 'border-l-4 border-l-danger/30' : ''} ${isExpanded ? 'ring-2 ring-primary/20' : ''}" onclick="Nodes.expandRow('${safeAttr(node.id)}')">
+      html += `<div class="bg-surface rounded-xl p-5 shadow-ambient border border-border-default hover:bg-elevated/40 transition-colors cursor-pointer group ${isCritical && !isPending ? 'border-l-4 border-l-danger/30' : ''} ${isExpanded ? 'ring-2 ring-primary/20' : ''}" data-node-id="${safeAttr(node.id)}" onclick="Nodes.expandRow('${safeAttr(node.id)}')">
         <div class="flex flex-wrap items-center gap-6">
           <!-- 选择 + 节点信息 -->
           <div class="flex items-center gap-4 w-56">
@@ -253,24 +253,24 @@ const Nodes = {
             ${isOnline ? `<div class="col-span-1 md:col-span-2 space-y-2">
               <div>
                 <div class="flex justify-between text-xs font-bold text-text-muted uppercase tracking-widest mb-1">
-                  <span>CPU</span><span>${cpuPct}%</span>
+                  <span>CPU</span><span data-cpu-pct>${cpuPct}%</span>
                 </div>
                 <div class="h-1.5 w-full bg-elevated rounded-full overflow-hidden">
-                  <div class="h-full rounded-full transition-all ${cpuPct > 80 ? 'bg-warning' : 'bg-primary'}" style="width:${Math.min(cpuPct, 100)}%"></div>
+                  <div data-cpu-bar class="h-full rounded-full transition-all ${cpuPct > 80 ? 'bg-warning' : 'bg-primary'}" style="width:${Math.min(cpuPct, 100)}%"></div>
                 </div>
               </div>
               <div>
                 <div class="flex justify-between text-xs font-bold text-text-muted uppercase tracking-widest mb-1">
-                  <span>内存</span><span>${memPct}%</span>
+                  <span>内存</span><span data-mem-pct>${memPct}%</span>
                 </div>
                 <div class="h-1.5 w-full bg-elevated rounded-full overflow-hidden">
-                  <div class="h-full rounded-full transition-all ${memPct > 80 ? 'bg-warning' : 'bg-primary'}" style="width:${Math.min(memPct, 100)}%"></div>
+                  <div data-mem-bar class="h-full rounded-full transition-all ${memPct > 80 ? 'bg-warning' : 'bg-primary'}" style="width:${Math.min(memPct, 100)}%"></div>
                 </div>
               </div>
             </div>
             <div class="text-right">
               <p class="text-xs font-bold text-text-muted uppercase tracking-widest mb-1.5">延迟</p>
-              <span class="text-sm font-bold ${(monitorNode?.sshLatencyMs || 0) > 500 ? 'text-danger' : ''}">${monitorNode?.sshLatencyMs || 0}ms</span>
+              <span data-latency class="text-sm font-bold ${(monitorNode?.sshLatencyMs || 0) > 500 ? 'text-danger' : ''}">${monitorNode?.sshLatencyMs || 0}ms</span>
             </div>` : `<div class="col-span-1 md:col-span-2 opacity-30 space-y-2">
               <div>
                 <div class="flex justify-between text-xs font-bold text-text-muted uppercase tracking-widest mb-1"><span>CPU</span><span>--</span></div>
@@ -338,6 +338,78 @@ const Nodes = {
           if (monitorNode) this.renderInlineDetail(panel, monitorNode);
           else panel.innerHTML = `<div class="text-sm text-text-muted flex items-center gap-2">${L('zap')} 无监控数据</div>`;
           refreshIcons();
+        }
+      }
+    }
+  },
+
+  /** 增量更新 — 只 patch 动态数值，不重建 DOM */
+  updateMetrics() {
+    const allNodes = App.allNodesRaw || [];
+    const monData = App.nodesData || [];
+    const online = monData.filter(n => n.online).length;
+    const approved = allNodes.filter(n => n.status === 'approved').length;
+    const offline = approved - online;
+    const pending = allNodes.filter(n => n.status === 'pending').length;
+
+    // --- 顶部汇总卡片 ---
+    const elTotal = $('#summary-total');
+    if (elTotal) elTotal.textContent = allNodes.length;
+    const elPending = $('#summary-pending');
+    if (elPending) elPending.innerHTML = pending > 0
+      ? `<span class="text-warning text-sm font-bold flex items-center gap-1">${L('clock')} ${pending} 待审批</span>`
+      : `<span class="text-success text-sm font-bold flex items-center gap-1">${L('check-circle')} 全部已审批</span>`;
+    const elOnlinePct = $('#summary-online-pct');
+    if (elOnlinePct) elOnlinePct.textContent = `${approved > 0 ? Math.round(online / approved * 100) : 0}%`;
+    const elOnlineCount = $('#summary-online-count');
+    if (elOnlineCount) elOnlineCount.textContent = `${online} 在线`;
+    const elHealthLabel = $('#summary-health-label');
+    if (elHealthLabel) elHealthLabel.textContent = offline === 0 && pending === 0 ? '全部健康' : '需关注';
+    const elHealthDetail = $('#summary-health-detail');
+    if (elHealthDetail) elHealthDetail.textContent = `${online} 健康 / ${offline} 离线 / ${pending} 待审批`;
+    if (elPending) refreshIcons();
+
+    // --- 节点卡片内联指标 ---
+    const wrap = $('#nodes-table-wrap');
+    if (!wrap) return;
+    for (const card of wrap.querySelectorAll('[data-node-id]')) {
+      const nid = card.dataset.nodeId;
+      const mon = monData.find(n => n.id === nid);
+      if (!mon) continue;
+      const si = mon.sysInfo || {};
+      const cpu = si.cpuUsage ?? 0;
+      const mem = si.memTotalMB > 0 ? Math.round(si.memUsedMB / si.memTotalMB * 100) : 0;
+      const lat = mon.sshLatencyMs || 0;
+
+      const cpuEl = card.querySelector('[data-cpu-pct]');
+      if (cpuEl) cpuEl.textContent = `${cpu}%`;
+      const cpuBar = card.querySelector('[data-cpu-bar]');
+      if (cpuBar) {
+        cpuBar.style.width = `${Math.min(cpu, 100)}%`;
+        cpuBar.className = `h-full rounded-full transition-all ${cpu > 80 ? 'bg-warning' : 'bg-primary'}`;
+      }
+      const memEl = card.querySelector('[data-mem-pct]');
+      if (memEl) memEl.textContent = `${mem}%`;
+      const memBar = card.querySelector('[data-mem-bar]');
+      if (memBar) {
+        memBar.style.width = `${Math.min(mem, 100)}%`;
+        memBar.className = `h-full rounded-full transition-all ${mem > 80 ? 'bg-warning' : 'bg-primary'}`;
+      }
+      const latEl = card.querySelector('[data-latency]');
+      if (latEl) {
+        latEl.textContent = `${lat}ms`;
+        latEl.className = `text-sm font-bold ${lat > 500 ? 'text-danger' : ''}`;
+      }
+    }
+
+    // --- 概览 Tab 实时更新（如果展开中）---
+    if (App.selectedNodeId) {
+      const ts = this._getTabState(App.selectedNodeId);
+      if (ts.tab === 'overview') {
+        const mon = monData.find(n => n.id === App.selectedNodeId);
+        if (mon) {
+          const contentEl = wrap.querySelector(`#inline-tab-content-${App.selectedNodeId}`);
+          if (contentEl) { contentEl.innerHTML = this._renderOverview(mon); refreshIcons(); }
         }
       }
     }
