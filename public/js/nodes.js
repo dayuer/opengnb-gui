@@ -502,7 +502,7 @@ const Nodes = {
 
   filterByGroup(gid) { App.nodeFilter.groupId = gid; App.nodePagination.page = 1; App.selectedIds.clear(); this.renderSidebar(); this.renderTable(); this.renderPagination(); },
   onSearch(v) { App.nodeFilter.keyword = v; App.nodePagination.page = 1; this.renderTable(); this.renderPagination(); },
-  onStatusFilter(v) { App.nodeFilter.status = v; App.nodePagination.page = 1; this.renderTable(); this.renderPagination(); },
+  onStatusFilter(v) { App.nodeFilter.status = v; App.nodePagination.page = 1; this.renderToolbar(); this.renderTable(); this.renderPagination(); },
   expandRow(id) { App.selectedNodeId = App.selectedNodeId === id ? null : id; this.renderTable(); },
 
   goPage(p) { App.nodePagination.page = p; App.selectedIds.clear(); this.renderTable(); this.renderPagination(); },
