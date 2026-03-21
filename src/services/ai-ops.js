@@ -290,11 +290,18 @@ class AiOps {
     ];
 
     return new Promise((resolve) => {
+      const nodeBin = process.execPath.replace(/\/[^/]+$/, ''); // 当前 node 路径的 bin 目录
+      const extraPaths = [
+        nodeBin,
+        '/root/.nvm/versions/node/v24.14.0/bin',
+        '/usr/local/bin',
+      ].join(':');
+
       execFile('claude', args, {
         cwd: '/opt/gnb-console',
         timeout: 120_000,
         maxBuffer: 1024 * 512,
-        env: { ...process.env, NO_COLOR: '1' },
+        env: { ...process.env, NO_COLOR: '1', PATH: `${extraPaths}:${process.env.PATH || ''}` },
       }, (err, stdout, stderr) => {
         if (err) {
           const msg = err.killed
