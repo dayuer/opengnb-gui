@@ -81,18 +81,23 @@ const Nodes = {
     const sb = $('#group-sidebar');
     if (!sb) return;
     const ungrouped = App.allNodesRaw.filter(n => !n.groupId).length;
+    const totalNodes = App.allNodesRaw.length;
     const f = App.nodeFilter;
     let html = `<div class="bg-surface rounded-xl shadow-ambient border border-border-default p-4 space-y-1 sticky top-20">
       <div class="text-xs font-bold text-text-muted uppercase tracking-widest mb-3 px-2">分组筛选</div>
       <div class="flex items-center gap-2 px-3 py-2 rounded-lg text-sm cursor-pointer transition ${!f.groupId ? 'bg-primary/10 text-primary font-bold' : 'text-text-secondary hover:bg-elevated'}" onclick="Nodes.filterByGroup(null)">
-        <span class="[&_svg]:w-4 [&_svg]:h-4">${L('layers')}</span> <span>全部节点</span> <span class="ml-auto text-xs font-bold">${App.allNodesRaw.length}</span>
+        <span class="[&_svg]:w-4 [&_svg]:h-4">${L('layers')}</span> <span>全部节点</span> <span class="ml-auto text-xs font-bold">${totalNodes}</span>
       </div>`;
     for (const g of App.nodeGroups) {
       const count = App.allNodesRaw.filter(n => n.groupId === g.id).length;
-      html += `<div class="flex items-center gap-2 px-3 py-2 rounded-lg text-sm cursor-pointer transition ${f.groupId === g.id ? 'bg-primary/10 text-primary font-bold' : 'text-text-secondary hover:bg-elevated'}" onclick="Nodes.filterByGroup('${safeAttr(g.id)}')">
+      html += `<div class="flex items-center gap-2 px-3 py-2 rounded-lg text-sm cursor-pointer transition group/g ${f.groupId === g.id ? 'bg-primary/10 text-primary font-bold' : 'text-text-secondary hover:bg-elevated'}" onclick="Nodes.filterByGroup('${safeAttr(g.id)}')">
         <span class="w-2.5 h-2.5 rounded-full shrink-0" style="background:${escHtml(g.color)}"></span>
-        <span class="truncate">${escHtml(g.name)}</span>
-        <span class="ml-auto text-xs font-bold">${count}</span>
+        <span class="truncate flex-1">${escHtml(g.name)}</span>
+        <span class="text-xs font-bold">${count}</span>
+        <span class="hidden group-hover/g:flex items-center gap-0.5 ml-1" onclick="event.stopPropagation()">
+          <button class="p-1 rounded text-text-muted hover:text-primary hover:bg-primary/10 transition cursor-pointer [&_svg]:w-3 [&_svg]:h-3" onclick="Groups.showEditModal('${safeAttr(g.id)}')" title="编辑">${L('pencil')}</button>
+          <button class="p-1 rounded text-text-muted hover:text-danger hover:bg-danger/10 transition cursor-pointer [&_svg]:w-3 [&_svg]:h-3" onclick="Groups.deleteGroup('${safeAttr(g.id)}')" title="删除">${L('trash-2')}</button>
+        </span>
       </div>`;
     }
     html += `<div class="flex items-center gap-2 px-3 py-2 rounded-lg text-sm cursor-pointer transition ${f.groupId === '__none' ? 'bg-primary/10 text-primary font-bold' : 'text-text-secondary hover:bg-elevated'}" onclick="Nodes.filterByGroup('__none')">
@@ -100,7 +105,42 @@ const Nodes = {
     </div>`;
     html += `<div class="border-t border-border-subtle mt-3 pt-3">
       <button class="w-full flex items-center gap-2 px-3 py-2 rounded-lg text-xs text-text-muted hover:text-primary hover:bg-primary/10 transition cursor-pointer [&_svg]:w-3.5 [&_svg]:h-3.5" onclick="Groups.showCreateModal()">${L('plus')} 新建分组</button>
-    </div></div>`;
+    </div>`;
+
+    // 节点分布
+    if (App.nodeGroups.length > 0) {
+      html += `<div class="border-t border-border-subtle mt-3 pt-3">
+        <div class="text-xs font-bold text-text-muted uppercase tracking-widest mb-2 px-2">节点分布</div>
+        <div class="space-y-2 px-1">`;
+      for (const g of App.nodeGroups) {
+        const count = App.allNodesRaw.filter(n => n.groupId === g.id).length;
+        const pct = totalNodes > 0 ? Math.round(count / totalNodes * 100) : 0;
+        html += `<div>
+          <div class="flex items-center justify-between mb-1">
+            <span class="text-[10px] text-text-muted truncate">${escHtml(g.name)}</span>
+            <span class="text-[10px] font-bold">${pct}%</span>
+          </div>
+          <div class="h-1 w-full bg-elevated rounded-full overflow-hidden">
+            <div class="h-full rounded-full transition-all" style="width:${pct}%;background:${escHtml(g.color)}"></div>
+          </div>
+        </div>`;
+      }
+      if (ungrouped > 0) {
+        const pct = totalNodes > 0 ? Math.round(ungrouped / totalNodes * 100) : 0;
+        html += `<div>
+          <div class="flex items-center justify-between mb-1">
+            <span class="text-[10px] text-text-muted">未分组</span>
+            <span class="text-[10px] font-bold">${pct}%</span>
+          </div>
+          <div class="h-1 w-full bg-elevated rounded-full overflow-hidden">
+            <div class="h-full rounded-full bg-text-muted transition-all" style="width:${pct}%"></div>
+          </div>
+        </div>`;
+      }
+      html += `</div></div>`;
+    }
+
+    html += `</div>`;
     sb.innerHTML = html;
     refreshIcons();
   },

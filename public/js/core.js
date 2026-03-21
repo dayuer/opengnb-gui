@@ -19,7 +19,6 @@ const App = {
     dashboard: '仪表盘',
     nodes: '节点管理',
     users: '团队设置',
-    groups: '分组管理',
     settings: '系统设置',
   },
 
@@ -104,7 +103,7 @@ const App = {
       case 'dashboard': Dashboard.render(container); break;
       case 'nodes':     Nodes.render(container); break;
       case 'users':     Users.render(container); break;
-      case 'groups':    Groups.render(container); break;
+      case 'groups':    this.switchPage('nodes'); return; // @alpha: 分组已融合到节点管理
       case 'settings':  Settings.render(container); break;
       default:
         container.innerHTML = `<div class="flex flex-col items-center justify-center h-64 text-text-muted">

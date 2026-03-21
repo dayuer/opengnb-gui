@@ -144,7 +144,10 @@ const Groups = {
       if (res.status === 409) { alert('同名分组已存在'); return; }
       if (!res.ok) { alert('创建失败'); return; }
       App.closeModal();
-      await Groups.render($('#main-content'));
+      // @alpha: 刷新分组数据后重新渲染节点页侧边栏
+      const gRes = await App.authFetch('/api/nodes/groups').catch(() => null);
+      if (gRes) { const d = await gRes.json(); App.nodeGroups = d.groups || []; }
+      if (App.currentPage === 'nodes') Nodes.renderSidebar();
     } catch (e) { alert(`创建失败: ${e.message}`); }
   },
 
@@ -177,7 +180,9 @@ const Groups = {
       const res = await App.authFetch(`/api/nodes/groups/${encodeURIComponent(groupId)}`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ name, color: Modal.pickedColor }) });
       if (!res.ok) { const d = await res.json(); alert(d.message || d.error || '更新失败'); return; }
       App.closeModal();
-      await Groups.render($('#main-content'));
+      const gRes = await App.authFetch('/api/nodes/groups').catch(() => null);
+      if (gRes) { const d = await gRes.json(); App.nodeGroups = d.groups || []; }
+      if (App.currentPage === 'nodes') { Nodes.renderSidebar(); Nodes.renderTable(); }
     } catch (e) { alert(`更新失败: ${e.message}`); }
   },
 
@@ -186,7 +191,9 @@ const Groups = {
     try {
       await App.authFetch(`/api/nodes/groups/${encodeURIComponent(groupId)}`, { method: 'DELETE' });
       if (App.nodeFilter?.groupId === groupId) App.nodeFilter.groupId = null;
-      await Groups.render($('#main-content'));
+      const gRes = await App.authFetch('/api/nodes/groups').catch(() => null);
+      if (gRes) { const d = await gRes.json(); App.nodeGroups = d.groups || []; }
+      if (App.currentPage === 'nodes') { Nodes.renderSidebar(); Nodes.renderTable(); }
     } catch (e) { alert(`删除失败: ${e.message}`); }
   },
 };
