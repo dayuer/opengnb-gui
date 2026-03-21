@@ -76,6 +76,16 @@ class AiOps {
       return this._handleLogs(nodeId);
     }
 
+    // 磁盘
+    if (/磁盘|disk|df/i.test(msg)) {
+      return this._handleDisk(nodeId);
+    }
+
+    // 性能
+    if (/性能|perf|performance|负载|load/i.test(msg)) {
+      return this._handlePerformance(nodeId);
+    }
+
     // 执行自定义命令: "exec <nodeId> <command>"
     if (/^(exec|run|执行)\s/i.test(msg)) {
       return this._handleExec(msg);
@@ -155,6 +165,28 @@ class AiOps {
     }
   }
 
+  async _handleDisk(nodeId) {
+    const nodeConfig = this._resolveNode(nodeId);
+    if (!nodeConfig) return { response: this._nodeNotFoundMsg(nodeId), commands: [] };
+    try {
+      const result = await this.sshManager.exec(nodeConfig, 'df -h && echo "---" && du -sh /var/log/* 2>/dev/null | sort -rh | head -5');
+      return { response: `💾 磁盘使用:\n\`\`\`\n${result.stdout.trim()}\n\`\`\``, commands: [], targetNodeId: nodeConfig.id };
+    } catch (err) {
+      return { response: `❌ 获取磁盘信息失败: ${err.message}`, commands: [], targetNodeId: nodeConfig.id };
+    }
+  }
+
+  async _handlePerformance(nodeId) {
+    const nodeConfig = this._resolveNode(nodeId);
+    if (!nodeConfig) return { response: this._nodeNotFoundMsg(nodeId), commands: [] };
+    try {
+      const result = await this.sshManager.exec(nodeConfig, 'echo "=== 负载 ==="; uptime; echo "\\n=== CPU ==="; top -bn1 | head -5; echo "\\n=== 内存 ==="; free -h; echo "\\n=== IO ==="; iostat -x 1 1 2>/dev/null || echo "iostat 不可用"');
+      return { response: `⚡ 性能概况:\n\`\`\`\n${result.stdout.trim()}\n\`\`\``, commands: [], targetNodeId: nodeConfig.id };
+    } catch (err) {
+      return { response: `❌ 获取性能信息失败: ${err.message}`, commands: [], targetNodeId: nodeConfig.id };
+    }
+  }
+
   async _handleExec(msg) {
     // 格式: exec <nodeId> <command>
     const parts = msg.replace(/^(exec|run|执行)\s+/i, '').trim();
@@ -222,6 +254,8 @@ class AiOps {
 • 重启 gnb <节点ID> — 重启 GNB 服务
 • 重启 openclaw <节点ID> — 重启 OpenClaw
 • 日志 <节点ID> — 查看最近日志
+• 磁盘 [节点ID] — 查看磁盘使用
+• 性能 [节点ID] — 查看 CPU/内存/负载
 • exec <节点ID> <命令> — 执行自定义命令（同步）
 • async exec <节点ID> <命令> — 异步执行（后台运行，WS 推送结果）`,
       commands: [],
@@ -233,7 +267,7 @@ class AiOps {
   _extractNodeId(msg) {
     // 尝试从消息中提取节点 ID
     // 支持格式: "安装 openclaw VM-0-16-debian", "安装 openclaw 到 VM-0-16-debian"
-    const cleaned = msg.replace(/^(安装|配置下发|重启|日志|状态)\s*(openclaw|claw|gnb|服务)?\s*(到|on|for)?\s*/i, '').trim();
+    const cleaned = msg.replace(/^(安装|配置下发|重启|日志|状态|磁盘|性能)\s*(openclaw|claw|gnb|服务)?\s*(到|on|for)?\s*/i, '').trim();
     if (cleaned && !cleaned.includes(' ')) return cleaned;
 
     // 如果只有一个节点，直接使用
