@@ -6,27 +6,31 @@
   <meta name="description" content="SynonClaw Console — P2P VPN 节点管理中控台，实时监控、审批注册、AI 智能运维">
   <title>SynonClaw Console</title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
-  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+  <link href="https://fonts.googleapis.com/css2?family=Manrope:wght@400;500;600;700;800&family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
   <script src="https://unpkg.com/lucide@latest/dist/umd/lucide.min.js"></script>
   <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@tailwindcss/browser@4"></link>
   <script src="https://cdn.jsdelivr.net/npm/@tailwindcss/browser@4"></script>
   <style type="text/tailwindcss">
     @theme {
-      /* 主色系 — Stitch primary #135bec */
-      --color-primary: #135bec;
-      --color-primary-light: #3b7bf0;
-      --color-primary-dark: #0e47bd;
-      --color-primary-subtle: rgba(19, 91, 236, 0.08);
-      /* 背景色 — Stitch 亮色 */
+      /* 主色系 — Indigo Cloud */
+      --color-primary: #4b41e1;
+      --color-primary-light: #645efb;
+      --color-primary-dark: #3323cc;
+      --color-primary-subtle: rgba(75, 65, 225, 0.08);
+      --color-primary-container: #e2dfff;
+      --color-secondary: #006c4a;
+      --color-secondary-container: #82f5c1;
+      /* 背景色 — Indigo Cloud Light */
       --color-surface: #ffffff;
       --color-elevated: #f2f4f6;
       --color-base: #f7f9fb;
       --color-overlay: rgba(25, 28, 30, 0.5);
+      --color-surface-container: #eceef0;
       /* 边框色 */
       --color-border-default: #e0e3e5;
       --color-border-subtle: #eceef0;
-      --color-border-focus: #135bec;
-      /* 文字色 — Stitch on-surface */
+      --color-border-focus: #4b41e1;
+      /* 文字色 — Indigo Cloud on-surface */
       --color-text-primary: #191c1e;
       --color-text-secondary: #464554;
       --color-text-muted: #767586;
@@ -36,8 +40,10 @@
       --color-warning: #ba1a1a;
       --color-danger: #ba1a1a;
       --color-info: #4b41e1;
+      --color-error-container: #ffdad6;
       /* 字体 */
       --font-sans: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+      --font-headline: 'Manrope', 'Inter', sans-serif;
       --font-mono: 'JetBrains Mono', 'Fira Code', monospace;
       /* 圆角 */
       --radius-sm: 4px;
@@ -48,7 +54,7 @@
       --shadow-sm: 0 1px 3px rgba(25, 28, 30, 0.06);
       --shadow-md: 0 4px 12px rgba(25, 28, 30, 0.08);
       --shadow-lg: 0 10px 30px rgba(25, 28, 30, 0.06);
-      --shadow-glow: 0 0 20px rgba(19, 91, 236, 0.15);
+      --shadow-glow: 0 0 20px rgba(75, 65, 225, 0.15);
       /* 字号 */
       --text-xs: 11px;
     }
@@ -77,12 +83,12 @@
 
     /* 网格点阵背景 */
     .bg-grid-pattern {
-      background-image: radial-gradient(circle, rgba(19, 91, 236, 0.08) 1px, transparent 1px);
+      background-image: radial-gradient(circle, rgba(75, 65, 225, 0.08) 1px, transparent 1px);
       background-size: 32px 32px;
     }
 
     /* 品牌渐变 */
-    .signature-gradient { background: linear-gradient(135deg, #135bec 0%, #3b7bf0 100%); }
+    .signature-gradient { background: linear-gradient(135deg, #4b41e1 0%, #645efb 100%); }
 
     /* 亮色模式环境阴影 */
     .shadow-ambient { box-shadow: 0 10px 30px rgba(25, 28, 30, 0.06); }
