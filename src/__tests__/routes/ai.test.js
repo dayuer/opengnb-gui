@@ -41,7 +41,7 @@ describe('services/ai-ops', () => {
   it('S9.4 should attempt direct cmd for unknown input', async () => {
     const ai = createAiOps();
     const result = await ai.chat('随便说一句');
-    assert.ok(result.response.includes('无法识别指令'));
+    assert.ok(result.response.includes('请指定目标节点'));
   });
 
   // S9.5: 黑名单拦截

@@ -265,10 +265,12 @@ class AiOps {
    * 直接执行 Linux 命令（落底处理）
    */
   async _handleDirectCmd(cmd, nodeId) {
-    const nodeConfig = this._resolveNode(nodeId);
+    // 先尝试用提取的 nodeId，失败则 auto-select（单节点场景）
+    let nodeConfig = this._resolveNode(nodeId);
+    if (!nodeConfig) nodeConfig = this._resolveNode(null);
     if (!nodeConfig) {
       return {
-        response: `无法识别指令“${cmd}”，且未找到目标节点。\n输入 help 查看内置指令。`,
+        response: `请指定目标节点。可用节点: ${this.nodesConfig.map(n => n.id).join(', ') || '无'}\n输入 help 查看内置指令。`,
         commands: [],
       };
     }
