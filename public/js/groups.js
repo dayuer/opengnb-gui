@@ -1,67 +1,137 @@
 'use strict';
-// @alpha: 分组管理模块
+// @alpha: 分组管理 — Stitch "Team & Member Management" 风格
 
 const Groups = {
   async render(container) {
-    container.innerHTML = `<div class="space-y-4">
-      <div class="flex items-center justify-between">
-        <h3 class="text-lg font-semibold">分组管理</h3>
-        <button class="px-4 py-2 text-sm rounded-lg bg-primary hover:bg-primary-light text-white transition cursor-pointer flex items-center gap-1.5" onclick="Groups.showCreateModal()">${L('plus')} 创建分组</button>
+    const res = await App.authFetch('/api/nodes/groups').catch(() => null);
+    const data = res ? await res.json() : {};
+    const groups = data.groups || [];
+    App.nodeGroups = groups;
+
+    const totalNodes = App.nodesData?.length || 0;
+    const groupedNodes = groups.reduce((s, g) => s + (g.nodeCount ?? 0), 0);
+    const ungrouped = Math.max(0, totalNodes - groupedNodes);
+
+    container.innerHTML = `<div class="space-y-8">
+      <!-- 页面标题 -->
+      <div class="flex flex-col md:flex-row md:items-end justify-between gap-6">
+        <div>
+          <h1 class="text-3xl font-extrabold tracking-tight font-headline mb-2">节点分组</h1>
+          <p class="text-text-muted max-w-lg leading-relaxed">按地域、职能或业务线组织你的节点，实现精细化管理。</p>
+        </div>
+        <button class="px-5 py-2.5 signature-gradient text-white rounded-lg font-bold text-sm shadow-lg shadow-primary/20 hover:scale-[1.02] active:scale-95 transition-all flex items-center gap-2 cursor-pointer" onclick="Groups.showCreateModal()">
+          ${L('plus')}<span>创建分组</span>
+        </button>
       </div>
-      <div id="groups-table-wrap" class="text-text-muted">加载中...</div>
+
+      <!-- 8:4 网格布局 -->
+      <div class="grid grid-cols-12 gap-8 items-start">
+        <!-- 左侧: 分组卡片列表 -->
+        <div class="col-span-12 lg:col-span-8 space-y-4" id="groups-list-wrap">
+          ${groups.length > 0 ? groups.map(g => {
+            const nodeCount = g.nodeCount ?? 0;
+            const created = g.createdAt ? new Date(g.createdAt).toLocaleDateString() : '—';
+            return `<div class="bg-surface rounded-xl shadow-ambient border border-border-default p-6 hover:shadow-md transition-all group">
+              <div class="flex items-center justify-between">
+                <div class="flex items-center gap-4">
+                  <div class="w-12 h-12 rounded-xl flex items-center justify-center text-white font-bold text-lg font-headline shadow-sm" style="background:${escHtml(g.color)}">
+                    ${escHtml(g.name.charAt(0).toUpperCase())}
+                  </div>
+                  <div>
+                    <div class="font-bold font-headline text-lg">${escHtml(g.name)}</div>
+                    <div class="text-xs text-text-muted">创建于 ${created}</div>
+                  </div>
+                </div>
+                <div class="flex items-center gap-3">
+                  <span class="px-3 py-1 bg-primary/10 text-primary rounded-full text-xs font-bold">${nodeCount} 节点</span>
+                  <div class="flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                    <button class="p-2 rounded-lg text-text-muted hover:text-primary hover:bg-primary/10 transition cursor-pointer [&_svg]:w-4 [&_svg]:h-4" onclick="Groups.showEditModal('${safeAttr(g.id)}')" title="编辑">${L('pencil')}</button>
+                    <button class="p-2 rounded-lg text-text-muted hover:text-danger hover:bg-danger/10 transition cursor-pointer [&_svg]:w-4 [&_svg]:h-4" onclick="Groups.deleteGroup('${safeAttr(g.id)}')" title="删除">${L('trash-2')}</button>
+                  </div>
+                </div>
+              </div>
+            </div>`;
+          }).join('') : `<div class="bg-surface rounded-xl shadow-ambient border border-border-default p-12 text-center">
+            <div class="[&_svg]:w-10 [&_svg]:h-10 text-text-muted mb-3 flex justify-center">${L('layers')}</div>
+            <p class="text-text-muted text-sm">暂无分组，点击「创建分组」开始</p>
+          </div>`}
+        </div>
+
+        <!-- 右侧: 统计 + 分布 -->
+        <div class="col-span-12 lg:col-span-4 space-y-6">
+          <!-- 统计卡片 -->
+          <div class="grid grid-cols-2 gap-4">
+            <div class="signature-gradient p-5 rounded-xl text-white flex flex-col justify-between h-32 shadow-lg shadow-primary/20">
+              <span class="[&_svg]:w-5 [&_svg]:h-5 opacity-60">${L('layers')}</span>
+              <div>
+                <div class="text-3xl font-extrabold font-headline">${groups.length}</div>
+                <div class="text-xs font-bold opacity-70 uppercase tracking-widest">分组</div>
+              </div>
+            </div>
+            <div class="bg-surface p-5 rounded-xl border border-border-default flex flex-col justify-between h-32">
+              <span class="[&_svg]:w-5 [&_svg]:h-5 text-text-muted">${L('inbox')}</span>
+              <div>
+                <div class="text-3xl font-extrabold font-headline">${ungrouped}</div>
+                <div class="text-xs font-bold text-text-muted uppercase tracking-widest">未分组</div>
+              </div>
+            </div>
+          </div>
+
+          <!-- 节点分布列表 -->
+          <div class="bg-surface p-6 rounded-xl shadow-ambient border border-border-default">
+            <h3 class="font-headline font-extrabold tracking-tight mb-4">节点分布</h3>
+            <div class="space-y-3">
+              ${groups.map(g => {
+                const pct = totalNodes > 0 ? Math.round((g.nodeCount ?? 0) / totalNodes * 100) : 0;
+                return `<div>
+                  <div class="flex items-center justify-between mb-1.5">
+                    <div class="flex items-center gap-2">
+                      <div class="w-2.5 h-2.5 rounded-full" style="background:${escHtml(g.color)}"></div>
+                      <span class="text-xs font-medium">${escHtml(g.name)}</span>
+                    </div>
+                    <span class="text-xs font-bold">${pct}%</span>
+                  </div>
+                  <div class="h-1.5 w-full bg-elevated rounded-full overflow-hidden">
+                    <div class="h-full rounded-full transition-all" style="width:${pct}%;background:${escHtml(g.color)}"></div>
+                  </div>
+                </div>`;
+              }).join('')}
+              ${ungrouped > 0 ? `<div>
+                <div class="flex items-center justify-between mb-1.5">
+                  <div class="flex items-center gap-2">
+                    <div class="w-2.5 h-2.5 rounded-full bg-text-muted"></div>
+                    <span class="text-xs font-medium">未分组</span>
+                  </div>
+                  <span class="text-xs font-bold">${totalNodes > 0 ? Math.round(ungrouped / totalNodes * 100) : 0}%</span>
+                </div>
+                <div class="h-1.5 w-full bg-elevated rounded-full overflow-hidden">
+                  <div class="h-full rounded-full bg-text-muted transition-all" style="width:${totalNodes > 0 ? Math.round(ungrouped / totalNodes * 100) : 0}%"></div>
+                </div>
+              </div>` : ''}
+            </div>
+          </div>
+        </div>
+      </div>
     </div>`;
     refreshIcons();
-    await this.loadTable();
-  },
-
-  async loadTable() {
-    const wrap = $('#groups-table-wrap');
-    if (!wrap) return;
-    try {
-      const res = await App.authFetch('/api/nodes/groups');
-      const data = await res.json();
-      const groups = data.groups || [];
-      App.nodeGroups = groups;
-
-      if (groups.length === 0) { wrap.innerHTML = `<div class="text-text-muted text-sm text-center py-10">暂无分组，点击「创建分组」开始</div>`; return; }
-
-      let html = `<div class="bg-surface rounded-lg border border-border-default overflow-hidden">
-        <table class="w-full text-sm"><thead><tr class="border-b border-border-default text-xs text-text-muted">
-          <th class="text-left px-4 py-2.5 font-medium">颜色</th>
-          <th class="text-left px-4 py-2.5 font-medium">名称</th>
-          <th class="text-left px-4 py-2.5 font-medium">节点数</th>
-          <th class="text-left px-4 py-2.5 font-medium">创建时间</th>
-          <th class="text-left px-4 py-2.5 font-medium">操作</th>
-        </tr></thead><tbody>`;
-      for (const g of groups) {
-        const created = g.createdAt ? new Date(g.createdAt).toLocaleString() : '—';
-        html += `<tr class="border-b border-border-subtle hover:bg-elevated/50 transition">
-          <td class="px-4 py-2.5"><span class="w-4 h-4 rounded-full inline-block" style="background:${escHtml(g.color)}"></span></td>
-          <td class="px-4 py-2.5 font-medium">${escHtml(g.name)}</td>
-          <td class="px-4 py-2.5 text-text-secondary">${g.nodeCount ?? 0}</td>
-          <td class="px-4 py-2.5 text-text-secondary">${created}</td>
-          <td class="px-4 py-2.5"><div class="flex gap-1">
-            <button class="p-1 rounded text-text-muted hover:text-text-primary hover:bg-elevated transition cursor-pointer" onclick="Groups.showEditModal('${safeAttr(g.id)}')" title="编辑">${L('pencil')}</button>
-            <button class="p-1 rounded text-text-muted hover:text-danger hover:bg-danger/10 transition cursor-pointer" onclick="Groups.deleteGroup('${safeAttr(g.id)}')" title="删除">${L('trash-2')}</button>
-          </div></td>
-        </tr>`;
-      }
-      html += `</tbody></table></div>`;
-      wrap.innerHTML = html;
-      refreshIcons();
-    } catch (e) { wrap.innerHTML = `<div class="text-text-muted text-sm">加载失败: ${escHtml(e.message)}</div>`; }
   },
 
   showCreateModal() {
     Modal.show(`
-      <h3 class="text-base font-semibold mb-4">新建分组</h3>
-      <label class="block text-xs text-text-secondary mb-1">分组名称</label>
-      <input type="text" id="group-name-input" placeholder="输入分组名称..." autofocus class="w-full bg-elevated border border-border-default rounded-lg px-3 py-2 text-sm text-text-primary mb-3 outline-none focus:border-primary">
-      <label class="block text-xs text-text-secondary mb-1">颜色</label>
-      ${Modal.renderColorPicker()}
-      <div class="flex justify-end gap-2 mt-5">
-        <button class="px-4 py-2 text-sm rounded-lg bg-elevated hover:bg-border-default text-text-secondary transition cursor-pointer" onclick="App.closeModal()">取消</button>
-        <button class="px-4 py-2 text-sm rounded-lg bg-primary hover:bg-primary-light text-white transition cursor-pointer" onclick="Groups.createGroup()">创建</button>
+      <h3 class="text-lg font-bold font-headline mb-6">新建分组</h3>
+      <div class="space-y-4">
+        <div class="space-y-2">
+          <label class="block text-sm font-medium">分组名称</label>
+          <input type="text" id="group-name-input" placeholder="例如：雅加达" autofocus class="w-full bg-elevated border border-border-default rounded-lg px-4 py-2.5 text-sm outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary transition-all">
+        </div>
+        <div class="space-y-2">
+          <label class="block text-sm font-medium">颜色</label>
+          ${Modal.renderColorPicker()}
+        </div>
+      </div>
+      <div class="flex justify-end gap-3 mt-6">
+        <button class="px-5 py-2.5 text-sm font-semibold text-text-muted hover:bg-elevated rounded-lg transition cursor-pointer" onclick="App.closeModal()">取消</button>
+        <button class="px-6 py-2.5 text-sm font-bold signature-gradient text-white rounded-lg shadow-lg shadow-primary/20 hover:scale-[1.02] active:scale-95 transition-all cursor-pointer" onclick="Groups.createGroup()">创建</button>
       </div>
     `);
   },
@@ -74,7 +144,7 @@ const Groups = {
       if (res.status === 409) { alert('同名分组已存在'); return; }
       if (!res.ok) { alert('创建失败'); return; }
       App.closeModal();
-      await this.loadTable();
+      await Groups.render($('#main-content'));
     } catch (e) { alert(`创建失败: ${e.message}`); }
   },
 
@@ -82,14 +152,20 @@ const Groups = {
     const group = App.nodeGroups.find(g => g.id === groupId);
     if (!group) return;
     Modal.show(`
-      <h3 class="text-base font-semibold mb-4">编辑分组</h3>
-      <label class="block text-xs text-text-secondary mb-1">分组名称</label>
-      <input type="text" id="edit-group-name" value="${escHtml(group.name)}" autofocus class="w-full bg-elevated border border-border-default rounded-lg px-3 py-2 text-sm text-text-primary mb-3 outline-none focus:border-primary">
-      <label class="block text-xs text-text-secondary mb-1">颜色</label>
-      ${Modal.renderColorPicker(group.color)}
-      <div class="flex justify-end gap-2 mt-5">
-        <button class="px-4 py-2 text-sm rounded-lg bg-elevated hover:bg-border-default text-text-secondary transition cursor-pointer" onclick="App.closeModal()">取消</button>
-        <button class="px-4 py-2 text-sm rounded-lg bg-primary hover:bg-primary-light text-white transition cursor-pointer" onclick="Groups.updateGroup('${safeAttr(groupId)}')">保存</button>
+      <h3 class="text-lg font-bold font-headline mb-6">编辑分组</h3>
+      <div class="space-y-4">
+        <div class="space-y-2">
+          <label class="block text-sm font-medium">分组名称</label>
+          <input type="text" id="edit-group-name" value="${escHtml(group.name)}" autofocus class="w-full bg-elevated border border-border-default rounded-lg px-4 py-2.5 text-sm outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary transition-all">
+        </div>
+        <div class="space-y-2">
+          <label class="block text-sm font-medium">颜色</label>
+          ${Modal.renderColorPicker(group.color)}
+        </div>
+      </div>
+      <div class="flex justify-end gap-3 mt-6">
+        <button class="px-5 py-2.5 text-sm font-semibold text-text-muted hover:bg-elevated rounded-lg transition cursor-pointer" onclick="App.closeModal()">取消</button>
+        <button class="px-6 py-2.5 text-sm font-bold signature-gradient text-white rounded-lg shadow-lg shadow-primary/20 hover:scale-[1.02] active:scale-95 transition-all cursor-pointer" onclick="Groups.updateGroup('${safeAttr(groupId)}')">保存</button>
       </div>
     `);
   },
@@ -101,7 +177,7 @@ const Groups = {
       const res = await App.authFetch(`/api/nodes/groups/${encodeURIComponent(groupId)}`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ name, color: Modal.pickedColor }) });
       if (!res.ok) { const d = await res.json(); alert(d.message || d.error || '更新失败'); return; }
       App.closeModal();
-      await this.loadTable();
+      await Groups.render($('#main-content'));
     } catch (e) { alert(`更新失败: ${e.message}`); }
   },
 
@@ -109,8 +185,8 @@ const Groups = {
     if (!confirm('确认删除此分组？节点将回归未分组')) return;
     try {
       await App.authFetch(`/api/nodes/groups/${encodeURIComponent(groupId)}`, { method: 'DELETE' });
-      if (App.nodeFilter.groupId === groupId) App.nodeFilter.groupId = null;
-      await this.loadTable();
+      if (App.nodeFilter?.groupId === groupId) App.nodeFilter.groupId = null;
+      await Groups.render($('#main-content'));
     } catch (e) { alert(`删除失败: ${e.message}`); }
   },
 };
