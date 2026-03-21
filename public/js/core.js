@@ -18,7 +18,7 @@ const App = {
   PAGE_TITLES: {
     dashboard: '仪表盘',
     nodes: '节点管理',
-    users: '用户管理',
+    users: '团队设置',
     groups: '分组管理',
     settings: '系统设置',
   },
