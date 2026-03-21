@@ -806,6 +806,15 @@ const Nodes = {
     output.scrollTop = output.scrollHeight;
     try {
       const res = await App.authFetch('/api/ai/chat', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ message: cmd, nodeId }) });
+      if (!res.ok) {
+        const text = await res.text().catch(() => '');
+        throw new Error(`请求失败 (${res.status}): ${text.slice(0, 120)}`);
+      }
+      const ct = res.headers.get('content-type') || '';
+      if (!ct.includes('json')) {
+        const text = await res.text().catch(() => '');
+        throw new Error(`非 JSON 响应: ${text.slice(0, 120)}`);
+      }
       const data = await res.json();
       const response = data.response || '(无响应)';
       terminalLogs[nodeId].push({ role: 'assistant', text: response });

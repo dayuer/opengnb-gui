@@ -12,24 +12,28 @@ function createAiRouter(aiOps, saveOpsLog) {
 
   // POST /api/ai/chat — 运维指令
   router.post('/chat', async (req, res) => {
-    const { message, nodeId } = req.body;
-    if (!message) {
-      return res.status(400).json({ error: '缺少 message 参数' });
+    try {
+      const { message, nodeId } = req.body;
+      if (!message) {
+        return res.status(400).json({ error: '缺少 message 参数' });
+      }
+
+      // 运行命令路由
+      const result = await aiOps.chat(message);
+
+      // 确定日志归属的节点
+      const logNodeId = result.targetNodeId || nodeId || '_global';
+
+      // 持久化
+      if (saveOpsLog) {
+        saveOpsLog(logNodeId, 'user', message);
+        saveOpsLog(logNodeId, 'assistant', result.response);
+      }
+
+      res.json(result);
+    } catch (err) {
+      res.status(500).json({ response: `❌ 服务端异常: ${err.message}`, commands: [] });
     }
-
-    // 运行命令路由
-    const result = await aiOps.chat(message);
-
-    // 确定日志归属的节点
-    const logNodeId = result.targetNodeId || nodeId || '_global';
-
-    // 持久化
-    if (saveOpsLog) {
-      saveOpsLog(logNodeId, 'user', message);
-      saveOpsLog(logNodeId, 'assistant', result.response);
-    }
-
-    res.json(result);
   });
 
   // POST /api/ai/confirm — 确认执行
