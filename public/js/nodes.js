@@ -520,32 +520,45 @@ const Nodes = {
     </div>`;
   },
 
-  // @alpha: AI Chat 终端 — 自然语言 → Claude Code 流式执行
+  // @alpha: AI Ops Terminal — Stitch 设计对齐
   _renderTerminal(node) {
     const shortcuts = [
-      { prompt: '请检查 GNB 和 OpenClaw 服务状态', icon: 'activity', label: '状态' },
+      { prompt: '请检查 GNB 和 OpenClaw 服务状态', icon: 'activity', label: '状态检查' },
       { prompt: '请重启 GNB 服务', icon: 'refresh-cw', label: '重启 GNB' },
-      { prompt: '请查看 GNB 和 OpenClaw 最近 30 条日志', icon: 'file-text', label: '日志' },
-      { prompt: '请检查磁盘空间使用情况', icon: 'hard-drive', label: '磁盘' },
+      { prompt: '请查看 GNB 和 OpenClaw 最近 30 条日志', icon: 'file-text', label: '查看日志' },
+      { prompt: '请检查磁盘空间使用情况', icon: 'hard-drive', label: '磁盘用量' },
       { prompt: '请查看系统性能概况（CPU/负载/进程）', icon: 'gauge', label: '性能' },
-      { prompt: '请查看内存使用情况', icon: 'cpu', label: '内存' },
+      { prompt: '请查看内存使用情况', icon: 'memory-stick', label: '内存' },
     ];
     const maximized = this._termMaximized;
-    const h = maximized ? 'calc(100vh - 280px)' : '320px';
-    return `<div class="rounded-lg border border-border-default overflow-hidden flex flex-col" id="terminal-wrap-${safeAttr(node.id)}" style="background:#fafbfc">
-      <div class="flex items-center gap-1.5 px-3 py-2 border-b border-border-subtle flex-wrap" style="background:#f3f4f6">
-        <span class="text-xs text-text-muted mr-1 [&_svg]:w-3 [&_svg]:h-3 flex items-center gap-1">${L('zap')} 快捷</span>
-        ${shortcuts.map(s => `<button class="px-2 py-0.5 text-xs rounded-full border border-border-subtle hover:border-primary/40 hover:bg-primary/10 text-text-secondary hover:text-primary transition cursor-pointer flex items-center gap-1 [&_svg]:w-3 [&_svg]:h-3" onclick="Nodes.quickCmd('${safeAttr(node.id)}','${safeAttr(s.prompt)}')">${L(s.icon)} ${s.label}</button>`).join('')}
-        <button class="ml-auto px-2 py-0.5 text-xs rounded-full border border-border-subtle hover:border-primary/40 hover:bg-primary/10 text-text-secondary hover:text-primary transition cursor-pointer flex items-center gap-1 [&_svg]:w-3 [&_svg]:h-3" onclick="Nodes.toggleTerminalSize('${safeAttr(node.id)}')" title="${maximized ? '还原' : '最大化'}">${L(maximized ? 'minimize-2' : 'maximize-2')}</button>
+    const hClass = maximized ? 'h-[calc(100vh-280px)]' : 'h-80';
+    const nid = safeAttr(node.id);
+    return `<div class="rounded-xl border border-border-default overflow-hidden flex flex-col bg-surface shadow-md" id="terminal-wrap-${nid}">
+      <!-- 深色头部栏 -->
+      <div class="flex items-center gap-3 px-4 py-2.5 bg-[#1a1b2e]">
+        <span class="text-white text-xs font-bold tracking-tight flex items-center gap-1.5 [&_svg]:w-3.5 [&_svg]:h-3.5">${L('terminal')} AI Ops Terminal</span>
+        <span id="term-status-${nid}" class="flex items-center gap-1.5 text-[10px] font-semibold text-emerald-400 uppercase tracking-widest"><span class="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse"></span>连接中</span>
+        <span class="px-2 py-0.5 rounded-md bg-white/10 text-white/80 text-[10px] font-mono">${escHtml(node.name || node.id)}</span>
+        <div class="ml-auto flex items-center gap-1">
+          <button class="p-1 rounded text-white/50 hover:text-white hover:bg-white/10 transition cursor-pointer [&_svg]:w-3.5 [&_svg]:h-3.5" onclick="Nodes.toggleTerminalSize('${nid}')" title="${maximized ? '还原' : '最大化'}">${L(maximized ? 'minimize-2' : 'maximize-2')}</button>
+        </div>
       </div>
-      <div id="chat-messages-${safeAttr(node.id)}" class="overflow-y-auto px-4 py-3 space-y-3" style="height:${h};scroll-behavior:smooth">
-        <div class="flex gap-2 items-start"><div class="w-6 h-6 rounded-full flex items-center justify-center text-xs flex-shrink-0" style="background:linear-gradient(135deg,#7c5cfc,#a78bfa)">🤖</div><div class="text-sm leading-relaxed" style="color:#374151">你好！我是节点 <strong>${node.name || node.id}</strong> 的 AI 运维助手。用自然语言告诉我你需要做什么。</div></div>
+      <!-- 快捷按钮栏 -->
+      <div class="flex items-center gap-1.5 px-4 py-2 border-b border-border-subtle bg-base overflow-x-auto">
+        ${shortcuts.map(s => `<button class="px-2.5 py-1 text-xs rounded-full border border-border-default hover:border-primary/40 hover:bg-primary/8 text-text-secondary hover:text-primary transition cursor-pointer flex items-center gap-1 whitespace-nowrap [&_svg]:w-3 [&_svg]:h-3" onclick="Nodes.quickCmd('${nid}','${safeAttr(s.prompt)}')">${L(s.icon)} ${s.label}</button>`).join('')}
       </div>
-      <div class="px-3 py-2 border-t border-border-subtle flex gap-2 items-center" style="background:#f9fafb">
-        <input id="chat-input-${safeAttr(node.id)}" type="text" placeholder="用自然语言描述运维任务..." class="flex-1 px-3 py-1.5 text-sm rounded-full border border-border-subtle focus:border-primary focus:outline-none" style="background:#fff" onkeydown="if(event.key==='Enter'){Nodes.sendChat('${safeAttr(node.id)}');event.preventDefault()}" />
-        <button onclick="Nodes.sendChat('${safeAttr(node.id)}')" class="px-3 py-1.5 text-xs rounded-full text-white cursor-pointer flex items-center gap-1 [&_svg]:w-3.5 [&_svg]:h-3.5 hover:opacity-90 transition" style="background:linear-gradient(135deg,#7c5cfc,#6d4de8)">${L('send')} 发送</button>
+      <!-- 消息区域 -->
+      <div id="chat-messages-${nid}" class="overflow-y-auto px-4 py-4 space-y-4 scroll-smooth bg-surface ${hClass}">
+        <div class="flex gap-2.5 items-start"><div class="w-7 h-7 rounded-full signature-gradient flex items-center justify-center text-xs text-white flex-shrink-0 shadow-sm">AI</div><div class="bg-base border border-border-subtle rounded-xl rounded-tl-sm px-3.5 py-2.5 text-sm text-text-secondary leading-relaxed max-w-[85%]">你好！我是节点 <strong class="text-text-primary">${escHtml(node.name || node.id)}</strong> 的 AI 运维助手。用自然语言告诉我你需要做什么。</div></div>
       </div>
-      <div class="px-3 py-1 text-center" style="background:#f3f4f6"><span class="text-[10px]" style="color:#9ca3af">Powered by Claude Code · 命令通过 SSH 执行</span></div>
+      <!-- 输入区域 -->
+      <div class="px-4 py-3 border-t border-border-default bg-base flex gap-2.5 items-center">
+        <input id="chat-input-${nid}" type="text" placeholder="用自然语言描述运维任务..." class="flex-1 px-4 py-2 text-sm rounded-xl bg-surface border border-border-default focus:border-primary focus:ring-2 focus:ring-primary/20 outline-none transition-all placeholder:text-text-muted" onkeydown="if(event.key==='Enter'){Nodes.sendChat('${nid}');event.preventDefault()}" />
+        <span class="hidden sm:flex items-center gap-1 px-2 py-1 rounded-md bg-elevated text-[10px] text-text-muted font-medium [&_svg]:w-3 [&_svg]:h-3">${L('bot')} Claude Code</span>
+        <button onclick="Nodes.sendChat('${nid}')" class="px-4 py-2 text-xs font-semibold rounded-xl signature-gradient text-white cursor-pointer flex items-center gap-1.5 [&_svg]:w-3.5 [&_svg]:h-3.5 hover:scale-[1.02] active:scale-95 transition-all shadow-sm shadow-primary/20">${L('send')} 发送</button>
+      </div>
+      <!-- 页脚 -->
+      <div class="px-4 py-1.5 text-center border-t border-border-subtle bg-base"><span class="text-[10px] text-text-muted font-medium">Powered by Claude Code · 命令通过 SSH 执行</span></div>
     </div>`;
   },
 
@@ -554,7 +567,10 @@ const Nodes = {
   toggleTerminalSize(nodeId) {
     this._termMaximized = !this._termMaximized;
     const msgEl = document.getElementById(`chat-messages-${nodeId}`);
-    if (msgEl) msgEl.style.height = this._termMaximized ? 'calc(100vh - 280px)' : '320px';
+    if (msgEl) {
+      msgEl.classList.toggle('h-80', !this._termMaximized);
+      msgEl.classList.toggle('h-[calc(100vh-280px)]', this._termMaximized);
+    }
     const wrap = document.getElementById(`terminal-wrap-${nodeId}`);
     if (wrap) {
       const btn = wrap.querySelector('[title="最大化"], [title="还原"]');
@@ -582,20 +598,20 @@ const Nodes = {
     s.ws.send(JSON.stringify({ type: 'chat', text }));
   },
 
-  // @alpha: 追加消息到聊天区域
+  // @alpha: 追加消息到聊天区域 — 三种角色样式
   _appendMsg(nodeId, role, content) {
     const box = document.getElementById(`chat-messages-${nodeId}`);
     if (!box) return;
     const div = document.createElement('div');
     if (role === 'user') {
       div.className = 'flex justify-end';
-      div.innerHTML = `<div class="px-3 py-1.5 rounded-2xl text-sm text-white max-w-[80%]" style="background:linear-gradient(135deg,#7c5cfc,#6d4de8)">${this._escHtml(content)}</div>`;
+      div.innerHTML = `<div class="px-3.5 py-2 rounded-xl rounded-tr-sm text-sm text-white max-w-[80%] signature-gradient shadow-sm">${this._escHtml(content)}</div>`;
     } else if (role === 'ai') {
-      div.className = 'flex gap-2 items-start ai-msg';
-      div.innerHTML = `<div class="w-6 h-6 rounded-full flex items-center justify-center text-xs flex-shrink-0" style="background:linear-gradient(135deg,#7c5cfc,#a78bfa)">🤖</div><div class="text-sm leading-relaxed max-w-[90%] ai-text" style="color:#374151"></div>`;
+      div.className = 'flex gap-2.5 items-start ai-msg';
+      div.innerHTML = `<div class="w-7 h-7 rounded-full signature-gradient flex items-center justify-center text-xs text-white flex-shrink-0 shadow-sm">AI</div><div class="bg-base border border-border-subtle rounded-xl rounded-tl-sm px-3.5 py-2.5 text-sm text-text-secondary leading-relaxed max-w-[85%] ai-text"></div>`;
     } else {
-      div.className = 'text-center';
-      div.innerHTML = `<span class="text-xs px-2 py-0.5 rounded-full" style="color:#9ca3af;background:#f3f4f6">${this._escHtml(content)}</span>`;
+      div.className = 'flex justify-center';
+      div.innerHTML = `<span class="text-[10px] px-3 py-1 rounded-full bg-elevated text-text-muted font-medium">${this._escHtml(content)}</span>`;
     }
     box.appendChild(div);
     box.scrollTop = box.scrollHeight;
@@ -618,6 +634,19 @@ const Nodes = {
     return d.innerHTML;
   },
 
+  // @alpha: 更新头部连接状态指示
+  _updateTermStatus(nodeId, connected) {
+    const el = document.getElementById(`term-status-${nodeId}`);
+    if (!el) return;
+    if (connected) {
+      el.className = 'flex items-center gap-1.5 text-[10px] font-semibold text-emerald-400 uppercase tracking-widest';
+      el.innerHTML = '<span class="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse"></span>已连接';
+    } else {
+      el.className = 'flex items-center gap-1.5 text-[10px] font-semibold text-red-400 uppercase tracking-widest';
+      el.innerHTML = '<span class="w-1.5 h-1.5 rounded-full bg-red-400"></span>已断开';
+    }
+  },
+
   // @alpha: 初始化 AI Chat WebSocket
   _initChat(nodeId) {
     if (_chatSessions[nodeId]) return;
@@ -631,6 +660,7 @@ const Nodes = {
     let aiBuf = ''; // 累积当前 AI 响应文本
 
     ws.onopen = () => {
+      this._updateTermStatus(nodeId, true);
       this._appendMsg(nodeId, 'system', '✓ AI 助手已连接');
     };
 
@@ -687,10 +717,12 @@ const Nodes = {
     };
 
     ws.onerror = () => {
+      this._updateTermStatus(nodeId, false);
       this._appendMsg(nodeId, 'system', '❌ 连接错误');
     };
 
     ws.onclose = (e) => {
+      this._updateTermStatus(nodeId, false);
       this._appendMsg(nodeId, 'system', `连接已断开 (${e.code})`);
       delete _chatSessions[nodeId];
     };
@@ -698,15 +730,15 @@ const Nodes = {
     _chatSessions[nodeId] = { ws };
   },
 
-  // @alpha: 简易 Markdown → HTML（代码块 + 加粗 + 行内代码）
+  // @alpha: Markdown → HTML — 深色代码块 + Tailwind 类名
   _renderMd(text) {
     let html = this._escHtml(text);
-    // 代码块
-    html = html.replace(/```([\s\S]*?)```/g, '<pre style="background:#f3f4f6;padding:8px 12px;border-radius:6px;font-size:12px;overflow-x:auto;margin:6px 0;font-family:monospace;color:#1f2937">$1</pre>');
+    // 代码块 — 深色背景
+    html = html.replace(/```([\s\S]*?)```/g, '<pre class="bg-[#1e1e2e] text-emerald-300 px-3.5 py-3 rounded-lg text-xs overflow-x-auto my-2 font-mono leading-relaxed">$1</pre>');
     // 行内代码
-    html = html.replace(/`([^`]+)`/g, '<code style="background:#f3f4f6;padding:1px 4px;border-radius:3px;font-size:12px;font-family:monospace">$1</code>');
+    html = html.replace(/`([^`]+)`/g, '<code class="bg-elevated text-primary px-1.5 py-0.5 rounded text-xs font-mono">$1</code>');
     // 加粗
-    html = html.replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>');
+    html = html.replace(/\*\*([^*]+)\*\*/g, '<strong class="text-text-primary font-semibold">$1</strong>');
     // 换行
     html = html.replace(/\n/g, '<br>');
     return html;
