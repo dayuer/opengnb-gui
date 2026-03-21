@@ -38,7 +38,7 @@ function createAuthRouter(store) {
     // @alpha: 若用户尚无 apiToken 则自动生成
     let apiToken = user.apiToken || '';
     if (!apiToken) {
-      apiToken = crypto.randomBytes(5).toString('hex');
+      apiToken = crypto.randomBytes(16).toString('hex');
       store._stmts.updateApiToken.run(apiToken, user.id);
     }
 
@@ -117,7 +117,7 @@ function createAuthRouter(store) {
 
   /** POST /api/auth/api-token/refresh — 重新生成 apiToken */
   router.post('/api-token/refresh', requireAuth, (req, res) => {
-    const apiToken = crypto.randomBytes(5).toString('hex');
+    const apiToken = crypto.randomBytes(16).toString('hex');
     store._stmts.updateApiToken.run(apiToken, req.user.userId);
     res.json({ apiToken, note: '旧 token 已失效' });
   });
