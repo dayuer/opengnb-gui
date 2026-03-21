@@ -529,13 +529,38 @@ const Nodes = {
       { cmd: 'top -bn1 | head -15', icon: 'gauge', label: '性能' },
       { cmd: 'free -h', icon: 'cpu', label: '内存' },
     ];
-    return `<div class="bg-base rounded-lg border border-border-default overflow-hidden">
+    const maximized = this._termMaximized;
+    return `<div class="bg-base rounded-lg border border-border-default overflow-hidden" id="terminal-wrap-${safeAttr(node.id)}">
       <div class="flex items-center gap-1.5 px-3 py-2 border-b border-border-subtle bg-elevated/30 flex-wrap">
         <span class="text-xs text-text-muted mr-1 [&_svg]:w-3 [&_svg]:h-3 flex items-center gap-1">${L('zap')} 快捷</span>
         ${shortcuts.map(s => `<button class="px-2 py-0.5 text-xs rounded-md border border-border-subtle hover:border-primary/40 hover:bg-primary/10 text-text-secondary hover:text-primary transition cursor-pointer flex items-center gap-1 [&_svg]:w-3 [&_svg]:h-3" onclick="Nodes.quickCmd('${safeAttr(node.id)}','${safeAttr(s.cmd)}')">${L(s.icon)} ${s.label}</button>`).join('')}
+        <button class="ml-auto px-2 py-0.5 text-xs rounded-md border border-border-subtle hover:border-primary/40 hover:bg-primary/10 text-text-secondary hover:text-primary transition cursor-pointer flex items-center gap-1 [&_svg]:w-3 [&_svg]:h-3" onclick="Nodes.toggleTerminalSize('${safeAttr(node.id)}')" title="${maximized ? '还原' : '最大化'}">${L(maximized ? 'minimize-2' : 'maximize-2')}</button>
       </div>
-      <div id="xterm-${safeAttr(node.id)}" style="height:320px"></div>
+      <div id="xterm-${safeAttr(node.id)}" style="height:${maximized ? 'calc(100vh - 240px)' : '320px'}"></div>
     </div>`;
+  },
+
+  _termMaximized: false,
+
+  toggleTerminalSize(nodeId) {
+    this._termMaximized = !this._termMaximized;
+    const xtermEl = document.getElementById(`xterm-${nodeId}`);
+    if (xtermEl) {
+      xtermEl.style.height = this._termMaximized ? 'calc(100vh - 240px)' : '320px';
+    }
+    // 更新按钮图标
+    const wrap = document.getElementById(`terminal-wrap-${nodeId}`);
+    if (wrap) {
+      const btn = wrap.querySelector('[title="最大化"], [title="还原"]');
+      if (btn) {
+        btn.title = this._termMaximized ? '还原' : '最大化';
+        btn.innerHTML = L(this._termMaximized ? 'minimize-2' : 'maximize-2');
+        refreshIcons();
+      }
+    }
+    // 触发 xterm fit
+    const s = _xtermSessions[nodeId];
+    if (s?.fitAddon) { setTimeout(() => { try { s.fitAddon.fit(); } catch (_) {} }, 50); }
   },
 
   /** 初始化 xterm.js 并通过 WebSocket 连接到 SSH */
