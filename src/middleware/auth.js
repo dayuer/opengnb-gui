@@ -136,6 +136,17 @@ function requireAuth(req, res, next) {
   return res.status(401).json({ error: '认证失败：Token 无效或已过期' });
 }
 
+/**
+ * Express 中间件：要求管理员角色
+ * 必须在 requireAuth 之后使用
+ */
+function requireAdmin(req, res, next) {
+  if (!req.user || req.user.role !== 'admin') {
+    return res.status(403).json({ error: '需要管理员权限' });
+  }
+  next();
+}
+
 /** 常量时间字符串比较 */
 function timingSafeEqual(a, b) {
   if (typeof a !== 'string' || typeof b !== 'string') return false;
@@ -146,7 +157,7 @@ function timingSafeEqual(a, b) {
 }
 
 module.exports = {
-  requireAuth, initToken, getAdminToken,
+  requireAuth, requireAdmin, initToken, getAdminToken,
   setJwtSecret, setStore, signJwt, verifyJwt,
   hashPassword, verifyPassword,
 };

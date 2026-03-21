@@ -300,7 +300,7 @@ Type=simple
 ExecStartPre=/bin/mkdir -p /var/log/opengnb
 ExecStart=/opt/gnb/bin/gnb -c ${GNB_CONF} \\
   -i gnb_tun \\
-  --crypto rc4 \\
+  --crypto chacha20 \\
   --crypto-key-update-interval hour \\
   --address-secure=on \\
   --console-log-level=3 \\
@@ -315,7 +315,7 @@ SVCEOF
     systemctl enable gnb
     systemctl start gnb
 else
-    /opt/gnb/bin/gnb -c "$GNB_CONF" -i gnb_tun --crypto rc4 --address-secure=on -d
+    /opt/gnb/bin/gnb -c "$GNB_CONF" -i gnb_tun --crypto chacha20 --address-secure=on -d
 fi
 
 # 等待 TUN 接口出现

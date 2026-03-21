@@ -154,8 +154,11 @@ class AiOps {
       return this._handleHelp();
     }
 
-    // 落底：尝试作为直接 Linux 命令执行
-    return this._handleDirectCmd(msg, nodeId);
+    // @security: 不再将未识别的文本作为 shell 命令自动执行（安全审计 C2 修复）
+    return {
+      response: `❓ 未识别的指令: \`${msg.substring(0, 80)}\`\n\n请使用以下方式:\n• 输入 **help** 查看内置指令\n• 使用 **exec \<节点ID\> \<命令\>** 执行远程命令\n• 使用 **@claude \<问题\>** 调用 AI 助手`,
+      commands: [],
+    };
   }
 
   // --- 指令处理 ---
@@ -394,32 +397,8 @@ class AiOps {
     return { kill: () => { try { child.kill('SIGTERM'); } catch (_) {} } };
   }
 
-  /**
-   * 直接执行 Linux 命令（落底处理）
-   */
-  async _handleDirectCmd(cmd, nodeId) {
-    // 先尝试用提取的 nodeId，失败则 auto-select（单节点场景）
-    let nodeConfig = this._resolveNode(nodeId);
-    if (!nodeConfig) nodeConfig = this._resolveNode(null);
-    if (!nodeConfig) {
-      return {
-        response: `请指定目标节点。可用节点: ${this.nodesConfig.map(n => n.id).join(', ') || '无'}\n输入 help 查看内置指令。`,
-        commands: [],
-      };
-    }
-
-    const blocked = this._checkCommandSafety(cmd);
-    if (blocked) return blocked;
-
-    try {
-      const result = await this.sshManager.exec(nodeConfig, cmd, 30000);
-      let output = result.stdout.trim();
-      if (result.stderr.trim()) output += `\n[STDERR] ${result.stderr.trim()}`;
-      return { response: `\`\`\`\n${output || '(空输出)'}\n\`\`\``, commands: [], targetNodeId: nodeConfig.id };
-    } catch (err) {
-      return { response: `❌ 执行失败: ${err.message}`, commands: [], targetNodeId: nodeConfig.id };
-    }
-  }
+  // @security: _handleDirectCmd 已移除（安全审计 C2 修复）
+  // 未识别的命令不再自动作为 shell 命令执行
 
   // @beta: 异步执行命令
   async _handleAsyncExec(msg) {

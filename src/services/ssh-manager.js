@@ -9,10 +9,31 @@ const path = require('path');
  * 通过 GNB TUN 内网地址连接到各节点的 sshd
  */
 class SSHManager {
-  constructor() {
+  constructor(options = {}) {
     /** @type {Map<string, {client: Client, ready: boolean, lastUsed: number}>} */
     this.pool = new Map();
     this.reconnectInterval = 30000;
+    // @security: SSH 主机指纹持久化（安全审计 H3 修复）
+    this._knownHostsPath = options.knownHostsPath || '';
+    this._knownHosts = this._loadKnownHosts();
+  }
+
+  /** @private 加载已知主机指纹 */
+  _loadKnownHosts() {
+    if (!this._knownHostsPath) return {};
+    try {
+      return JSON.parse(fs.readFileSync(this._knownHostsPath, 'utf-8'));
+    } catch (_) { return {}; }
+  }
+
+  /** @private 保存已知主机指纹 */
+  _saveKnownHosts() {
+    if (!this._knownHostsPath) return;
+    try {
+      fs.writeFileSync(this._knownHostsPath, JSON.stringify(this._knownHosts, null, 2), { mode: 0o600 });
+    } catch (err) {
+      console.error(`[SSH] 保存 known_hosts 失败: ${err.message}`);
+    }
   }
 
   /**
@@ -86,9 +107,21 @@ class SSHManager {
           privateKey,
           readyTimeout: 30000,
           keepaliveInterval: 15000,
-          // TOFU 模式：记录主机指纹，不阻断连接
+          // @security: TOFU 主机指纹持久化（安全审计 H3 修复）
           hostVerifier: (key) => {
-            console.log(`[SSH] 主机密钥: ${nodeConfig.tunAddr} fingerprint=${key.toString('hex').substring(0, 16)}...`);
+            const fp = require('crypto').createHash('sha256').update(key).digest('hex');
+            const host = nodeConfig.tunAddr;
+            if (this._knownHosts[host]) {
+              if (this._knownHosts[host] !== fp) {
+                console.error(`[SSH] ⚠️ 主机密钥变更! ${host} 旧=${this._knownHosts[host].substring(0, 16)}... 新=${fp.substring(0, 16)}...`);
+                console.error(`[SSH] 可能存在中间人攻击，请人工确认!`);
+                // TOFU: 仍然允许连接但强烈告警
+              }
+            } else {
+              console.log(`[SSH] 首次连接 ${host}，记录指纹: ${fp.substring(0, 16)}...`);
+              this._knownHosts[host] = fp;
+              this._saveKnownHosts();
+            }
             return true;
           },
           // 限制加密算法白名单
@@ -215,6 +248,17 @@ class SSHManager {
    * @returns {string} shell 命令
    */
   static buildAsyncWrapper(command, jobId, callbackUrl, clawToken) {
+    // @security: 参数字符白名单校验（安全审计 H4 修复）
+    if (!/^[a-zA-Z0-9_-]+$/.test(jobId)) {
+      throw new Error(`无效 jobId: 仅允许字母数字下划线和短横线`);
+    }
+    if (!/^https?:\/\/[\w.:/-]+$/.test(callbackUrl)) {
+      throw new Error(`无效 callbackUrl: 格式不合法`);
+    }
+    if (clawToken && !/^[a-zA-Z0-9_.-]+$/.test(clawToken)) {
+      throw new Error(`无效 clawToken: 仅允许安全字符`);
+    }
+
     // 用 heredoc 避免转义问题，stdout/stderr 写到临时文件
     const script = `
 TMP_DIR="/tmp/job_${jobId}"

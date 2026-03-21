@@ -655,11 +655,14 @@ const Nodes = {
 
     const proto = location.protocol === 'https:' ? 'wss' : 'ws';
     const token = App.getToken();
-    const ws = new WebSocket(`${proto}://${location.host}/ws/ai?token=${encodeURIComponent(token)}&nodeId=${encodeURIComponent(nodeId)}`);
+    // @security: 首条消息认证，不再通过 URL 传递 token（安全审计 H1 适配）
+    const ws = new WebSocket(`${proto}://${location.host}/ws/ai`);
 
     let aiBuf = ''; // 累积当前 AI 响应文本
 
     ws.onopen = () => {
+      // 发送认证消息
+      ws.send(JSON.stringify({ type: 'auth', token, nodeId }));
       this._updateTermStatus(nodeId, true);
       this._appendMsg(nodeId, 'system', '✓ AI 助手已连接');
     };

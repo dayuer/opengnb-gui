@@ -3,7 +3,7 @@
 const { Router } = require('express');
 const crypto = require('crypto');
 const {
-  requireAuth, signJwt, hashPassword, verifyPassword,
+  requireAuth, requireAdmin, signJwt, hashPassword, verifyPassword,
 } = require('../middleware/auth');
 
 /**
@@ -61,8 +61,8 @@ function createAuthRouter(store) {
     res.json({ token, apiToken, expiresIn: '24h' });
   });
 
-  /** POST /api/auth/register — 创建新用户 */
-  router.post('/register', requireAuth, (req, res) => {
+  /** POST /api/auth/register — 创建新用户（仅管理员） */
+  router.post('/register', requireAuth, requireAdmin, (req, res) => {
     const { username, password, role } = req.body || {};
     if (!username || !password) {
       return res.status(400).json({ error: '请提供用户名和密码' });
@@ -77,9 +77,10 @@ function createAuthRouter(store) {
 
     const id = crypto.randomBytes(8).toString('hex');
     const passwordHash = hashPassword(password);
-    store.insertUser({ id, username, passwordHash, role: role || 'admin' });
+    const finalRole = (role === 'admin') ? 'admin' : 'member';
+    store.insertUser({ id, username, passwordHash, role: finalRole });
 
-    res.status(201).json({ id, username, role: role || 'admin' });
+    res.status(201).json({ id, username, role: finalRole });
   });
 
   /** GET /api/auth/users — 用户列表（脱敏） */
@@ -87,8 +88,8 @@ function createAuthRouter(store) {
     res.json(store.allUsers());
   });
 
-  /** DELETE /api/auth/users/:id — 删除用户 */
-  router.delete('/users/:id', requireAuth, (req, res) => {
+  /** DELETE /api/auth/users/:id — 删除用户（仅管理员） */
+  router.delete('/users/:id', requireAuth, requireAdmin, (req, res) => {
     const { id } = req.params;
     // 禁止删除自身
     if (req.user.userId === id) {
@@ -98,8 +99,8 @@ function createAuthRouter(store) {
     res.status(204).end();
   });
 
-  /** PATCH /api/auth/users/:id/role — 修改用户角色 */
-  router.patch('/users/:id/role', requireAuth, (req, res) => {
+  /** PATCH /api/auth/users/:id/role — 修改用户角色（仅管理员） */
+  router.patch('/users/:id/role', requireAuth, requireAdmin, (req, res) => {
     const { id } = req.params;
     const { role } = req.body || {};
     if (!role || !['admin', 'member'].includes(role)) {

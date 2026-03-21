@@ -202,7 +202,7 @@ class KeyManager {
   }
 
   /**
-   * 验证 enrollToken
+   * 验证 enrollToken（40 分钟过期）
    * @param {string} token
    * @returns {{valid: boolean, nodeId?: string}}
    */
@@ -210,6 +210,12 @@ class KeyManager {
     if (!token) return { valid: false };
     const entry = this.enrollTokens.get(token);
     if (!entry) return { valid: false };
+    // @security: enrollToken TTL 校验（安全审计 M2 修复）
+    const ENROLL_TOKEN_TTL_MS = 40 * 60 * 1000; // 40 分钟（略长于 passcode 30min，免得初始化中途过期）
+    if (Date.now() - new Date(entry.createdAt).getTime() > ENROLL_TOKEN_TTL_MS) {
+      this.enrollTokens.delete(token);
+      return { valid: false };
+    }
     return { valid: true, nodeId: entry.nodeId };
   }
 

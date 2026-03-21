@@ -106,6 +106,10 @@ function createNodesRouter(monitor, sshManager, nodesConfig, keyManager, metrics
       const newIp = String(tunAddr).trim();
       const netmask = oldNode.netmask || '255.0.0.0';
       const gnbId = oldNode.gnbNodeId;
+      // @security: gnbId 必须是纯数字，防止 sed 注入（安全审计 L3 修复）
+      if (!/^\d+$/.test(gnbId)) {
+        return res.status(400).json({ error: 'GNB 节点 ID 格式异常，拒绝执行远程操作' });
+      }
       const confPath = `/opt/gnb/conf/${gnbId}/address.conf`;
       const expectedLine = `${gnbId}|${newIp}|${netmask}`;
 

@@ -37,30 +37,30 @@ describe('services/ai-ops', () => {
     assert.ok(result.response.includes('请输入指令'));
   });
 
-  // S9.4: 未知指令（无节点时）→ 提示无法识别
-  it('S9.4 should attempt direct cmd for unknown input', async () => {
+  // S9.4: 未知指令 → 提示未识别（C2 修复：不再自动作为 shell 命令执行）
+  it('S9.4 should reject unknown input with help message', async () => {
     const ai = createAiOps();
     const result = await ai.chat('随便说一句');
-    assert.ok(result.response.includes('请指定目标节点'));
+    assert.ok(result.response.includes('未识别的指令'));
   });
 
-  // S9.5: 黑名单拦截
-  it('S9.5 should block dangerous commands', async () => {
+  // S9.5: 黑名单拦截（通过 exec 格式触发）
+  it('S9.5 should block dangerous commands via exec', async () => {
     const ai = createAiOps([{ id: 'n1', name: 'TestNode' }]);
-    const result = await ai.chat('rm -rf /');
+    const result = await ai.chat('exec n1 rm -rf /');
     assert.ok(result.blocked);
     assert.ok(result.response.includes('拦截'));
   });
 
-  // S9.6: 直接 Linux 命令执行（安全命令）
-  it('S9.6 should execute safe Linux commands directly', async () => {
+  // S9.6: 通过 exec 格式执行安全命令
+  it('S9.6 should execute safe commands via exec format', async () => {
     const ai = new AiOps({
       nodesConfig: [{ id: 'n1', name: 'TestNode' }],
       sshManager: { exec: async () => ({ stdout: 'hello world', stderr: '', code: 0 }) },
       getNodeStatus: () => [],
       provisioner: { provision: () => {} },
     });
-    const result = await ai.chat('echo hello');
+    const result = await ai.chat('exec n1 echo hello');
     assert.ok(result.response.includes('hello world'));
   });
 

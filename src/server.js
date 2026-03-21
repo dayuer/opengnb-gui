@@ -21,7 +21,7 @@ const createClawRouter = require('./routes/claw');
 const createAuthRouter = require('./routes/auth');
 const createJobsRouter = require('./routes/jobs');
 const ClawRPC = require('./services/claw-rpc');
-const { requireAuth, initToken, getAdminToken, setJwtSecret, setStore, hashPassword, verifyJwt } = require('./middleware/auth');
+const { requireAuth, requireAdmin, initToken, getAdminToken, setJwtSecret, setStore, hashPassword, verifyJwt } = require('./middleware/auth');
 const { createRateLimit } = require('./middleware/rate-limit');
 const { errorHandler } = require('./middleware/error-handler');
 const { resolvePaths, ensureDataDirs } = require('./services/data-paths');
@@ -39,11 +39,21 @@ const server = http.createServer(app);
 app.use(express.json({ limit: '1mb' }));
 app.use(express.static(path.resolve(__dirname, '../public')));
 
+// --- 安全响应头（安全审计 L5 修复） ---
+app.use((req, res, next) => {
+  res.setHeader('X-Content-Type-Options', 'nosniff');
+  res.setHeader('X-Frame-Options', 'DENY');
+  res.setHeader('Strict-Transport-Security', 'max-age=31536000; includeSubDomains');
+  res.setHeader('X-XSS-Protection', '1; mode=block');
+  res.setHeader('Referrer-Policy', 'strict-origin-when-cross-origin');
+  next();
+});
+
 // --- 全局速率限制 ---
 app.use('/api', createRateLimit({ windowMs: 60000, max: 200 }));
 
 const keyManager = new KeyManager({ dataDir: DATA_DIR, paths: dataPaths });
-const sshManager = new SSHManager();
+const sshManager = new SSHManager({ knownHostsPath: path.join(DATA_DIR, 'security', 'known_hosts.json') });
 
 // --- 运维日志持久化（按终端分开存储） ---
 const OPS_LOG_DIR = dataPaths.logs.opsDir;
@@ -100,13 +110,15 @@ async function boot() {
     const crypto = require('crypto');
     const tempPwd = crypto.randomBytes(8).toString('hex');
     const id = crypto.randomBytes(8).toString('hex');
-    const apiToken = crypto.randomBytes(5).toString('hex'); // 10 char
+    const apiToken = crypto.randomBytes(16).toString('hex'); // @security: 128-bit 熵（安全审计 H2 修复）
     store.insertUser({ id, username: 'admin', passwordHash: hashPassword(tempPwd) });
     store._stmts.updateApiToken.run(apiToken, id);
-    console.log(`\n  👤 首次启动，已创建管理员账号:`);
-    console.log(`     用户名: admin`);
-    console.log(`     密码:   ${tempPwd}`);
-    console.log(`     API Token: ${apiToken}`);
+    // @security: 密码写入文件而非 stdout（安全审计 L1 修复）
+    const credFile = path.join(DATA_DIR, '.initial-credentials');
+    const credContent = `admin:${tempPwd}\napiToken:${apiToken}\ncreated:${new Date().toISOString()}`;
+    fs.writeFileSync(credFile, credContent, { mode: 0o600 });
+    console.log(`\n  👤 首次启动，已创建管理员账号。`);
+    console.log(`     凭据已写入: ${credFile}`);
     console.log(`     ⚠️  请登录后及时修改密码\n`);
   }
 
@@ -222,9 +234,10 @@ async function boot() {
     return res.status(403).json({ error: '无效 token 或节点未找到' });
   });
 
-  // 认证路由（login 公开，其余需认证）— @alpha: login 独立限速防暴力破解
+  // 认证路由（login 公开，其余需认证）— @security: loginLimit 仅限制 /login 端点（安全审计 M1 修复）
   const loginLimit = createRateLimit({ windowMs: 60000, max: 5, message: '登录尝试过于频繁，请 1 分钟后重试' });
-  app.use('/api/auth', loginLimit, express.json(), createAuthRouter(store));
+  app.post('/api/auth/login', loginLimit); // 仅对 login 端点限速
+  app.use('/api/auth', express.json(), createAuthRouter(store));
 
   // 需认证 + 审计的管理路由
   app.use('/api/nodes', requireAuth, audit.middleware('nodes'), createNodesRouter(monitor, sshManager, monitor.nodesConfig, keyManager, metricsStore));
@@ -285,14 +298,11 @@ async function boot() {
     res.json(task);
   });
 
-  // 健康检查
+  // 健康检查 — @security: 精简返回信息（安全审计 L2 修复）
   app.get('/api/health', (req, res) => {
     res.json({
       status: 'ok',
-      uptime: process.uptime(),
-      nodesTotal: keyManager.getAllNodes().length,
-      nodesApproved: keyManager.getApprovedNodesConfig().length,
-      nodesPending: keyManager.getPendingNodes().length,
+      uptime: Math.floor(process.uptime()),
       timestamp: new Date().toISOString(),
     });
   });
@@ -429,84 +439,91 @@ async function boot() {
 
   wssSsh.on('connection', async (ws, req) => {
     const url = new URL(req.url, 'http://localhost');
-    const token = url.searchParams.get('token');
     const nodeId = url.searchParams.get('nodeId');
     const cols = parseInt(url.searchParams.get('cols')) || 80;
     const rows = parseInt(url.searchParams.get('rows')) || 24;
 
-    // 认证
-    if (!token || !_resolveWsToken(token).valid) {
-      ws.close(4001, '认证失败');
-      return;
-    }
+    // @security: 改为首条消息认证，不再从 URL 提取 token（安全审计 H1 修复）
+    const AUTH_TIMEOUT = 5000;
+    const authTimer = setTimeout(() => {
+      ws.close(4001, '认证超时');
+    }, AUTH_TIMEOUT);
 
-    // 查找节点配置
-    if (!nodeId) {
-      ws.close(4003, '缺少 nodeId');
-      return;
-    }
-    const configs = keyManager.getApprovedNodesConfig();
-    const nodeConfig = configs.find(c => c.id === nodeId);
-    if (!nodeConfig) {
-      ws.close(4004, '节点不存在');
-      return;
-    }
-
-    console.log(`[SSH-WS] 建立连接: 节点 ${nodeConfig.name || nodeId}`);
-
-    let sshStream = null;
-    try {
-      sshStream = await sshManager.shell(nodeConfig, { cols, rows });
-    } catch (err) {
-      console.error(`[SSH-WS] SSH Shell 创建失败: ${err.message}`);
-      ws.send(`\r\n\x1b[31m连接失败: ${err.message}\x1b[0m\r\n`);
-      ws.close(4005, 'SSH 连接失败');
-      return;
-    }
-
-    // SSH stdout → WebSocket
-    sshStream.on('data', (data) => {
-      if (ws.readyState === 1) ws.send(data);
-    });
-
-    sshStream.stderr.on('data', (data) => {
-      if (ws.readyState === 1) ws.send(data);
-    });
-
-    sshStream.on('close', () => {
-      console.log(`[SSH-WS] SSH Stream 关闭: ${nodeId}`);
-      if (ws.readyState === 1) ws.close(1000, 'SSH 会话结束');
-    });
-
-    // WebSocket → SSH stdin
-    ws.on('message', (msg) => {
-      if (!sshStream || sshStream.destroyed) return;
-
-      // 检查是否是控制消息（JSON）
-      if (typeof msg === 'string' || (msg instanceof Buffer && msg[0] === 0x7b)) {
-        try {
-          const ctrl = JSON.parse(msg.toString());
-          if (ctrl.type === 'resize' && ctrl.cols && ctrl.rows) {
-            sshStream.setWindow(ctrl.rows, ctrl.cols, 0, 0);
-            return;
-          }
-        } catch (_) { /* 不是 JSON，当作普通输入 */ }
+    ws.once('message', async (data) => {
+      clearTimeout(authTimer);
+      let msg;
+      try { msg = JSON.parse(data.toString()); } catch (_) {
+        ws.close(4001, '认证消息格式错误');
+        return;
+      }
+      if (msg.type !== 'auth' || !msg.token || !_resolveWsToken(msg.token).valid) {
+        ws.close(4001, '认证失败');
+        return;
       }
 
-      sshStream.write(msg);
-    });
-
-    ws.on('close', () => {
-      console.log(`[SSH-WS] WebSocket 断开: ${nodeId}`);
-      if (sshStream && !sshStream.destroyed) {
-        sshStream.end();
-        sshStream.destroy();
+      // 认证通过，建立 SSH
+      const targetNodeId = msg.nodeId || nodeId;
+      if (!targetNodeId) {
+        ws.close(4003, '缺少 nodeId');
+        return;
       }
-    });
+      const configs = keyManager.getApprovedNodesConfig();
+      const nodeConfig = configs.find(c => c.id === targetNodeId);
+      if (!nodeConfig) {
+        ws.close(4004, '节点不存在');
+        return;
+      }
 
-    ws.on('error', (err) => {
-      console.error(`[SSH-WS] WebSocket 错误: ${err.message}`);
-      if (sshStream && !sshStream.destroyed) sshStream.destroy();
+      console.log(`[SSH-WS] 建立连接: 节点 ${nodeConfig.name || targetNodeId}`);
+
+      let sshStream = null;
+      try {
+        sshStream = await sshManager.shell(nodeConfig, { cols: msg.cols || cols, rows: msg.rows || rows });
+      } catch (err) {
+        console.error(`[SSH-WS] SSH Shell 创建失败: ${err.message}`);
+        ws.send(`\r\n\x1b[31m连接失败: ${err.message}\x1b[0m\r\n`);
+        ws.close(4005, 'SSH 连接失败');
+        return;
+      }
+
+      // SSH stdout → WebSocket
+      sshStream.on('data', (data) => {
+        if (ws.readyState === 1) ws.send(data);
+      });
+      sshStream.stderr.on('data', (data) => {
+        if (ws.readyState === 1) ws.send(data);
+      });
+      sshStream.on('close', () => {
+        console.log(`[SSH-WS] SSH Stream 关闭: ${targetNodeId}`);
+        if (ws.readyState === 1) ws.close(1000, 'SSH 会话结束');
+      });
+
+      // WebSocket → SSH stdin
+      ws.on('message', (msg) => {
+        if (!sshStream || sshStream.destroyed) return;
+        if (typeof msg === 'string' || (msg instanceof Buffer && msg[0] === 0x7b)) {
+          try {
+            const ctrl = JSON.parse(msg.toString());
+            if (ctrl.type === 'resize' && ctrl.cols && ctrl.rows) {
+              sshStream.setWindow(ctrl.rows, ctrl.cols, 0, 0);
+              return;
+            }
+          } catch (_) { /* 不是 JSON，当作普通输入 */ }
+        }
+        sshStream.write(msg);
+      });
+
+      ws.on('close', () => {
+        console.log(`[SSH-WS] WebSocket 断开: ${targetNodeId}`);
+        if (sshStream && !sshStream.destroyed) {
+          sshStream.end();
+          sshStream.destroy();
+        }
+      });
+      ws.on('error', (err) => {
+        console.error(`[SSH-WS] WebSocket 错误: ${err.message}`);
+        if (sshStream && !sshStream.destroyed) sshStream.destroy();
+      });
     });
   });
 
@@ -515,51 +532,69 @@ async function boot() {
   const wssAi = new WebSocketServer({ noServer: true });
 
   wssAi.on('connection', (ws, req) => {
-    const url = new URL(req.url, 'http://localhost');
-    const token = url.searchParams.get('token');
-    const nodeId = url.searchParams.get('nodeId');
+    // @security: 改为首条消息认证（安全审计 H1 修复）
+    const AUTH_TIMEOUT = 5000;
+    let authenticated = false;
+    let nodeId = null;
 
-    const authResult = _resolveWsToken(token);
-    if (!authResult.valid) {
-      ws.send(JSON.stringify({ type: 'error', text: '认证失败' }));
-      ws.close(4001);
-      return;
-    }
-    console.log(`[AI-WS] 连接: nodeId=${nodeId}, user=${authResult.userId}`);
+    const authTimer = setTimeout(() => {
+      if (!authenticated) ws.close(4001, '认证超时');
+    }, AUTH_TIMEOUT);
 
-    const nodeConfig = aiOps._resolveNode(nodeId);
-    let activeHandle = null;
-
-    ws.on('message', (raw) => {
+    ws.once('message', (raw) => {
+      clearTimeout(authTimer);
       let msg;
-      try { msg = JSON.parse(raw.toString()); } catch (_) { return; }
-
-      if (msg.type === 'chat' && msg.text?.trim()) {
-        // @alpha: 上一个 Claude 进程仍在运行则拒绝
-        if (activeHandle) {
-          ws.send(JSON.stringify({ type: 'busy', text: '上一条指令仍在执行，请稍候...' }));
-          return;
-        }
-
-        ws.send(JSON.stringify({ type: 'ack', text: msg.text }));
-        activeHandle = aiOps.streamChat(nodeConfig, msg.text, (chunk) => {
-          if (ws.readyState !== 1) return;
-          ws.send(JSON.stringify(chunk));
-          if (chunk.type === 'done' || chunk.type === 'error') {
-            activeHandle = null;
-          }
-        });
+      try { msg = JSON.parse(raw.toString()); } catch (_) {
+        ws.close(4001, '认证消息格式错误');
+        return;
       }
-    });
+      if (msg.type !== 'auth' || !msg.token) {
+        ws.close(4001, '认证消息格式错误');
+        return;
+      }
+      const authResult = _resolveWsToken(msg.token);
+      if (!authResult.valid) {
+        ws.send(JSON.stringify({ type: 'error', text: '认证失败' }));
+        ws.close(4001);
+        return;
+      }
+      authenticated = true;
+      nodeId = msg.nodeId || null;
+      console.log(`[AI-WS] 连接: nodeId=${nodeId}, user=${authResult.userId}`);
 
-    ws.on('close', () => {
-      console.log('[AI-WS] 断开');
-      if (activeHandle) activeHandle.kill();
-    });
+      const nodeConfig = aiOps._resolveNode(nodeId);
+      let activeHandle = null;
 
-    ws.on('error', (err) => {
-      console.error(`[AI-WS] 错误: ${err.message}`);
-      if (activeHandle) activeHandle.kill();
+      ws.on('message', (raw) => {
+        let msg;
+        try { msg = JSON.parse(raw.toString()); } catch (_) { return; }
+
+        if (msg.type === 'chat' && msg.text?.trim()) {
+          if (activeHandle) {
+            ws.send(JSON.stringify({ type: 'busy', text: '上一条指令仍在执行，请稍候...' }));
+            return;
+          }
+
+          ws.send(JSON.stringify({ type: 'ack', text: msg.text }));
+          activeHandle = aiOps.streamChat(nodeConfig, msg.text, (chunk) => {
+            if (ws.readyState !== 1) return;
+            ws.send(JSON.stringify(chunk));
+            if (chunk.type === 'done' || chunk.type === 'error') {
+              activeHandle = null;
+            }
+          });
+        }
+      });
+
+      ws.on('close', () => {
+        console.log('[AI-WS] 断开');
+        if (activeHandle) activeHandle.kill();
+      });
+
+      ws.on('error', (err) => {
+        console.error(`[AI-WS] 错误: ${err.message}`);
+        if (activeHandle) activeHandle.kill();
+      });
     });
   });
 
@@ -577,18 +612,20 @@ async function boot() {
     }
   });
 
-  // 监控更新 + 待审批推送
+  // 监控更新 + 待审批推送 — @security: 按用户过滤（安全审计 M4 修复）
   monitor.on('update', (allStatus) => {
-    const payload = JSON.stringify({
-      type: 'update',
-      data: enrichNodesData(allStatus),
-      pending: keyManager.getPendingNodes(),
-      groups: keyManager.getGroups(),
-      allNodes: keyManager.getAllNodes(),
-      timestamp: new Date().toISOString(),
-    });
     for (const client of wss.clients) {
-      if (client.readyState === 1) client.send(payload);
+      if (client.readyState !== 1 || !client._authenticated) continue;
+      const userId = client._userId || '';
+      const payload = JSON.stringify({
+        type: 'update',
+        data: enrichNodesData(allStatus),
+        pending: keyManager.getPendingNodes().filter(n => !n.ownerId || n.ownerId === userId),
+        groups: keyManager.getGroups(),
+        allNodes: keyManager.getNodesByOwner(userId),
+        timestamp: new Date().toISOString(),
+      });
+      client.send(payload);
     }
   });
 

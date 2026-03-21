@@ -1,6 +1,7 @@
 'use strict';
 
 const express = require('express');
+const { createRateLimit } = require('../middleware/rate-limit');
 
 /**
  * 节点注册 API（审批制 + passcode）
@@ -55,7 +56,9 @@ function createEnrollRouter(keyManager, security = {}) {
   });
 
   // POST /api/enroll — 节点提交注册申请（需 passcode）
-  router.post('/', (req, res) => {
+  // @security: 独立限速防滞用（安全审计 M5 修复）
+  const enrollLimit = createRateLimit({ windowMs: 60000, max: 10, message: '注册请求过于频繁' });
+  router.post('/', enrollLimit, (req, res) => {
     const result = keyManager.submitEnrollment(req.body);
     res.status(result.success ? 200 : 400).json(result);
   });
