@@ -45,7 +45,7 @@ const Settings = {
       </div>
     </div>`;
     refreshIcons();
-    if (settingsTab === 'general') await this.loadHealth();
+    if (settingsTab === 'general') { await this.loadHealth(); await this.loadToken(); }
   },
 
   // ── 通用 Tab ──
@@ -68,21 +68,11 @@ const Settings = {
         </div>
       </div>
 
-      <!-- 节点注册 -->
+      <!-- 节点注册 & API Token -->
       <div class="border-t border-border-subtle pt-8">
         <h3 class="text-sm font-bold uppercase tracking-widest text-text-muted mb-6">节点注册</h3>
-        <div class="bg-elevated rounded-xl border border-border-default p-5 space-y-3">
-          <div class="flex items-center justify-between">
-            <div class="flex items-center gap-3">
-              <div class="h-10 w-10 signature-gradient rounded-xl flex items-center justify-center text-white [&_svg]:w-4 [&_svg]:h-4 shadow-lg shadow-primary/20">${L('terminal')}</div>
-              <div>
-                <h4 class="text-sm font-bold font-headline">注册命令</h4>
-                <p class="text-xs text-text-muted">在目标节点上执行此命令自动注册</p>
-              </div>
-            </div>
-            <button class="px-3 py-1.5 text-xs font-bold text-primary bg-primary/10 rounded-lg hover:bg-primary/20 transition cursor-pointer flex items-center gap-1 [&_svg]:w-3.5 [&_svg]:h-3.5" onclick="navigator.clipboard.writeText('curl -sSf https://api.synonclaw.com/api/enroll/node-agent.sh | sudo bash');showToast('已复制到剪贴板')">${L('copy')} 复制</button>
-          </div>
-          <pre class="px-4 py-3 bg-base rounded-lg text-xs font-mono text-text-secondary overflow-x-auto border border-border-subtle">curl -sSf https://api.synonclaw.com/api/enroll/node-agent.sh | sudo bash</pre>
+        <div id="settings-token" class="space-y-4">
+          <div class="text-text-muted text-sm">加载中...</div>
         </div>
       </div>
 
@@ -148,31 +138,6 @@ const Settings = {
           </button>
         </form>
       </div>
-
-      <!-- API 密钥 -->
-      <div class="border-t border-border-subtle pt-8">
-        <div class="flex items-center justify-between mb-6">
-          <h3 class="text-sm font-bold uppercase tracking-widest text-text-muted">API 密钥</h3>
-          <button class="text-xs font-bold text-primary flex items-center gap-1 hover:underline cursor-pointer [&_svg]:w-3.5 [&_svg]:h-3.5" onclick="App.showApiKey()">
-            ${L('eye')} 查看 / 复制
-          </button>
-        </div>
-        <div class="bg-elevated rounded-xl border border-border-default overflow-hidden">
-          <div class="flex items-center justify-between p-5">
-            <div class="flex items-center gap-4">
-              <div class="h-12 w-12 signature-gradient rounded-xl flex items-center justify-center text-white [&_svg]:w-5 [&_svg]:h-5 shadow-lg shadow-primary/20">${L('key-round')}</div>
-              <div>
-                <h4 class="text-sm font-bold font-headline">Admin Token</h4>
-                <p class="text-xs text-text-muted mt-0.5">用于 API 认证的管理令牌</p>
-              </div>
-            </div>
-            <div class="flex items-center gap-3">
-              <span class="text-sm font-mono text-text-muted tracking-wider">••••••••••••</span>
-              <span class="px-2.5 py-1 text-[10px] font-bold uppercase tracking-wider text-success bg-secondary-container rounded-full">Active</span>
-            </div>
-          </div>
-        </div>
-      </div>
     </div>`;
   },
 
@@ -233,6 +198,53 @@ const Settings = {
         ${this._infoCard(L('clock'), '待审批', String(d.nodesPending), d.nodesPending > 0 ? 'text-warning' : '')}
         ${this._infoCard(L('server'), '版本', 'v0.1.0', '')}
       </div>`;
+      refreshIcons();
+    } catch (e) { wrap.innerHTML = `<div class="text-text-muted text-sm">加载失败: ${escHtml(e.message)}</div>`; }
+  },
+
+  async loadToken() {
+    const wrap = $('#settings-token');
+    if (!wrap) return;
+    try {
+      const res = await App.authFetch('/api/auth/token');
+      const d = await res.json();
+      const token = d.apiToken || '';
+      const initCmd = `curl -sSL https://${location.host}/api/enroll/init.sh | TOKEN=${token} bash`;
+      wrap.innerHTML = `
+        <!-- API Token -->
+        <div class="bg-elevated rounded-xl border border-border-default p-5">
+          <div class="flex items-center justify-between mb-3">
+            <div class="flex items-center gap-3">
+              <div class="h-10 w-10 signature-gradient rounded-xl flex items-center justify-center text-white [&_svg]:w-4 [&_svg]:h-4 shadow-lg shadow-primary/20">${L('key-round')}</div>
+              <div>
+                <h4 class="text-sm font-bold font-headline">API Token</h4>
+                <p class="text-xs text-text-muted">永久有效，用于节点认证</p>
+              </div>
+            </div>
+            <span class="px-2.5 py-1 text-[10px] font-bold uppercase tracking-wider text-success bg-secondary-container rounded-full">Active</span>
+          </div>
+          <div class="flex items-center bg-base border border-border-subtle rounded-lg cursor-pointer hover:border-primary transition group" onclick="navigator.clipboard.writeText('${escHtml(token)}');showToast('Token 已复制')">
+            <code class="flex-1 text-sm px-4 py-3 font-mono text-text-primary tracking-wide">${escHtml(token)}</code>
+            <span class="px-3 text-text-muted group-hover:text-primary [&_svg]:w-4 [&_svg]:h-4">${L('copy')}</span>
+          </div>
+        </div>
+
+        <!-- 节点初始化命令 -->
+        <div class="bg-elevated rounded-xl border border-border-default p-5">
+          <div class="flex items-center justify-between mb-3">
+            <div class="flex items-center gap-3">
+              <div class="h-10 w-10 bg-success/10 rounded-xl flex items-center justify-center text-success [&_svg]:w-4 [&_svg]:h-4">${L('terminal')}</div>
+              <div>
+                <h4 class="text-sm font-bold font-headline">节点初始化命令</h4>
+                <p class="text-xs text-text-muted">在目标节点上执行此命令自动注册</p>
+              </div>
+            </div>
+          </div>
+          <div class="flex items-center bg-base border border-border-subtle rounded-lg cursor-pointer hover:border-primary transition group" onclick="navigator.clipboard.writeText(this.querySelector('code').textContent.trim());showToast('命令已复制')">
+            <code class="flex-1 text-xs px-4 py-3 font-mono text-text-primary break-all leading-relaxed">${escHtml(initCmd)}</code>
+            <span class="px-3 text-text-muted group-hover:text-primary [&_svg]:w-4 [&_svg]:h-4">${L('copy')}</span>
+          </div>
+        </div>`;
       refreshIcons();
     } catch (e) { wrap.innerHTML = `<div class="text-text-muted text-sm">加载失败: ${escHtml(e.message)}</div>`; }
   },
