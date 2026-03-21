@@ -423,10 +423,22 @@ const Nodes = {
 
   _renderTerminal(node) {
     const logs = terminalLogs[node.id] || [];
+    const shortcuts = [
+      { cmd: '状态', icon: 'activity', label: '状态' },
+      { cmd: '重启 gnb', icon: 'refresh-cw', label: '重启 GNB' },
+      { cmd: '日志', icon: 'file-text', label: '日志' },
+      { cmd: '磁盘', icon: 'hard-drive', label: '磁盘' },
+      { cmd: '性能', icon: 'gauge', label: '性能' },
+      { cmd: '安装 openclaw', icon: 'download', label: '安装 OpenClaw' },
+    ];
     let html = `<div class="bg-base rounded-lg border border-border-default overflow-hidden">
+      <div class="flex items-center gap-1.5 px-3 py-2 border-b border-border-subtle bg-elevated/30 flex-wrap">
+        <span class="text-xs text-text-muted mr-1 [&_svg]:w-3 [&_svg]:h-3 flex items-center gap-1">${L('zap')} 快捷</span>
+        ${shortcuts.map(s => `<button class="px-2 py-0.5 text-xs rounded-md border border-border-subtle hover:border-primary/40 hover:bg-primary/10 text-text-secondary hover:text-primary transition cursor-pointer flex items-center gap-1 [&_svg]:w-3 [&_svg]:h-3" onclick="Nodes.quickCmd('${safeAttr(node.id)}','${safeAttr(s.cmd)}')">${L(s.icon)} ${s.label}</button>`).join('')}
+      </div>
       <div class="max-h-60 overflow-y-auto p-3 font-mono text-xs space-y-1" id="terminal-output-${safeAttr(node.id)}">`;
     if (logs.length === 0) {
-      html += `<div class="text-text-muted">输入运维指令，如：状态、重启 gnb、安装 openclaw、日志</div>`;
+      html += `<div class="text-text-muted">点击上方快捷按钮或输入自定义指令</div>`;
     } else {
       for (const log of logs) {
         const cls = log.role === 'user' ? 'text-primary' : log.role === 'error' ? 'text-danger' : 'text-text-secondary';
@@ -669,6 +681,12 @@ const Nodes = {
 
   async moveTo(id, gid) {
     try { await App.authFetch(`/api/enroll/${encodeURIComponent(id)}/group`, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ groupId: gid }) }); App.closeModal(); } catch (e) { showToast(`移动失败: ${e.message}`, 'error'); }
+  },
+
+  quickCmd(nodeId, cmd) {
+    const input = document.getElementById(`terminal-input-${nodeId}`);
+    if (input) input.value = cmd;
+    this.execCmd(nodeId);
   },
 
   async execCmd(nodeId) {
