@@ -322,7 +322,7 @@ async function boot() {
     });
   }
 
-  const wss = new WebSocketServer({ server, path: '/ws' });
+  const wss = new WebSocketServer({ noServer: true });
   const MAX_WS_CLIENTS = 10;
 
   // @alpha: WS token 校验 — 兼容 adminToken、JWT、apiToken，返回 {valid, userId}
@@ -425,7 +425,7 @@ async function boot() {
   });
 
   // --- Web SSH 终端 WebSocket ---
-  const wssSsh = new WebSocketServer({ server, path: '/ws/ssh' });
+  const wssSsh = new WebSocketServer({ noServer: true });
 
   wssSsh.on('connection', async (ws, req) => {
     const url = new URL(req.url, 'http://localhost');
@@ -508,6 +508,18 @@ async function boot() {
       console.error(`[SSH-WS] WebSocket 错误: ${err.message}`);
       if (sshStream && !sshStream.destroyed) sshStream.destroy();
     });
+  });
+
+  // --- HTTP upgrade 路由：手动分发到对应 WSS ---
+  server.on('upgrade', (req, socket, head) => {
+    const { pathname } = new URL(req.url, 'http://localhost');
+    if (pathname === '/ws') {
+      wss.handleUpgrade(req, socket, head, (ws) => { wss.emit('connection', ws, req); });
+    } else if (pathname === '/ws/ssh') {
+      wssSsh.handleUpgrade(req, socket, head, (ws) => { wssSsh.emit('connection', ws, req); });
+    } else {
+      socket.destroy();
+    }
   });
 
   // 监控更新 + 待审批推送
