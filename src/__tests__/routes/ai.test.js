@@ -37,11 +37,31 @@ describe('services/ai-ops', () => {
     assert.ok(result.response.includes('请输入指令'));
   });
 
-  // S9.4: 未知指令 → 返回帮助
-  it('S9.4 should return help for unknown input', async () => {
+  // S9.4: 未知指令（无节点时）→ 提示无法识别
+  it('S9.4 should attempt direct cmd for unknown input', async () => {
     const ai = createAiOps();
     const result = await ai.chat('随便说一句');
-    assert.ok(result.response.includes('可用指令'));
+    assert.ok(result.response.includes('无法识别指令'));
+  });
+
+  // S9.5: 黑名单拦截
+  it('S9.5 should block dangerous commands', async () => {
+    const ai = createAiOps([{ id: 'n1', name: 'TestNode' }]);
+    const result = await ai.chat('rm -rf /');
+    assert.ok(result.blocked);
+    assert.ok(result.response.includes('拦截'));
+  });
+
+  // S9.6: 直接 Linux 命令执行（安全命令）
+  it('S9.6 should execute safe Linux commands directly', async () => {
+    const ai = new AiOps({
+      nodesConfig: [{ id: 'n1', name: 'TestNode' }],
+      sshManager: { exec: async () => ({ stdout: 'hello world', stderr: '', code: 0 }) },
+      getNodeStatus: () => [],
+      provisioner: { provision: () => {} },
+    });
+    const result = await ai.chat('echo hello');
+    assert.ok(result.response.includes('hello world'));
   });
 
   // 额外: 有节点时的状态查询

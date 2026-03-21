@@ -7,13 +7,58 @@
  * Provisioner（SSH 执行）或直接返回节点状态。
  *
  * 支持的指令：
- *   - "安装 openclaw [节点ID]" → provisioner.provision(node, {installGnb:false})
- *   - "配置下发 [节点ID]"      → provisioner.provision(node)
- *   - "状态"                   → 返回所有节点状态
- *   - "重启 gnb [节点ID]"      → SSH 执行 systemctl restart gnb
- *   - "日志 [节点ID]"          → SSH 获取 journalctl 日志
- *   - 其他                     → 返回帮助信息
+ *   - 内置快捷：状态/重启/日志/磁盘/性能/安装 openclaw/配置下发
+ *   - 直接执行 Linux 命令（经过危险指令黑名单过滤）
+ *   - exec <nodeId> <cmd> — 指定节点执行
  */
+
+// ——— 危险命令黑名单 ———
+// 每个条目: { pattern: RegExp, reason: string }
+// 注意：匹配前会将命令转小写，并去除变量展开等混淆手法
+const BLOCKED_PATTERNS = [
+  // 文件系统破坏
+  { pattern: /\brm\s+(-[a-z]*f|-[a-z]*r|--force|--recursive|--no-preserve-root)/i, reason: '禁止强制/递归删除' },
+  { pattern: /\brm\s+(-[a-z]*\s+)?\//,  reason: '禁止删除根目录' },
+  { pattern: /\bmkfs\b/i,                reason: '禁止格式化磁盘' },
+  { pattern: /\bdd\s+.*of\s*=\s*\/dev/i, reason: '禁止 dd 写入设备' },
+  { pattern: /\bshred\b/i,               reason: '禁止安全擦除' },
+  { pattern: /\bwipefs\b/i,              reason: '禁止擦除文件系统签名' },
+
+  // 系统关机/重启
+  { pattern: /\b(shutdown|poweroff|halt|init\s+0)\b/i, reason: '禁止关机' },
+  { pattern: /\breboot\b/i,              reason: '禁止重启系统' },
+
+  // 用户/权限操作
+  { pattern: /\b(userdel|groupdel)\b/i,  reason: '禁止删除用户/组' },
+  { pattern: /\bpasswd\b/i,              reason: '禁止修改密码' },
+  { pattern: /\bchmod\s+(-[a-z]*\s+)?0?777\b/i, reason: '禁止全开权限' },
+  { pattern: /\bchown\s+.*\s+\//i,       reason: '禁止根目录 chown' },
+  { pattern: /\bvisudo\b/i,              reason: '禁止编辑 sudoers' },
+
+  // 网络危险操作
+  { pattern: /\biptables\s+(-[a-z]*\s+)*-F\b/i, reason: '禁止清空防火墙规则' },
+  { pattern: /\bnft\s+flush\b/i,         reason: '禁止清空 nftables' },
+  { pattern: /\bifconfig\s+.*\s+down\b/i, reason: '禁止关闭网卡' },
+  { pattern: /\bip\s+link\s+.*\s+down\b/i, reason: '禁止关闭网卡' },
+
+  // 包管理危险操作
+  { pattern: /\b(yum|apt|dnf|rpm)\s+(remove|purge|erase)\b/i, reason: '禁止卸载软件包' },
+
+  // 危险 shell 操作
+  { pattern: /\>\s*\/dev\/sd[a-z]/i,     reason: '禁止覆写磁盘设备' },
+  { pattern: /\|\s*bash\b/i,             reason: '禁止管道到 bash（远程代码执行风险）' },
+  { pattern: /\bcurl\b.*\|\s*(sh|bash)/i, reason: '禁止 curl 管道执行' },
+  { pattern: /\bwget\b.*\|\s*(sh|bash)/i, reason: '禁止 wget 管道执行' },
+  { pattern: /:(\){\s*:|\(\)\{)/,        reason: '禁止 fork 炸弹' },
+  { pattern: /\beval\b/i,                reason: '禁止 eval（代码注入风险）' },
+  { pattern: /\bnohup\b/i,               reason: '禁止后台驻留进程' },
+  
+  // 内核/系统核心
+  { pattern: /\binsmod\b|\brmmod\b|\bmodprobe\s+-r\b/i, reason: '禁止内核模块操作' },
+  { pattern: /\/proc\/sys|sysctl\s+-w/i, reason: '禁止修改内核参数' },
+  { pattern: /\bkill\s+(-9\s+)?(-1|1)\b/i, reason: '禁止杀死所有进程' },
+  { pattern: /\bkillall\b/i,             reason: '禁止批量杀进程' },
+];
 class AiOps {
   /**
    * @param {object} options
@@ -97,7 +142,12 @@ class AiOps {
     }
 
     // 帮助
-    return this._handleHelp();
+    if (/^(help|帮助|\?)$/i.test(msg)) {
+      return this._handleHelp();
+    }
+
+    // 落底：尝试作为直接 Linux 命令执行
+    return this._handleDirectCmd(msg, nodeId);
   }
 
   // --- 指令处理 ---
@@ -198,6 +248,9 @@ class AiOps {
     const nodeConfig = this._resolveNode(nodeId);
     if (!nodeConfig) return { response: this._nodeNotFoundMsg(nodeId), commands: [] };
 
+    const blocked = this._checkCommandSafety(command);
+    if (blocked) return blocked;
+
     try {
       const result = await this.sshManager.exec(nodeConfig, command, 30000);
       let output = result.stdout.trim();
@@ -205,6 +258,31 @@ class AiOps {
       return { response: `\`\`\`\n${output || '(空输出)'}\n\`\`\``, commands: [] };
     } catch (err) {
       return { response: `❌ 执行失败: ${err.message}`, commands: [] };
+    }
+  }
+
+  /**
+   * 直接执行 Linux 命令（落底处理）
+   */
+  async _handleDirectCmd(cmd, nodeId) {
+    const nodeConfig = this._resolveNode(nodeId);
+    if (!nodeConfig) {
+      return {
+        response: `无法识别指令“${cmd}”，且未找到目标节点。\n输入 help 查看内置指令。`,
+        commands: [],
+      };
+    }
+
+    const blocked = this._checkCommandSafety(cmd);
+    if (blocked) return blocked;
+
+    try {
+      const result = await this.sshManager.exec(nodeConfig, cmd, 30000);
+      let output = result.stdout.trim();
+      if (result.stderr.trim()) output += `\n[STDERR] ${result.stderr.trim()}`;
+      return { response: `\`\`\`\n${output || '(空输出)'}\n\`\`\``, commands: [], targetNodeId: nodeConfig.id };
+    } catch (err) {
+      return { response: `❌ 执行失败: ${err.message}`, commands: [], targetNodeId: nodeConfig.id };
     }
   }
 
@@ -222,6 +300,9 @@ class AiOps {
     const command = parts.substring(spaceIdx + 1);
     const nodeConfig = this._resolveNode(nodeId);
     if (!nodeConfig) return { response: this._nodeNotFoundMsg(nodeId), commands: [] };
+
+    const blocked = this._checkCommandSafety(command);
+    if (blocked) return blocked;
 
     const { jobId } = this.jobManager.create(nodeConfig.id, command);
     const callbackUrl = `${this.callbackBaseUrl}/api/jobs/${jobId}/callback`;
@@ -248,21 +329,47 @@ class AiOps {
   _handleHelp() {
     return {
       response: `📖 可用指令：
-• 安装 openclaw <节点ID> — 在终端安装 OpenClaw
-• 配置下发 <节点ID> — 完整配置下发（GNB + OpenClaw）
-• 状态 [节点ID] — 查看节点状态
-• 重启 gnb <节点ID> — 重启 GNB 服务
-• 重启 openclaw <节点ID> — 重启 OpenClaw
-• 日志 <节点ID> — 查看最近日志
-• 磁盘 [节点ID] — 查看磁盘使用
-• 性能 [节点ID] — 查看 CPU/内存/负载
-• exec <节点ID> <命令> — 执行自定义命令（同步）
-• async exec <节点ID> <命令> — 异步执行（后台运行，WS 推送结果）`,
+• 状态 — 查看节点状态
+• 重启 gnb — 重启 GNB 服务
+• 日志 — 查看最近日志
+• 磁盘 — 查看磁盘使用
+• 性能 — 查看 CPU/内存/负载
+• 安装 openclaw — 在终端安装 OpenClaw
+• 配置下发 — 完整配置下发
+• help — 显示此帮助
+
+💻 也可直接输入 Linux 命令（如 ls, cat, top, netstat 等）
+⚠️ 危险指令已被黑名单拦截（rm -rf, shutdown, reboot, mkfs 等）`,
       commands: [],
     };
   }
 
   // --- 工具方法 ---
+
+  /**
+   * 命令安全检查 — 匹配黑名单
+   * @param {string} cmd - 待检查的命令
+   * @returns {object|null} 拦截响应对象，安全时返回 null
+   */
+  _checkCommandSafety(cmd) {
+    // 去掉变量展开、反引号等混淆手法
+    const normalized = cmd
+      .replace(/\$\{[^}]*\}/g, '')  // 去掉 ${...}
+      .replace(/\$\([^)]*\)/g, '')  // 去掉 $(...)
+      .replace(/`[^`]*`/g, '')      // 去掉 `...`
+      .replace(/\\/g, '');           // 去掉反斜杠转义
+
+    for (const { pattern, reason } of BLOCKED_PATTERNS) {
+      if (pattern.test(normalized) || pattern.test(cmd)) {
+        return {
+          response: `🚫 命令被拦截: ${reason}\n原始命令: \`${cmd}\`\n\n如确需执行，请登录服务器手动操作。`,
+          commands: [],
+          blocked: true,
+        };
+      }
+    }
+    return null;
+  }
 
   _extractNodeId(msg) {
     // 尝试从消息中提取节点 ID
