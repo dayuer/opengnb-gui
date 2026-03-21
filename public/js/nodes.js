@@ -292,7 +292,7 @@ const Nodes = {
             ${actions}
           </div>
         </div>
-        ${isExpanded ? `<div class="inline-panel mt-4 pt-4 border-t border-border-subtle"></div>` : ''}
+        ${isExpanded ? `<div class="inline-panel mt-4 pt-4 border-t border-border-subtle" onclick="event.stopPropagation()"></div>` : ''}
       </div>`;
     }
 
