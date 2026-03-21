@@ -2,7 +2,7 @@
 // @alpha: 节点管理 — Stitch "Cluster Management" 风格
 
 let nodeTabStates = {};
-let _xtermSessions = {}; // nodeId → { term, ws, fitAddon }
+let _chatSessions = {}; // @alpha: nodeId → { ws, messages }
 
 const Nodes = {
   render(container) {
@@ -446,7 +446,7 @@ const Nodes = {
     refreshIcons();
 
     if (ts.tab === 'claw') this._loadClawTab(node.id, ts.clawSubTab);
-    if (ts.tab === 'terminal') this._initXterm(node.id);
+    if (ts.tab === 'terminal') this._initChat(node.id);
   },
 
   _renderOverview(node) {
@@ -520,23 +520,32 @@ const Nodes = {
     </div>`;
   },
 
+  // @alpha: AI Chat 终端 — 自然语言 → Claude Code 流式执行
   _renderTerminal(node) {
     const shortcuts = [
-      { cmd: 'systemctl status gnb openclaw-gateway', icon: 'activity', label: '状态' },
-      { cmd: 'sudo systemctl restart gnb', icon: 'refresh-cw', label: '重启 GNB' },
-      { cmd: 'journalctl -u gnb -u openclaw-gateway --no-pager -n 30', icon: 'file-text', label: '日志' },
-      { cmd: 'df -h', icon: 'hard-drive', label: '磁盘' },
-      { cmd: 'top -bn1 | head -15', icon: 'gauge', label: '性能' },
-      { cmd: 'free -h', icon: 'cpu', label: '内存' },
+      { prompt: '请检查 GNB 和 OpenClaw 服务状态', icon: 'activity', label: '状态' },
+      { prompt: '请重启 GNB 服务', icon: 'refresh-cw', label: '重启 GNB' },
+      { prompt: '请查看 GNB 和 OpenClaw 最近 30 条日志', icon: 'file-text', label: '日志' },
+      { prompt: '请检查磁盘空间使用情况', icon: 'hard-drive', label: '磁盘' },
+      { prompt: '请查看系统性能概况（CPU/负载/进程）', icon: 'gauge', label: '性能' },
+      { prompt: '请查看内存使用情况', icon: 'cpu', label: '内存' },
     ];
     const maximized = this._termMaximized;
-    return `<div class="bg-base rounded-lg border border-border-default overflow-hidden" id="terminal-wrap-${safeAttr(node.id)}">
-      <div class="flex items-center gap-1.5 px-3 py-2 border-b border-border-subtle bg-elevated/30 flex-wrap">
+    const h = maximized ? 'calc(100vh - 280px)' : '320px';
+    return `<div class="rounded-lg border border-border-default overflow-hidden flex flex-col" id="terminal-wrap-${safeAttr(node.id)}" style="background:#fafbfc">
+      <div class="flex items-center gap-1.5 px-3 py-2 border-b border-border-subtle flex-wrap" style="background:#f3f4f6">
         <span class="text-xs text-text-muted mr-1 [&_svg]:w-3 [&_svg]:h-3 flex items-center gap-1">${L('zap')} 快捷</span>
-        ${shortcuts.map(s => `<button class="px-2 py-0.5 text-xs rounded-md border border-border-subtle hover:border-primary/40 hover:bg-primary/10 text-text-secondary hover:text-primary transition cursor-pointer flex items-center gap-1 [&_svg]:w-3 [&_svg]:h-3" onclick="Nodes.quickCmd('${safeAttr(node.id)}','${safeAttr(s.cmd)}')">${L(s.icon)} ${s.label}</button>`).join('')}
-        <button class="ml-auto px-2 py-0.5 text-xs rounded-md border border-border-subtle hover:border-primary/40 hover:bg-primary/10 text-text-secondary hover:text-primary transition cursor-pointer flex items-center gap-1 [&_svg]:w-3 [&_svg]:h-3" onclick="Nodes.toggleTerminalSize('${safeAttr(node.id)}')" title="${maximized ? '还原' : '最大化'}">${L(maximized ? 'minimize-2' : 'maximize-2')}</button>
+        ${shortcuts.map(s => `<button class="px-2 py-0.5 text-xs rounded-full border border-border-subtle hover:border-primary/40 hover:bg-primary/10 text-text-secondary hover:text-primary transition cursor-pointer flex items-center gap-1 [&_svg]:w-3 [&_svg]:h-3" onclick="Nodes.quickCmd('${safeAttr(node.id)}','${safeAttr(s.prompt)}')">${L(s.icon)} ${s.label}</button>`).join('')}
+        <button class="ml-auto px-2 py-0.5 text-xs rounded-full border border-border-subtle hover:border-primary/40 hover:bg-primary/10 text-text-secondary hover:text-primary transition cursor-pointer flex items-center gap-1 [&_svg]:w-3 [&_svg]:h-3" onclick="Nodes.toggleTerminalSize('${safeAttr(node.id)}')" title="${maximized ? '还原' : '最大化'}">${L(maximized ? 'minimize-2' : 'maximize-2')}</button>
       </div>
-      <div id="xterm-${safeAttr(node.id)}" style="height:${maximized ? 'calc(100vh - 240px)' : '320px'}"></div>
+      <div id="chat-messages-${safeAttr(node.id)}" class="overflow-y-auto px-4 py-3 space-y-3" style="height:${h};scroll-behavior:smooth">
+        <div class="flex gap-2 items-start"><div class="w-6 h-6 rounded-full flex items-center justify-center text-xs flex-shrink-0" style="background:linear-gradient(135deg,#7c5cfc,#a78bfa)">🤖</div><div class="text-sm leading-relaxed" style="color:#374151">你好！我是节点 <strong>${node.name || node.id}</strong> 的 AI 运维助手。用自然语言告诉我你需要做什么。</div></div>
+      </div>
+      <div class="px-3 py-2 border-t border-border-subtle flex gap-2 items-center" style="background:#f9fafb">
+        <input id="chat-input-${safeAttr(node.id)}" type="text" placeholder="用自然语言描述运维任务..." class="flex-1 px-3 py-1.5 text-sm rounded-full border border-border-subtle focus:border-primary focus:outline-none" style="background:#fff" onkeydown="if(event.key==='Enter'){Nodes.sendChat('${safeAttr(node.id)}');event.preventDefault()}" />
+        <button onclick="Nodes.sendChat('${safeAttr(node.id)}')" class="px-3 py-1.5 text-xs rounded-full text-white cursor-pointer flex items-center gap-1 [&_svg]:w-3.5 [&_svg]:h-3.5 hover:opacity-90 transition" style="background:linear-gradient(135deg,#7c5cfc,#6d4de8)">${L('send')} 发送</button>
+      </div>
+      <div class="px-3 py-1 text-center" style="background:#f3f4f6"><span class="text-[10px]" style="color:#9ca3af">Powered by Claude Code · 命令通过 SSH 执行</span></div>
     </div>`;
   },
 
@@ -544,11 +553,8 @@ const Nodes = {
 
   toggleTerminalSize(nodeId) {
     this._termMaximized = !this._termMaximized;
-    const xtermEl = document.getElementById(`xterm-${nodeId}`);
-    if (xtermEl) {
-      xtermEl.style.height = this._termMaximized ? 'calc(100vh - 240px)' : '320px';
-    }
-    // 更新按钮图标
+    const msgEl = document.getElementById(`chat-messages-${nodeId}`);
+    if (msgEl) msgEl.style.height = this._termMaximized ? 'calc(100vh - 280px)' : '320px';
     const wrap = document.getElementById(`terminal-wrap-${nodeId}`);
     if (wrap) {
       const btn = wrap.querySelector('[title="最大化"], [title="还原"]');
@@ -558,90 +564,159 @@ const Nodes = {
         refreshIcons();
       }
     }
-    // 触发 xterm fit
-    const s = _xtermSessions[nodeId];
-    if (s?.fitAddon) { setTimeout(() => { try { s.fitAddon.fit(); } catch (_) {} }, 50); }
   },
 
-  /** 初始化 xterm.js 并通过 WebSocket 连接到 SSH */
-  _initXterm(nodeId) {
-    // 复用已有会话
-    if (_xtermSessions[nodeId]) return;
+  // @alpha: 发送聊天消息
+  sendChat(nodeId) {
+    const input = document.getElementById(`chat-input-${nodeId}`);
+    if (!input) return;
+    const text = input.value.trim();
+    if (!text) return;
+    input.value = '';
+    const s = _chatSessions[nodeId];
+    if (!s || !s.ws || s.ws.readyState !== 1) {
+      this._appendMsg(nodeId, 'system', '⚠️ 未连接，请稍候重试');
+      return;
+    }
+    this._appendMsg(nodeId, 'user', text);
+    s.ws.send(JSON.stringify({ type: 'chat', text }));
+  },
 
-    const container = document.getElementById(`xterm-${nodeId}`);
-    if (!container) return;
+  // @alpha: 追加消息到聊天区域
+  _appendMsg(nodeId, role, content) {
+    const box = document.getElementById(`chat-messages-${nodeId}`);
+    if (!box) return;
+    const div = document.createElement('div');
+    if (role === 'user') {
+      div.className = 'flex justify-end';
+      div.innerHTML = `<div class="px-3 py-1.5 rounded-2xl text-sm text-white max-w-[80%]" style="background:linear-gradient(135deg,#7c5cfc,#6d4de8)">${this._escHtml(content)}</div>`;
+    } else if (role === 'ai') {
+      div.className = 'flex gap-2 items-start ai-msg';
+      div.innerHTML = `<div class="w-6 h-6 rounded-full flex items-center justify-center text-xs flex-shrink-0" style="background:linear-gradient(135deg,#7c5cfc,#a78bfa)">🤖</div><div class="text-sm leading-relaxed max-w-[90%] ai-text" style="color:#374151"></div>`;
+    } else {
+      div.className = 'text-center';
+      div.innerHTML = `<span class="text-xs px-2 py-0.5 rounded-full" style="color:#9ca3af;background:#f3f4f6">${this._escHtml(content)}</span>`;
+    }
+    box.appendChild(div);
+    box.scrollTop = box.scrollHeight;
+    return div;
+  },
 
-    const term = new Terminal({
-      fontSize: 13,
-      fontFamily: 'JetBrains Mono, Menlo, Monaco, monospace',
-      cursorBlink: true,
-      cursorStyle: 'bar',
-      allowProposedApi: true,
-      theme: {
-        background: '#0f1117',
-        foreground: '#e0e0e0',
-        cursor: '#e0e0e0',
-        selectionBackground: 'rgba(99, 102, 241, 0.3)',
-        black: '#1a1b26', red: '#f7768e', green: '#9ece6a', yellow: '#e0af68',
-        blue: '#7aa2f7', magenta: '#bb9af7', cyan: '#7dcfff', white: '#a9b1d6',
-      },
-    });
+  // @alpha: 获取或创建当前 AI 响应气泡
+  _getOrCreateAiBubble(nodeId) {
+    const box = document.getElementById(`chat-messages-${nodeId}`);
+    if (!box) return null;
+    const last = box.querySelector('.ai-msg:last-child');
+    if (last) return last.querySelector('.ai-text');
+    const div = this._appendMsg(nodeId, 'ai', '');
+    return div?.querySelector('.ai-text') || null;
+  },
 
-    const fitAddon = new FitAddon.FitAddon();
-    term.loadAddon(fitAddon);
-    try { term.loadAddon(new WebLinksAddon.WebLinksAddon()); } catch (_) {}
+  _escHtml(s) {
+    const d = document.createElement('div');
+    d.textContent = s;
+    return d.innerHTML;
+  },
 
-    term.open(container);
-    fitAddon.fit();
+  // @alpha: 初始化 AI Chat WebSocket
+  _initChat(nodeId) {
+    if (_chatSessions[nodeId]) return;
+    const msgBox = document.getElementById(`chat-messages-${nodeId}`);
+    if (!msgBox) return;
 
-    // 连接 WebSocket
     const proto = location.protocol === 'https:' ? 'wss' : 'ws';
     const token = App.getToken();
-    const ws = new WebSocket(`${proto}://${location.host}/ws/ssh?token=${encodeURIComponent(token)}&nodeId=${encodeURIComponent(nodeId)}&cols=${term.cols}&rows=${term.rows}`);
-    ws.binaryType = 'arraybuffer';
+    const ws = new WebSocket(`${proto}://${location.host}/ws/ai?token=${encodeURIComponent(token)}&nodeId=${encodeURIComponent(nodeId)}`);
+
+    let aiBuf = ''; // 累积当前 AI 响应文本
 
     ws.onopen = () => {
-      term.writeln('\x1b[32m✓ SSH 连接已建立\x1b[0m\r');
+      this._appendMsg(nodeId, 'system', '✓ AI 助手已连接');
     };
 
     ws.onmessage = (e) => {
-      const data = e.data instanceof ArrayBuffer ? new Uint8Array(e.data) : e.data;
-      term.write(data);
+      let chunk;
+      try { chunk = JSON.parse(e.data); } catch (_) { return; }
+
+      // @alpha: stream-json 事件处理
+      if (chunk.type === 'ack') {
+        aiBuf = '';
+        return;
+      }
+      if (chunk.type === 'busy') {
+        this._appendMsg(nodeId, 'system', chunk.text);
+        return;
+      }
+      if (chunk.type === 'error') {
+        this._appendMsg(nodeId, 'system', `❌ ${chunk.text || '执行失败'}`);
+        return;
+      }
+      if (chunk.type === 'done') {
+        aiBuf = '';
+        return;
+      }
+
+      // Claude stream-json 事件：assistant（文本）、tool_use（命令执行）、tool_result
+      const bubble = this._getOrCreateAiBubble(nodeId);
+      if (!bubble) return;
+
+      if (chunk.type === 'assistant' && chunk.message?.content) {
+        for (const block of chunk.message.content) {
+          if (block.type === 'text') {
+            aiBuf += block.text;
+            bubble.innerHTML = this._renderMd(aiBuf);
+          }
+        }
+      } else if (chunk.type === 'content_block_delta') {
+        if (chunk.delta?.type === 'text_delta') {
+          aiBuf += chunk.delta.text;
+          bubble.innerHTML = this._renderMd(aiBuf);
+        }
+      } else if (chunk.type === 'result') {
+        // 最终结果 — 完整替换
+        const text = chunk.result || '';
+        if (text) {
+          aiBuf = text;
+          bubble.innerHTML = this._renderMd(aiBuf);
+        }
+        aiBuf = '';
+        // 后续新消息需要新气泡
+      }
+
+      msgBox.scrollTop = msgBox.scrollHeight;
     };
 
     ws.onerror = () => {
-      term.writeln('\r\n\x1b[31m✗ WebSocket 连接错误\x1b[0m');
+      this._appendMsg(nodeId, 'system', '❌ 连接错误');
     };
 
     ws.onclose = (e) => {
-      term.writeln(`\r\n\x1b[33m⚡ 连接已断开 (${e.code})\x1b[0m`);
+      this._appendMsg(nodeId, 'system', `连接已断开 (${e.code})`);
+      delete _chatSessions[nodeId];
     };
 
-    // xterm → SSH
-    term.onData((data) => {
-      if (ws.readyState === 1) ws.send(data);
-    });
-
-    // resize
-    term.onResize(({ cols, rows }) => {
-      if (ws.readyState === 1) ws.send(JSON.stringify({ type: 'resize', cols, rows }));
-    });
-
-    // 窗口 resize → fit
-    const onResize = () => { try { fitAddon.fit(); } catch (_) {} };
-    window.addEventListener('resize', onResize);
-
-    _xtermSessions[nodeId] = { term, ws, fitAddon, onResize };
+    _chatSessions[nodeId] = { ws };
   },
 
-  /** 销毁 xterm 会话 */
-  _destroyXterm(nodeId) {
-    const s = _xtermSessions[nodeId];
+  // @alpha: 简易 Markdown → HTML（代码块 + 加粗 + 行内代码）
+  _renderMd(text) {
+    let html = this._escHtml(text);
+    // 代码块
+    html = html.replace(/```([\s\S]*?)```/g, '<pre style="background:#f3f4f6;padding:8px 12px;border-radius:6px;font-size:12px;overflow-x:auto;margin:6px 0;font-family:monospace;color:#1f2937">$1</pre>');
+    // 行内代码
+    html = html.replace(/`([^`]+)`/g, '<code style="background:#f3f4f6;padding:1px 4px;border-radius:3px;font-size:12px;font-family:monospace">$1</code>');
+    // 加粗
+    html = html.replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>');
+    // 换行
+    html = html.replace(/\n/g, '<br>');
+    return html;
+  },
+
+  _destroyChat(nodeId) {
+    const s = _chatSessions[nodeId];
     if (!s) return;
-    if (s.onResize) window.removeEventListener('resize', s.onResize);
     if (s.ws && s.ws.readyState <= 1) s.ws.close();
-    s.term.dispose();
-    delete _xtermSessions[nodeId];
+    delete _chatSessions[nodeId];
   },
 
   async _loadClawTab(nodeId, subTab) {
@@ -709,8 +784,8 @@ const Nodes = {
     const prev = App.selectedNodeId;
     App.selectedNodeId = prev === id ? null : id;
     // 收起旧节点的 xterm 会话
-    if (prev && prev !== id) this._destroyXterm(prev);
-    if (prev === id) this._destroyXterm(id);
+    if (prev && prev !== id) this._destroyChat(prev);
+    if (prev === id) this._destroyChat(id);
     this.renderTable();
   },
 
@@ -880,12 +955,14 @@ const Nodes = {
     try { await App.authFetch(`/api/enroll/${encodeURIComponent(id)}/group`, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ groupId: gid }) }); App.closeModal(); } catch (e) { showToast(`移动失败: ${e.message}`, 'error'); }
   },
 
-  /** 快捷按钮 — 直接向 SSH 会话写入命令 */
-  quickCmd(nodeId, cmd) {
-    const s = _xtermSessions[nodeId];
-    if (!s || !s.ws || s.ws.readyState !== 1) return;
-    // 写入命令 + 回车
-    s.ws.send(cmd + '\n');
-    s.term.focus();
+  // @alpha: 快捷按钮 — 发送自然语言描述给 Claude
+  quickCmd(nodeId, prompt) {
+    const s = _chatSessions[nodeId];
+    if (!s || !s.ws || s.ws.readyState !== 1) {
+      this._appendMsg(nodeId, 'system', '⚠️ AI 助手未连接');
+      return;
+    }
+    this._appendMsg(nodeId, 'user', prompt);
+    s.ws.send(JSON.stringify({ type: 'chat', text: prompt }));
   },
 };

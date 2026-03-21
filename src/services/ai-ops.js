@@ -1,6 +1,6 @@
 'use strict';
 
-const { execFile } = require('node:child_process');
+const { execFile, spawn } = require('node:child_process');
 
 /**
  * AI 运维服务 — 内置命令路由器
@@ -317,6 +317,69 @@ class AiOps {
         });
       });
     });
+  }
+
+  // @alpha: 流式 Claude Code 调用 — 供 /ws/ai 使用
+  streamChat(nodeConfig, prompt, onChunk) {
+    const nodeBin = process.execPath.replace(/\/[^/]+$/, '');
+    const extraPaths = [nodeBin, '/root/.nvm/versions/node/v24.14.0/bin', '/usr/local/bin'].join(':');
+
+    const sshTarget = nodeConfig
+      ? `${nodeConfig.sshUser || 'synon'}@${nodeConfig.tunAddr}`
+      : null;
+    const systemCtx = [
+      '你是服务器运维 AI 助手，使用中文回答。',
+      nodeConfig ? `当前管理节点: ${nodeConfig.name || nodeConfig.id}` : '',
+      sshTarget ? `SSH 地址: ${sshTarget}（端口 ${nodeConfig.sshPort || 22}）` : '',
+      sshTarget ? `执行远程命令时使用: ssh -o StrictHostKeyChecking=no -p ${nodeConfig.sshPort || 22} ${sshTarget} "<命令>"` : '',
+      '请用简洁专业的方式分析执行结果并给出建议。',
+    ].filter(Boolean).join(' ');
+
+    const args = [
+      '-p', prompt,
+      '--output-format', 'stream-json',
+      '--bare',
+      '--append-system-prompt', systemCtx,
+      '--allowedTools', 'Bash(ssh:*) Bash(cat:*) Bash(grep:*) Bash(head:*) Bash(tail:*) Read',
+      '--permission-mode', 'bypassPermissions',
+      '--max-budget-usd', '0.5',
+    ];
+
+    const child = spawn('claude', args, {
+      cwd: '/opt/gnb-console',
+      env: { ...process.env, NO_COLOR: '1', PATH: `${extraPaths}:${process.env.PATH || ''}` },
+      stdio: ['pipe', 'pipe', 'pipe'],
+    });
+
+    let buf = '';
+    child.stdout.on('data', (data) => {
+      buf += data.toString();
+      const lines = buf.split('\n');
+      buf = lines.pop() || '';
+      for (const line of lines) {
+        if (!line.trim()) continue;
+        try { onChunk(JSON.parse(line)); } catch (_) { /* 非 JSON 行忽略 */ }
+      }
+    });
+
+    child.stderr.on('data', (data) => {
+      const msg = data.toString().trim();
+      if (msg) onChunk({ type: 'system', text: msg });
+    });
+
+    child.on('close', (code) => {
+      // 处理缓冲区剩余
+      if (buf.trim()) {
+        try { onChunk(JSON.parse(buf)); } catch (_) {}
+      }
+      onChunk({ type: 'done', exitCode: code || 0 });
+    });
+
+    child.on('error', (err) => {
+      onChunk({ type: 'error', text: `Claude 启动失败: ${err.message}` });
+    });
+
+    return { kill: () => { try { child.kill('SIGTERM'); } catch (_) {} } };
   }
 
   /**

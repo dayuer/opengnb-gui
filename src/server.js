@@ -510,6 +510,59 @@ async function boot() {
     });
   });
 
+  // --- AI Chat 终端 WebSocket ---
+  // @alpha: 用户发自然语言 → Claude Code 流式执行 → 结果流式推送
+  const wssAi = new WebSocketServer({ noServer: true });
+
+  wssAi.on('connection', (ws, req) => {
+    const url = new URL(req.url, 'http://localhost');
+    const token = url.searchParams.get('token');
+    const nodeId = url.searchParams.get('nodeId');
+
+    const authResult = _resolveWsToken(token);
+    if (!authResult.valid) {
+      ws.send(JSON.stringify({ type: 'error', text: '认证失败' }));
+      ws.close(4001);
+      return;
+    }
+    console.log(`[AI-WS] 连接: nodeId=${nodeId}, user=${authResult.userId}`);
+
+    const nodeConfig = aiOps._resolveNode(nodeId);
+    let activeHandle = null;
+
+    ws.on('message', (raw) => {
+      let msg;
+      try { msg = JSON.parse(raw.toString()); } catch (_) { return; }
+
+      if (msg.type === 'chat' && msg.text?.trim()) {
+        // @alpha: 上一个 Claude 进程仍在运行则拒绝
+        if (activeHandle) {
+          ws.send(JSON.stringify({ type: 'busy', text: '上一条指令仍在执行，请稍候...' }));
+          return;
+        }
+
+        ws.send(JSON.stringify({ type: 'ack', text: msg.text }));
+        activeHandle = aiOps.streamChat(nodeConfig, msg.text, (chunk) => {
+          if (ws.readyState !== 1) return;
+          ws.send(JSON.stringify(chunk));
+          if (chunk.type === 'done' || chunk.type === 'error') {
+            activeHandle = null;
+          }
+        });
+      }
+    });
+
+    ws.on('close', () => {
+      console.log('[AI-WS] 断开');
+      if (activeHandle) activeHandle.kill();
+    });
+
+    ws.on('error', (err) => {
+      console.error(`[AI-WS] 错误: ${err.message}`);
+      if (activeHandle) activeHandle.kill();
+    });
+  });
+
   // --- HTTP upgrade 路由：手动分发到对应 WSS ---
   server.on('upgrade', (req, socket, head) => {
     const { pathname } = new URL(req.url, 'http://localhost');
@@ -517,6 +570,8 @@ async function boot() {
       wss.handleUpgrade(req, socket, head, (ws) => { wss.emit('connection', ws, req); });
     } else if (pathname === '/ws/ssh') {
       wssSsh.handleUpgrade(req, socket, head, (ws) => { wssSsh.emit('connection', ws, req); });
+    } else if (pathname === '/ws/ai') {
+      wssAi.handleUpgrade(req, socket, head, (ws) => { wssAi.emit('connection', ws, req); });
     } else {
       socket.destroy();
     }
