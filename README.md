@@ -58,8 +58,12 @@
 - **文件权限** — agent.env / 私钥 chmod 600
 - **命令白名单** — SSH 命令安全门控
 
-### 运维
-- **Claude AI 运维** — 智能诊断 + 安全门控
+### AI 运维 (AI Ops Terminal)
+- **自然语言运维** — 用中文描述运维意图，Claude Code 自动理解并执行 SSH 命令
+- **流式执行** — Console 本地调用 Claude CLI → `stream-json` → WebSocket 实时推送
+- **安全门控** — 63 条危险命令黑名单拦截（rm -rf、shutdown、reboot 等）
+- **快捷指令** — 一键状态检查、日志查看、性能分析、服务重启
+- **Premium UI** — Stitch 设计语言、深色终端头部、实时连接状态脉冲、深色代码块
 - **异步命令框架** — SSH 投递 + nohup 后台执行 + HTTP 回调
 - **远程部署** — 审批通过后自动推送 OpenClaw
 - **主题切换** — 深色 ↔ 亮色模式，`localStorage` 持久化
@@ -162,9 +166,18 @@ opengnb-gui/
 │   └── mirror/                     # GNB/OpenClaw 二进制镜像
 │
 ├── public/                         # Web Dashboard
-│   ├── index.html                  # SPA 入口
-│   ├── css/style.css               # 暗色/亮色主题
-│   └── js/app.js                   # 前端逻辑 + WebSocket
+│   ├── index.html                  # SPA 入口 (Tailwind v4 @theme)
+│   └── js/
+│       ├── app.js                  # 应用入口 + WebSocket
+│       ├── core.js                 # 核心状态管理
+│       ├── nodes.js                # 节点管理 + AI Ops Terminal
+│       ├── dashboard.js            # 仪表盘
+│       ├── settings.js             # 系统设置
+│       ├── users.js                # 团队管理
+│       ├── groups.js               # 分组管理
+│       ├── ws.js                   # WebSocket 客户端
+│       ├── modal.js                # 弹窗组件
+│       └── utils.js                # 工具函数
 │
 └── team/                           # 团队协作文档
     ├── requirements.md             # 当前需求
@@ -219,7 +232,7 @@ opengnb-gui/
 ## 测试
 
 ```bash
-npm test    # 169 tests, 100% pass
+npm test    # 174 tests, 100% pass
 ```
 
 ## 版本演进
@@ -236,6 +249,9 @@ npm test    # 169 tests, 100% pass
 | 03-20 | Enroll 安全加固 | enrollToken + passcode TTL + nodeId 绑定 |
 | 03-20 | Agent 推模式 | 节点 Agent 每 10s 推送 → 取代 SSH 轮询 |
 | 03-20 | TOKEN 统一 | 认证命名统一为 TOKEN |
+| 03-20 | Stitch 设计系统 | 亮色主题 + Indigo Cloud 配色 + Glassmorphism |
+| 03-20 | AI Terminal v1 | Claude Code 流式 Chat UI + WebSocket |
+| 03-21 | AI Ops Terminal | Stitch 设计对齐 — 深色头部 + premium 气泡 + 零行内 style |
 
 ## License
 
