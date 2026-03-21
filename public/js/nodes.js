@@ -772,9 +772,28 @@ const Nodes = {
       const monNode = App.nodesData.find(n => n.id === nodeId);
       const oc = monNode?.openclaw;
       if (oc && oc.running && oc.config) {
-        detail.innerHTML = `<pre class="text-xs bg-base rounded-lg p-3 overflow-x-auto">${escHtml(JSON.stringify(oc.config, null, 2))}</pre>`;
+        const gw = oc.config.gateway || {};
+        const tokenPreview = gw.auth?.token ? gw.auth.token.substring(0, 12) + '...' : '无';
+        detail.innerHTML = `
+          <div class="space-y-3">
+            <div class="grid grid-cols-2 md:grid-cols-3 gap-3">
+              ${this._statCard(L('activity'), '状态', oc.running ? '运行中' : '未运行', oc.running ? 'text-success' : 'text-warning')}
+              ${this._statCard(L('hash'), 'PID', oc.pid || '-', '')}
+              ${this._statCard(L('radio'), '端口', gw.port || '-', '')}
+              ${this._statCard(L('key-round'), 'Token', tokenPreview, 'font-mono text-xs')}
+              ${this._statCard(L('folder'), '配置路径', oc.configPath || '-', 'text-xs')}
+              ${this._statCard(L('wifi'), 'RPC 健康', oc.rpcOk ? '正常' : '不可用', oc.rpcOk ? 'text-success' : 'text-warning')}
+            </div>
+            <details class="text-xs">
+              <summary class="cursor-pointer text-text-muted hover:text-text-primary transition">查看完整配置 JSON</summary>
+              <pre class="bg-base rounded-lg p-3 mt-2 overflow-x-auto">${escHtml(JSON.stringify(oc.config, null, 2))}</pre>
+            </details>
+            <div class="text-xs text-text-muted">${L('info')} Token 将在下次 Agent 上报时自动同步到配置表</div>
+          </div>`;
+      } else if (oc && !oc.running) {
+        detail.innerHTML = `<div class="text-warning text-sm">${L('alert-triangle')} OpenClaw 未运行 (进程未检测到)</div>`;
       } else {
-        detail.innerHTML = `<div class="text-text-muted text-sm">${L('info')} 未配置 OpenClaw Token</div>`;
+        detail.innerHTML = `<div class="text-text-muted text-sm">${L('info')} 未检测到 OpenClaw 信息，等待 Agent 上报...</div>`;
       }
       refreshIcons();
       return;

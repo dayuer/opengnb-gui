@@ -601,6 +601,17 @@ async function boot() {
     }
   });
 
+  // @alpha: Agent 上报 OpenClaw token → 自动写入节点配置（推模式自发现）
+  monitor.on('clawDiscovered', ({ nodeId, token, port }) => {
+    if (token) {
+      keyManager.updateNodeClawConfig(nodeId, { token, port });
+      const updated = keyManager.getApprovedNodesConfig();
+      monitor.nodesConfig = updated;
+      aiOps.nodesConfig = updated;
+      console.log(`[ClawDiscovered] 节点 ${nodeId} 从 Agent 上报自动写入 Token (port=${port})`);
+    }
+  });
+
   // OpenClaw token 就绪 → 保存到节点配置
   provisioner.on('claw_ready', ({ nodeId, token, port }) => {
     if (token) {

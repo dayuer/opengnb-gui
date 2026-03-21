@@ -76,6 +76,20 @@ class GnbMonitor extends EventEmitter {
 
     this.latestState.set(nodeId, state);
 
+    // @alpha: OpenClaw token/port 自动发现 — agent 上报 config 后同步到节点配置表
+    const gw = report.openclaw?.config?.gateway;
+    if (gw) {
+      const discoveredToken = gw.auth?.token || null;
+      const discoveredPort = gw.port || null;
+      if (discoveredToken) {
+        const nodeConfig = this.nodesConfig.find(n => n.id === nodeId);
+        // 仅在首次发现或 token 变更时触发
+        if (nodeConfig && (!nodeConfig.clawToken || nodeConfig.clawToken !== discoveredToken)) {
+          this.emit('clawDiscovered', { nodeId, token: discoveredToken, port: discoveredPort });
+        }
+      }
+    }
+
     // 记录指标到时序存储
     if (this.metricsStore) {
       const memPct = sysInfo.memTotalMB > 0 ? Math.round(sysInfo.memUsedMB / sysInfo.memTotalMB * 100) : 0;
