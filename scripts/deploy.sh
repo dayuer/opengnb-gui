@@ -67,7 +67,9 @@ else
 fi
 
 cd $APP_DIR
-npm install --omit=dev
+npm install --include=dev  # Install vite to build
+npm run build              # Build frontend static files
+npm install --omit=dev     # Remove dev dependencies to save space
 npm rebuild
 mkdir -p data
 
