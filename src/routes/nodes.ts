@@ -246,17 +246,21 @@ function createNodesRouter(monitor: any, sshManager: any, nodesConfig: any, keyM
     const isLocalOnly = source === 'skills.sh' || source === 'console';
 
     // 构造安装命令（仅远程源需要）
+    // @fix: 用 bash -lc 包裹以加载 login profile（NVM/fnm 环境下 npm 不在默认 PATH）
     let cmd = '';
     if (!isLocalOnly) {
+      let innerCmd = '';
       if (source.startsWith('http')) {
-        cmd = `curl -sSL ${source} | sudo bash`;
+        innerCmd = `curl -sSL ${source} | sudo bash`;
       } else if (source === 'npm') {
-        cmd = `sudo npm install -g ${skillId}`;
+        innerCmd = `sudo $(which npm) install -g ${skillId}`;
       } else if (source === 'openclaw') {
-        cmd = `sudo npm install -g @openclaw/${skillId}`;
+        innerCmd = `sudo $(which npm) install -g @openclaw/${skillId}`;
       } else {
         return res.status(400).json({ error: '不支持的安装源: ' + source });
       }
+      // bash -lc 确保 .bashrc/.profile 被加载（NVM 等工具依赖此机制）
+      cmd = `bash -lc '${innerCmd.replace(/'/g, "'\"'\"'")}'`;
     }
 
     try {
@@ -264,9 +268,10 @@ function createNodesRouter(monitor: any, sshManager: any, nodesConfig: any, keyM
 
       // 远程源：SSH 执行安装命令
       if (!isLocalOnly) {
-        result = await sshManager.exec(nodeConfig, cmd, 30000);
+        result = await sshManager.exec(nodeConfig, cmd, 60000);
         if (result.code !== 0) {
-          return res.status(500).json({ error: `安装执行败(code:${result.code})`, stdout: result.stdout, stderr: result.stderr });
+          console.error(`[Skills] 安装失败 node=${req.params.id} cmd=${cmd} code=${result.code} stderr=${result.stderr}`);
+          return res.status(500).json({ error: `安装执行失败(code:${result.code}): ${result.stderr || result.stdout || '未知错误'}`, stdout: result.stdout, stderr: result.stderr });
         }
       }
 
@@ -307,10 +312,12 @@ function createNodesRouter(monitor: any, sshManager: any, nodesConfig: any, keyM
     }
 
     // fallback: 目前统一认为是全局 npm 包
-    const cmd = `sudo npm uninstall -g ${skillId} || echo "Skill likely not an NPM package"`;
+    // @fix: bash -lc 确保 NVM 环境加载（与安装一致）
+    const innerCmd = `sudo $(which npm) uninstall -g ${skillId} || echo "Skill likely not an NPM package"`;
+    const cmd = `bash -lc '${innerCmd.replace(/'/g, "'\"'\"'")}'`;
 
     try {
-      const result = await sshManager.exec(nodeConfig, cmd, 20000);
+      const result = await sshManager.exec(nodeConfig, cmd, 30000);
       
       // 无论命令执行成功与否，一律剔除本地记录以作乐观展示（假设物理已失效）
       if (keyManager) {

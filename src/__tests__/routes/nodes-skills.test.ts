@@ -73,7 +73,7 @@ describe('Node Skills API', () => {
       });
 
       assert.equal(res.statusCode, 200);
-      assert.equal(executedCmd, 'curl -sSL https://example.com/install.sh | sudo bash');
+      assert.ok(executedCmd.includes('curl -sSL https://example.com/install.sh | sudo bash'));
       
       const skills = keyManager.lastUpdatedSkills;
       assert.ok(skills);
@@ -99,7 +99,7 @@ describe('Node Skills API', () => {
       });
 
       assert.equal(res.statusCode, 200);
-      assert.equal(executedCmd, 'sudo npm install -g npm-package');
+      assert.ok(executedCmd.includes('$(which npm) install -g npm-package'));
     });
 
     it('should return 400 for unsupported source', async () => {
@@ -177,7 +177,7 @@ describe('Node Skills API', () => {
 
       assert.equal(res.statusCode, 500);
       assert.equal(keyManager.lastUpdatedSkills, null);
-      assert.ok(res.body.error.includes('安装执行败'));
+      assert.ok(res.body.error.includes('安装执行失败'));
     });
   });
 
@@ -194,7 +194,7 @@ describe('Node Skills API', () => {
       const res = await request(app, 'DELETE', '/api/nodes/n1/skills/old-skill', {});
 
       assert.equal(res.statusCode, 200);
-      assert.ok(executedCmd.includes('sudo npm uninstall -g old-skill'));
+      assert.ok(executedCmd.includes('$(which npm) uninstall -g old-skill'));
       
       const skills = keyManager.lastUpdatedSkills;
       assert.ok(skills);
