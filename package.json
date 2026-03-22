@@ -19,9 +19,13 @@
   ],
   "license": "GPL-3.0",
   "dependencies": {
+    "@fontsource-variable/inter": "^5.2.8",
+    "@fontsource-variable/jetbrains-mono": "^5.2.8",
+    "@fontsource-variable/manrope": "^5.2.8",
     "@tailwindcss/vite": "^4.2.2",
     "better-sqlite3": "^11.7.0",
     "express": "^4.21.0",
+    "lucide": "^0.577.0",
     "ssh2": "^1.16.0",
     "tailwindcss": "^4.2.2",
     "ws": "^8.18.0"

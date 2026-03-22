@@ -1,11 +1,12 @@
 // @alpha: 工具函数模块
+import { createIcons, icons } from 'lucide';
 
 export const $ = (sel: string): HTMLElement | null => document.querySelector(sel);
 export const $$ = (sel: string): NodeListOf<HTMLElement> => document.querySelectorAll(sel);
 export const L = (name: string): string => `<i data-lucide="${name}"></i>`;
 
 export function refreshIcons(): void {
-  if ((window as any).lucide) (window as any).lucide.createIcons();
+  createIcons({ icons });
 }
 
 export function escHtml(str: string): string {
