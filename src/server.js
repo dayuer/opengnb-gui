@@ -304,10 +304,16 @@ async function boot() {
 
   // 健康检查 — @security: 精简返回信息（安全审计 L2 修复）
   app.get('/api/health', (req, res) => {
+    const allNodes = keyManager.getAllNodes();
+    const approved = allNodes.filter(n => n.status === 'approved');
+    const pending = allNodes.filter(n => n.status === 'pending');
     res.json({
       status: 'ok',
       uptime: Math.floor(process.uptime()),
       timestamp: new Date().toISOString(),
+      nodesTotal: allNodes.length,
+      nodesApproved: approved.length,
+      nodesPending: pending.length,
     });
   });
 
