@@ -123,21 +123,23 @@ class SkillsStore {
   /** 创建新技能（用户上传） */
   create(skill: any): any {
     const now = new Date().toISOString();
+    // @fix: better-sqlite3 只接受 number|string|bigint|Buffer|null
+    // 必须显式强转所有字段，杜绝 boolean/undefined 泄漏
     const row = {
-      id: skill.id || crypto.randomUUID(),
-      name: skill.name || 'Untitled Skill',
-      version: skill.version || 'v1.0',
-      author: skill.author || 'User',
-      description: skill.description || '',
-      category: skill.category || 'ai',
-      icon: skill.icon || 'package',
-      iconGradient: skill.iconGradient || 'linear-gradient(135deg, #6366f1 0%, #a5b4fc 100%)',
-      rating: skill.rating || 0,
-      installs: skill.installs || 0,
-      source: skill.source || 'custom',
-      slug: skill.slug || '',
-      installType: skill.installType || 'prompt',
-      skillContent: skill.skillContent || '',
+      id: String(skill.id || crypto.randomUUID()),
+      name: String(skill.name || 'Untitled Skill'),
+      version: String(skill.version || 'v1.0'),
+      author: String(skill.author || 'User'),
+      description: String(skill.description || ''),
+      category: String(skill.category || 'ai'),
+      icon: String(skill.icon || 'package'),
+      iconGradient: String(skill.iconGradient || 'linear-gradient(135deg, #6366f1 0%, #a5b4fc 100%)'),
+      rating: Number(skill.rating) || 0,
+      installs: Number(skill.installs) || 0,
+      source: String(skill.source || 'custom'),
+      slug: String(skill.slug || ''),
+      installType: String(skill.installType || 'prompt'),
+      skillContent: String(skill.skillContent || ''),
       isBuiltin: skill.isBuiltin ? 1 : 0,
       createdAt: now,
       updatedAt: now,
