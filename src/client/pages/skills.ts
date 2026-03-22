@@ -675,14 +675,15 @@ export const Skills = {
       // 1. 抓取可用节点列表
       const res = await App.authFetch('/api/nodes');
       const data = await res.json();
-      const nodes = Array.isArray(data.nodes) ? data.nodes : (Array.isArray(data.data) ? data.data : (Array.isArray(data) ? data : []));
+      const allNodes = Array.isArray(data.nodes) ? data.nodes : (Array.isArray(data.data) ? data.data : (Array.isArray(data) ? data : []));
+      const nodes = allNodes.filter(n => n.online);
 
       // 2. 构建 Stitch "Kinetic Command" 风格的独立模态框
       const overlay = document.createElement('div');
       overlay.className = 'fixed inset-0 z-[60] flex items-center justify-center bg-black/60 backdrop-blur-sm transition-opacity duration-300 opacity-0';
       
       const nodeHtml = nodes.length > 0 ? nodes.map(node => {
-        const isOnline = node.status === 'online';
+        const isOnline = !!node.online;
         const statusColor = isOnline ? 'bg-primary shadow-[0_0_8px_#b2a1ff]' : 'bg-danger shadow-[0_0_8px_#ff6e84]';
         const statusText = isOnline ? 'Online' : 'Offline';
         const textColor = isOnline ? 'text-primary' : 'text-danger';
