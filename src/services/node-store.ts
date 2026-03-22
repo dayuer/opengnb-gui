@@ -437,12 +437,15 @@ class NodeStore {
     const params: Record<string, any> = { id };
     for (const [key, val] of Object.entries(fields)) {
       if (key === 'id') continue; // 不允许改 id
-      if (key === 'ready') {
-        sets.push(`${key} = @${key}`);
+      sets.push(`${key} = @${key}`);
+      // @fix: better-sqlite3 只接受 number|string|bigint|Buffer|null
+      // 数组/对象必须 JSON 序列化，布尔必须转 0/1
+      if (Array.isArray(val) || (val !== null && typeof val === 'object')) {
+        params[key] = JSON.stringify(val);
+      } else if (typeof val === 'boolean') {
         params[key] = val ? 1 : 0;
       } else {
-        sets.push(`${key} = @${key}`);
-        params[key] = val;
+        params[key] = val ?? null;
       }
     }
     if (sets.length === 0) return;
