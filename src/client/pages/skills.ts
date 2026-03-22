@@ -675,7 +675,7 @@ export const Skills = {
       // 1. 抓取可用节点列表
       const res = await App.authFetch('/api/nodes');
       const data = await res.json();
-      const nodes = Array.isArray(data.data) ? data.data : (Array.isArray(data) ? data : []);
+      const nodes = Array.isArray(data.nodes) ? data.nodes : (Array.isArray(data.data) ? data.data : (Array.isArray(data) ? data : []));
 
       // 2. 构建 Stitch "Kinetic Command" 风格的独立模态框
       const overlay = document.createElement('div');
