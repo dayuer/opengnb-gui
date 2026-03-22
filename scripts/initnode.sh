@@ -505,6 +505,13 @@ if [ "$CLAW_INSTALLED" = "true" ]; then
     "mode": "local",
     "port": $CLAW_PORT,
     "bind": "lan",
+    "controlUi": {
+      "allowedOrigins": [
+        "http://localhost:$CLAW_PORT",
+        "http://127.0.0.1:$CLAW_PORT",
+        "http://$TUN_ADDR:$CLAW_PORT"
+      ]
+    },
     "auth": {
       "mode": "token",
       "token": "$CLAW_TOKEN"

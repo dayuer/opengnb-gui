@@ -290,6 +290,13 @@ SVCUNIT`, log);
       gateway: {
         mode: 'local',
         port: 18789, bind: 'lan',
+        controlUi: {
+          allowedOrigins: [
+            'http://localhost:18789',
+            'http://127.0.0.1:18789',
+            `http://${nodeConfig.tunAddr}:18789`,
+          ],
+        },
         auth: { mode: 'token', token },
       },
     }, null, 2);
