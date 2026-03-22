@@ -585,13 +585,9 @@ export const Skills = {
               ${installText}
             </span>
           </div>
-          ${skill.installed
-            ? `<span class="inline-flex items-center gap-1 px-2.5 py-1 text-xs font-medium rounded-lg bg-success/10 text-success">
-                <i data-lucide="check-circle-2" class="w-3 h-3"></i>已安装</span>`
-            : `<button class="inline-flex items-center gap-1 px-3 py-1 text-xs font-medium rounded-lg bg-primary text-text-inverse hover:bg-primary-dark transition cursor-pointer shadow-sm"
-                onclick="event.stopPropagation(); Skills._installSkill('${skill.id}')">
-                <i data-lucide="download" class="w-3 h-3"></i>安装</button>`
-          }
+          <button class="inline-flex items-center gap-1 px-3 py-1 text-xs font-medium rounded-lg bg-primary text-text-inverse hover:bg-primary-dark transition cursor-pointer shadow-sm"
+              onclick="event.stopPropagation(); Skills._installSkill('${skill.id}')">
+              <i data-lucide="download" class="w-3 h-3"></i>安装</button>
         </div>
       </div>`;
   },
@@ -798,9 +794,6 @@ export const Skills = {
               throw new Error(errData.error || `Server responded with ${res.status}`);
             }
             showToast(`指令已发送至 ${targetNodeId} 执行部署`, 'success');
-            skill.installed = true; // 乐观UI更新
-            const mainContent = document.getElementById('main-content');
-            if (mainContent) this._filterAndRender(mainContent);
             closeHandler();
           } catch (err: any) {
             console.error('Install failed:', err);
