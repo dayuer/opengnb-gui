@@ -193,6 +193,20 @@ function createEnrollRouter(keyManager, security = {}) {
     res.status(result.success ? 200 : 404).json(result);
   });
 
+  // POST /api/enroll/:id/claw-token — 节点提交 OpenClaw token（enrollToken 认证）
+  router.post('/:id/claw-token', requireEnrollToken, requireNodeIdMatch, (req, res) => {
+    const { token: clawToken, port } = req.body;
+    if (!clawToken || typeof clawToken !== 'string' || clawToken.length < 16) {
+      return res.status(400).json({ error: '无效 clawToken' });
+    }
+    const ok = keyManager.updateNodeClawConfig(req.params.id, {
+      token: clawToken,
+      port: port || 18789,
+    });
+    if (!ok) return res.status(404).json({ error: '节点不存在' });
+    res.json({ success: true, message: 'OpenClaw Token 已保存' });
+  });
+
   return router;
 }
 

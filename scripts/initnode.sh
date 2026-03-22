@@ -8,10 +8,12 @@
 #   4. 配置 GNB（密钥生成 + 公钥交换 + 配置文件 + systemd）
 #   5. 启动 GNB 并验证 TUN 网络连通
 #   6. 创建 synon 用户（sudo 免密）
-#   7. 安装 Node.js v22（OpenClaw 由 Console 远程推送安装）
+#   7. 安装 Node.js v22
 #   8. 下载 Console SSH 公钥
-#   9. 安装监控 Agent（上报节点信息到 Console）
-#  10. 通知 Console 已就绪
+#   9. 安装 OpenClaw（Console 镜像优先 → npm 回退 + 配置 + systemd）
+#  10. 提交 OpenClaw Token 到 Console
+#  11. 安装监控 Agent（上报节点信息到 Console）
+#  12. 通知 Console 已就绪
 #
 # 用法（在目标节点以 root 执行）：
 #   curl -sSL https://api.synonclaw.com/api/enroll/init.sh | bash
@@ -418,9 +420,132 @@ chmod 600 "$AUTH_KEYS"
 chown -R "$SSH_USER:$SSH_USER" "$SSH_DIR"
 
 # ============================================
-# Step 9: 安装监控 Agent（上报节点信息到 Console）
+# Step 9: 安装 OpenClaw（Console 镜像优先 → npm 回退）
 # ============================================
-echo "[9/10] 安装监控 Agent..."
+echo "[9/12] 安装 OpenClaw..."
+
+CLAW_VER=$(openclaw --version 2>/dev/null || echo "NOT_FOUND")
+if echo "$CLAW_VER" | grep -qi "not_found"; then
+    # 策略 A: 从 Console 镜像下载 tarball
+    CLAW_INSTALLED=false
+    MIRROR_LIST=$(curl -sf -m 5 "$API_BASE/api/mirror/openclaw" 2>/dev/null || echo "{}")
+    CLAW_TGZ=$(echo "$MIRROR_LIST" | python3 -c "
+import sys,json
+try:
+    d=json.load(sys.stdin)
+    files=[f['name'] for f in d.get('files',[]) if f['name'].endswith('.tgz')]
+    files.sort()
+    print(files[-1] if files else '')
+except: print('')
+" 2>/dev/null)
+
+    if [ -n "$CLAW_TGZ" ]; then
+        echo "      从 Console 镜像下载: $CLAW_TGZ"
+        if curl -sf -m 120 "$API_BASE/api/mirror/openclaw/$CLAW_TGZ" -o "/tmp/$CLAW_TGZ"; then
+            npm install -g "/tmp/$CLAW_TGZ" > /tmp/openclaw-install.log 2>&1 && CLAW_INSTALLED=true
+            rm -f "/tmp/$CLAW_TGZ"
+        fi
+    fi
+
+    # 策略 B: npm 在线安装（含国内镜像）
+    if [ "$CLAW_INSTALLED" != "true" ]; then
+        echo "      从 npm 在线安装..."
+        npm install -g openclaw@latest --registry=https://registry.npmmirror.com \
+            > /tmp/openclaw-install.log 2>&1 && CLAW_INSTALLED=true
+    fi
+
+    if [ "$CLAW_INSTALLED" != "true" ]; then
+        echo "      ⚠️ OpenClaw 安装失败，跳过（可稍后通过 Console 终端安装）"
+    else
+        echo "      ✅ OpenClaw $(openclaw --version 2>/dev/null) 已安装"
+    fi
+else
+    echo "      OpenClaw $CLAW_VER 已存在"
+    CLAW_INSTALLED=true
+fi
+
+# 配置 OpenClaw + systemd + 生成 Token
+CLAW_TOKEN=""
+CLAW_PORT=18789
+if [ "$CLAW_INSTALLED" = "true" ]; then
+    # 生成随机 Token
+    CLAW_TOKEN=$(python3 -c "import secrets; print(secrets.token_hex(32))" 2>/dev/null \
+        || openssl rand -hex 32 2>/dev/null \
+        || cat /dev/urandom | tr -dc 'a-f0-9' | head -c 64)
+
+    # 创建配置文件
+    CLAW_CONFIG_DIR="/root/.openclaw"
+    mkdir -p "$CLAW_CONFIG_DIR"
+    cat > "$CLAW_CONFIG_DIR/openclaw.json" << CLAWEOF
+{
+  "gateway": {
+    "port": $CLAW_PORT,
+    "bind": "lan",
+    "auth": {
+      "mode": "token",
+      "token": "$CLAW_TOKEN"
+    }
+  }
+}
+CLAWEOF
+    chmod 600 "$CLAW_CONFIG_DIR/openclaw.json"
+    echo "      配置已写入 ($CLAW_CONFIG_DIR/openclaw.json)"
+
+    # 创建 systemd 服务
+    if command -v systemctl &>/dev/null; then
+        cat > /etc/systemd/system/openclaw-gateway.service << SVCEOF
+[Unit]
+Description=OpenClaw Gateway
+After=network.target gnb.service
+
+[Service]
+Type=simple
+Environment=PATH=/usr/local/bin:/usr/bin:/bin
+ExecStart=/usr/local/bin/openclaw gateway
+Restart=always
+RestartSec=5
+WorkingDirectory=/root
+
+[Install]
+WantedBy=multi-user.target
+SVCEOF
+        systemctl daemon-reload
+        systemctl enable openclaw-gateway
+        systemctl start openclaw-gateway
+        sleep 3
+        if systemctl is-active openclaw-gateway >/dev/null 2>&1; then
+            echo "      ✅ OpenClaw Gateway 已启动"
+        else
+            echo "      ⚠️ OpenClaw Gateway 启动失败"
+            journalctl -u openclaw-gateway --no-pager -n 5 2>/dev/null || true
+        fi
+    fi
+fi
+
+# ============================================
+# Step 10: 提交 OpenClaw Token 到 Console
+# ============================================
+echo "[10/12] 提交 OpenClaw Token..."
+
+if [ -n "$CLAW_TOKEN" ]; then
+    TOKEN_RESP=$(curl -sS -X POST "$API_BASE/api/enroll/${PLATFORM_NODE_ID:-$NODE_NAME}/claw-token" \
+      -H "$ENROLL_AUTH" \
+      -H "Content-Type: application/json" \
+      -d "{\"token\":\"$CLAW_TOKEN\",\"port\":$CLAW_PORT}")
+    TOKEN_MSG=$(echo "$TOKEN_RESP" | json_val message)
+    if [ -n "$TOKEN_MSG" ]; then
+        echo "      ✅ $TOKEN_MSG"
+    else
+        echo "      ⚠️ Token 提交失败: $TOKEN_RESP"
+    fi
+else
+    echo "      跳过（OpenClaw 未安装）"
+fi
+
+# ============================================
+# Step 11: 安装监控 Agent（上报节点信息到 Console）
+# ============================================
+echo "[11/12] 安装监控 Agent..."
 
 # 下载 agent 脚本
 curl -sSf "$API_BASE/api/enroll/node-agent.sh" -o /opt/gnb/bin/node-agent.sh 2>/dev/null \
@@ -435,7 +560,7 @@ NODE_ID=${PLATFORM_NODE_ID:-$NODE_NAME}
 GNB_NODE_ID=$GNB_NODE_ID
 GNB_MAP_PATH=/opt/gnb/conf/$GNB_NODE_ID/gnb.map
 GNB_CTL=gnb_ctl
-CLAW_PORT=18789
+CLAW_PORT=$CLAW_PORT
 AGENTEOF
 chmod 600 /opt/gnb/bin/agent.env
 
@@ -479,9 +604,9 @@ else
 fi
 
 # ============================================
-# Step 10: 通知 Console 已就绪
+# Step 12: 通知 Console 已就绪
 # ============================================
-echo "[10/10] 通知 Console 节点已就绪..."
+echo "[12/12] 通知 Console 节点已就绪..."
 
 READY_RESP=$(curl -sS -X POST "$API_BASE/api/enroll/${PLATFORM_NODE_ID:-$NODE_NAME}/ready" \
   -H "$ENROLL_AUTH" \
@@ -495,6 +620,6 @@ echo "  ╔═══════════════════════
 echo "  ║  ✅ 初始化完成                        ║"
 echo "  ║  GNB TUN: $TUN_ADDR                  ║"
 echo "  ║  Agent: 推模式监控已启动              ║"
-echo "  ║  OpenClaw: 由 Console 远程安装        ║"
+echo "  ║  OpenClaw: $([ "$CLAW_INSTALLED" = "true" ] && echo "已安装 + Token 已注册" || echo "未安装")          ║"
 echo "  ╚══════════════════════════════════════╝"
 echo ""
