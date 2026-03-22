@@ -195,38 +195,81 @@ SVCUNIT`, log);
       log(`      Node.js ${nodeVer} ✓`);
     }
 
-    // Step 2: 安装 OpenClaw
+    // Step 2: 安装 OpenClaw（Console 镜像优先 → npm 回退）
     const clawVer = (await this._execQuiet(nodeConfig, `${envPath} openclaw --version 2>/dev/null || echo "NOT_FOUND"`)).trim();
     if (clawVer.includes('NOT_FOUND') || clawVer === '0.0.1') {
-      log('      安装 openclaw@latest (后台安装，轮询检查)...');
+      log('      安装 openclaw@latest ...');
       await this._exec(nodeConfig, `${sudoEnv} npm uninstall -g openclaw 2>/dev/null || true`, log);
 
-      await this._execQuiet(nodeConfig,
-        `sudo nohup bash -c '${envPath} npm install -g openclaw@latest > /tmp/openclaw-install.log 2>&1 && echo INSTALL_DONE >> /tmp/openclaw-install.log || echo INSTALL_FAIL >> /tmp/openclaw-install.log' &`
-      );
-
-      const maxWait = 600000;
-      const pollInterval = 15000;
-      const startTime = Date.now();
+      // --- 策略 A: Console 镜像分发（适合防火墙内节点）---
       let installed = false;
+      const consoleTunAddr = nodeConfig.tunAddr
+        ? this._getConsoleApiBase(nodeConfig)
+        : null;
 
-      while (Date.now() - startTime < maxWait) {
-        await new Promise(r => setTimeout(r, pollInterval));
-        const logTail = await this._execQuiet(nodeConfig, 'tail -3 /tmp/openclaw-install.log 2>/dev/null || echo PENDING');
-        if (logTail.includes('INSTALL_DONE')) {
-          installed = true;
-          log('      npm install 完成');
-          break;
+      if (consoleTunAddr) {
+        log('      尝试从 Console 镜像下载...');
+        try {
+          // 查询可用 tarball 列表
+          const listResp = await this._execQuiet(nodeConfig,
+            `curl -sf -m 5 "${consoleTunAddr}/api/mirror/openclaw" 2>/dev/null || echo "{}"`
+          );
+          const listData = JSON.parse(listResp || '{}');
+          const tgzFile = (listData.files || [])
+            .map(f => f.name)
+            .filter(n => n.endsWith('.tgz'))
+            .sort()
+            .pop(); // 取最新
+
+          if (tgzFile) {
+            log(`      镜像文件: ${tgzFile}`);
+            await this._exec(nodeConfig,
+              `curl -sf -m 120 "${consoleTunAddr}/api/mirror/openclaw/${tgzFile}" -o /tmp/${tgzFile}`,
+              log
+            );
+            await this._exec(nodeConfig,
+              `${sudoEnv} npm install -g /tmp/${tgzFile} > /tmp/openclaw-install.log 2>&1`,
+              log
+            );
+            installed = true;
+            log('      Console 镜像安装完成');
+          } else {
+            log('      Console 镜像无 openclaw 包，回退到 npm');
+          }
+        } catch (e) {
+          log(`      Console 镜像安装失败 (${e.message})，回退到 npm`);
         }
-        if (logTail.includes('INSTALL_FAIL')) {
-          const errLog = await this._execQuiet(nodeConfig, 'tail -10 /tmp/openclaw-install.log 2>/dev/null');
-          log(`      npm install 失败: ${errLog.substring(0, 200)}`);
-          throw new Error('openclaw npm install 失败');
-        }
-        log(`      安装中... (${Math.round((Date.now() - startTime) / 1000)}s)`);
       }
 
-      if (!installed) throw new Error('openclaw 安装超时 (10分钟)');
+      // --- 策略 B: npm 在线安装（含国内镜像回退）---
+      if (!installed) {
+        log('      通过 npm 在线安装 (后台轮询)...');
+        await this._execQuiet(nodeConfig,
+          `sudo nohup bash -c '${envPath} npm install -g openclaw@latest --registry=https://registry.npmmirror.com > /tmp/openclaw-install.log 2>&1 && echo INSTALL_DONE >> /tmp/openclaw-install.log || echo INSTALL_FAIL >> /tmp/openclaw-install.log' &`
+        );
+
+        const maxWait = 600000;
+        const pollInterval = 15000;
+        const startTime = Date.now();
+
+        while (Date.now() - startTime < maxWait) {
+          await new Promise(r => setTimeout(r, pollInterval));
+          const logTail = await this._execQuiet(nodeConfig, 'tail -3 /tmp/openclaw-install.log 2>/dev/null || echo PENDING');
+          if (logTail.includes('INSTALL_DONE')) {
+            installed = true;
+            log('      npm install 完成');
+            break;
+          }
+          if (logTail.includes('INSTALL_FAIL')) {
+            const errLog = await this._execQuiet(nodeConfig, 'tail -10 /tmp/openclaw-install.log 2>/dev/null');
+            log(`      npm install 失败: ${errLog.substring(0, 200)}`);
+            throw new Error('openclaw npm install 失败');
+          }
+          log(`      安装中... (${Math.round((Date.now() - startTime) / 1000)}s)`);
+        }
+
+        if (!installed) throw new Error('openclaw 安装超时 (10分钟)');
+      }
     } else {
       log(`      OpenClaw ${clawVer} ✓`);
     }
@@ -358,6 +401,15 @@ SVCUNIT`, log);
       log(`      RPC 验证失败: ${err.message}`);
       return false;
     }
+  }
+
+  /**
+   * 获取 Console API 基础地址（通过 TUN 网络可达）
+   * @private
+   * @returns {string|null}
+   */
+  _getConsoleApiBase(_nodeConfig) {
+    return this.config.consoleApiBase || null;
   }
 
   /**

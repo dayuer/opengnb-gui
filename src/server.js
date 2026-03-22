@@ -11,6 +11,7 @@ const SSHManager = require('./services/ssh-manager');
 const GnbMonitor = require('./services/gnb-monitor');
 const AiOps = require('./services/ai-ops');
 const Provisioner = require('./services/provisioner');
+const MirrorUpdater = require('./services/mirror-updater');
 const AuditLogger = require('./services/audit-logger');
 const MetricsStore = require('./services/metrics-store');
 const createNodesRouter = require('./routes/nodes');
@@ -139,8 +140,11 @@ async function boot() {
     sshManager,
     provisionConfig: {
       indexNodes: process.env.GNB_INDEX_NODES || '',
+      consoleApiBase: process.env.CONSOLE_API_BASE || `http://10.1.0.1:${PORT}`,
     },
   });
+
+  const mirrorUpdater = new MirrorUpdater(DATA_DIR);
 
   const aiOps = new AiOps({
     nodesConfig: approvedNodes,
@@ -675,11 +679,13 @@ async function boot() {
     console.log(`    CONSOLE=<TUN_IP>:${PORT} NODE_ID=<ID> TUN_ADDR=<IP> bash\n`);
 
     if (approvedNodes.length > 0) monitor.start();
+    mirrorUpdater.start();
   });
 
   const shutdown = () => {
     console.log('\n[Server] 正在关闭...');
     monitor.stop();
+    mirrorUpdater.stop();
     sshManager.closeAll();
     server.close(() => process.exit(0));
   };
