@@ -70,6 +70,7 @@ class NodeStore {
         gnbCtlPath TEXT DEFAULT '',
         ready INTEGER DEFAULT 0,
         ownerId TEXT DEFAULT '',
+        skills TEXT DEFAULT '[]',
         submittedAt TEXT,
         approvedAt TEXT,
         updatedAt TEXT,
@@ -146,6 +147,11 @@ class NodeStore {
     try {
       this.db.exec(`ALTER TABLE nodes ADD COLUMN ownerId TEXT DEFAULT ''`);
     } catch { /* 列已存在，忽略 */ }
+
+    // @alpha: 向后兼容迁移 — 旧 db 的 nodes 表可能缺少 skills 列
+    try {
+      this.db.exec(`ALTER TABLE nodes ADD COLUMN skills TEXT DEFAULT '[]'`);
+    } catch { /* 列已存在，忽略 */ }
   }
 
   /** @private 预编译常用语句 */
@@ -161,11 +167,11 @@ class NodeStore {
         INSERT OR REPLACE INTO nodes
         (id, name, tunAddr, gnbNodeId, status, sshUser, sshPort, netmask,
          groupId, clawToken, clawPort, gnbMapPath, gnbCtlPath, ready,
-         submittedAt, approvedAt, updatedAt, readyAt)
+         ownerId, skills, submittedAt, approvedAt, updatedAt, readyAt)
         VALUES
         (@id, @name, @tunAddr, @gnbNodeId, @status, @sshUser, @sshPort, @netmask,
          @groupId, @clawToken, @clawPort, @gnbMapPath, @gnbCtlPath, @ready,
-         @submittedAt, @approvedAt, @updatedAt, @readyAt)
+         @ownerId, @skills, @submittedAt, @approvedAt, @updatedAt, @readyAt)
       `),
       remove: this.db.prepare('DELETE FROM nodes WHERE id = ?'),
       findByTunAddr: this.db.prepare('SELECT * FROM nodes WHERE tunAddr = ? AND id != ?'),
@@ -291,12 +297,12 @@ class NodeStore {
         this.db.prepare(`
           INSERT INTO nodes (id, name, tunAddr, gnbNodeId, status, sshUser, sshPort,
             netmask, groupId, clawToken, clawPort, gnbMapPath, gnbCtlPath, ready,
-            ownerId, submittedAt, approvedAt, updatedAt, readyAt)
+            ownerId, skills, submittedAt, approvedAt, updatedAt, readyAt)
           VALUES (@id, @name, @tunAddr, @gnbNodeId, @status, @sshUser, @sshPort,
             @netmask, @groupId, @clawToken, @clawPort, @gnbMapPath, @gnbCtlPath, @ready,
-            @ownerId, @submittedAt, @approvedAt, @updatedAt, @readyAt)
+            @ownerId, @skills, @submittedAt, @approvedAt, @updatedAt, @readyAt)
         `).run({
-          ...node, id: newId, name, ready: node.ready ? 1 : 0,
+          ...node, id: newId, name, ready: node.ready ? 1 : 0, skills: node.skills || '[]', ownerId: node.ownerId || '',
         });
 
         console.log(`[NodeStore] 迁移: ${oldId} → ${newId} (name: ${name})`);
@@ -326,6 +332,8 @@ class NodeStore {
       gnbMapPath: node.gnbMapPath || '',
       gnbCtlPath: node.gnbCtlPath || '',
       ready: node.ready ? 1 : 0,
+      ownerId: node.ownerId || '',
+      skills: typeof node.skills === 'string' ? node.skills : JSON.stringify(node.skills || []),
       submittedAt: node.submittedAt || null,
       approvedAt: node.approvedAt || null,
       updatedAt: node.updatedAt || null,
@@ -339,7 +347,11 @@ class NodeStore {
    */
   _fromRow(row: any) {
     if (!row) return null;
-    return { ...row, ready: !!row.ready };
+    return {
+      ...row,
+      ready: !!row.ready,
+      skills: row.skills ? JSON.parse(row.skills) : []
+    };
   }
 
   // ═══════════════════════════════════════

@@ -434,6 +434,7 @@ export const Nodes = {
       { key: 'overview', icon: 'bar-chart-3', label: '概览' },
       { key: 'claw', icon: 'bot', label: 'OpenClaw' },
       { key: 'terminal', icon: 'terminal', label: '终端' },
+      { key: 'skills', icon: 'blocks', label: '技能' },
     ];
 
     let html = `<div>
@@ -444,6 +445,7 @@ export const Nodes = {
 
     if (ts.tab === 'overview') html += this._renderOverview(node);
     else if (ts.tab === 'terminal') html += this._renderTerminal(node);
+    else if (ts.tab === 'skills') html += this._renderSkills(node);
     else html += `<div class="text-text-muted text-sm">${L('loader')} 加载中…</div>`;
 
     html += `</div></div>`;
@@ -505,6 +507,92 @@ export const Nodes = {
 
     html += `</div>`;
     return html;
+  },
+
+  // @alpha: AI Ops Terminal — Installed Skills (Stitch UI)
+  _renderSkills(node) {
+    // 假设 node.skills 或从全局的假数据获取。为了 UI 展示 Beta 阶段，如果没有技能，则提供空状态，或者展示假技能。
+    // 在真实连通后，这里的数据应来自 node.skills。
+    const installedSkills = node.skills || [];
+    const nid = safeAttr(node.id);
+    
+    let html = `
+    <div class="px-6 pb-8 pt-4 bg-surface/30 rounded-xl border border-border-default/20">
+      <div class="flex items-center justify-between mb-8 border-b border-border-default/20 pb-4">
+        <h4 class="text-xl font-headline font-bold tracking-tight text-text-primary">Installed Skills</h4>
+        <div class="flex gap-2">
+          <button class="px-4 py-1.5 rounded-full bg-primary/10 text-primary hover:bg-primary hover:text-white text-xs font-bold uppercase tracking-wider flex items-center gap-2 transition-all cursor-pointer" onclick="App.switchPage('skills')">
+            <span class="[&_svg]:w-3.5 [&_svg]:h-3.5">${L('plus')}</span> 部署新技能
+          </button>
+        </div>
+      </div>
+    `;
+
+    if (installedSkills.length === 0) {
+      html += `
+        <div class="flex flex-col items-center justify-center py-12 text-text-muted">
+          <div class="w-16 h-16 rounded-full bg-surface mb-4 flex items-center justify-center border border-border-default/20">
+            <span class="[&_svg]:w-8 [&_svg]:h-8 opacity-50">${L('box')}</span>
+          </div>
+          <p class="text-sm">此节点暂未安装任何技能</p>
+          <button class="mt-4 px-4 py-1.5 rounded-full bg-primary/10 text-primary hover:bg-primary hover:text-white text-xs font-bold uppercase transition-all cursor-pointer" onclick="App.switchPage('skills')">
+            前往技能商店
+          </button>
+        </div>
+      `;
+    } else {
+      // 真实数据渲染
+      html += `<div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">`;
+      for (const skill of installedSkills) {
+        html += `
+          <div class="bg-elevated/40 border border-border-default/30 p-4 rounded-xl flex items-center justify-between group/chip transition-all hover:bg-elevated hover:border-primary/30">
+            <div class="flex items-center gap-3">
+              <div class="w-10 h-10 rounded-lg bg-surface flex items-center justify-center text-primary shadow-sm">
+                <span class="[&_svg]:w-5 [&_svg]:h-5">${L(skill.icon || 'box')}</span>
+              </div>
+              <div>
+                <p class="text-sm font-medium text-text-primary whitespace-nowrap overflow-hidden text-ellipsis w-24">${escHtml(skill.name || skill.id)}</p>
+                <p class="text-[10px] text-text-muted font-mono">${escHtml(skill.version || 'v1.0.0')}</p>
+              </div>
+            </div>
+            <button class="w-8 h-8 rounded-lg flex items-center justify-center text-danger opacity-0 group-hover/chip:opacity-100 hover:bg-danger/10 transition-all cursor-pointer" title="卸载" onclick="event.stopPropagation();Nodes.uninstallSkill('${nid}', '${safeAttr(skill.id)}')">
+              <span class="[&_svg]:w-4 [&_svg]:h-4">${L('trash-2')}</span>
+            </button>
+          </div>
+        `;
+      }
+      html += `</div>`;
+    }
+    html += `</div>`;
+    return html;
+  },
+
+  async uninstallSkill(nodeId, skillId) {
+    if (!confirm(`确认要卸载技能 ${skillId} 吗？`)) return;
+    try {
+      // 调用 Phase 4 后端卸载接口
+      await App.authFetch(`/api/nodes/${nodeId}/skills/${skillId}`, {
+        method: 'DELETE'
+      });
+      showToast('技能卸载命令已下发', 'success');
+      // 乐观更新：如果有真实的 skills 数组，将其剔除
+      const node = App.allNodesRaw.find(n => n.id === nodeId);
+      if (node && node.skills) {
+        node.skills = node.skills.filter(s => s.id !== skillId);
+      }
+      // 刷新 Tab
+      const ts = this._getTabState(nodeId);
+      if (ts.tab === 'skills') {
+        const wrap = document.getElementById(`inline-tab-content-${nodeId}`);
+        if (wrap) {
+          wrap.innerHTML = this._renderSkills(node || { id: nodeId, skills: [] });
+          refreshIcons();
+        }
+      }
+    } catch (e: any) {
+      console.error(e);
+      showToast(e.message || '技能卸载失败', 'error');
+    }
   },
 
   _statCard(icon, label, value, color, sub) {

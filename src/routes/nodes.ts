@@ -226,6 +226,95 @@ function createNodesRouter(monitor: any, sshManager: any, nodesConfig: any, keyM
     }
   });
 
+  // ═══════════════════════════════════════
+  // @alpha: 技能管理 (Skills)
+  // ═══════════════════════════════════════
+
+  // POST /api/nodes/:id/skills — 推送安装技能
+  router.post('/:id/skills', async (req: any, res: any) => {
+    const { skillId, source, version, name } = req.body;
+    if (!skillId || !source) {
+      return res.status(400).json({ error: '缺少 skillId 或 source 参数' });
+    }
+
+    const nodeConfig = nodesConfig.find((n: any) => n.id === req.params.id);
+    if (!nodeConfig) {
+      return res.status(404).json({ error: `节点 ${req.params.id} 未找到或暂离线` });
+    }
+
+    // 构造安装命令
+    let cmd = '';
+    if (source.startsWith('http')) {
+      cmd = `curl -sSL ${source} | sudo bash`;
+    } else if (source === 'npm') {
+      cmd = `sudo npm install -g ${skillId}`;
+    } else {
+      return res.status(400).json({ error: '不支持的安装源' });
+    }
+
+    try {
+      // 串行同步执行（容错时长 30s）
+      const result = await sshManager.exec(nodeConfig, cmd, 30000);
+      
+      // 执行成功 -> 更新持久化状态
+      if (result.code === 0 && keyManager) {
+        const node = keyManager.store.findById(req.params.id);
+        const currentSkills = node.skills || [];
+        if (!currentSkills.find((s: any) => s.id === skillId)) {
+          currentSkills.push({
+            id: skillId,
+            name: name || skillId,
+            version: version || 'latest',
+            installedAt: new Date().toISOString()
+          });
+          keyManager.updateNodeSkills(req.params.id, currentSkills);
+        }
+      } else if (result.code !== 0) {
+        return res.status(500).json({ error: `安装执行败(code:${result.code})`, stdout: result.stdout, stderr: result.stderr });
+      }
+      
+      res.json(result);
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  // DELETE /api/nodes/:id/skills/:skillId — 卸载技能
+  router.delete('/:id/skills/:skillId', async (req: any, res: any) => {
+    const nodeConfig = nodesConfig.find((n: any) => n.id === req.params.id);
+    if (!nodeConfig) {
+      return res.status(404).json({ error: `节点 ${req.params.id} 未找到或不可达` });
+    }
+
+    const skillId = req.params.skillId;
+    
+    if (!/^[a-zA-Z0-9_@/.\\-]+$/.test(skillId)) {
+      return res.status(400).json({ error: '技能 ID 格式包含非法符号' });
+    }
+
+    // fallback: 目前统一认为是全局 npm 包
+    const cmd = `sudo npm uninstall -g ${skillId} || echo "Skill likely not an NPM package"`;
+
+    try {
+      const result = await sshManager.exec(nodeConfig, cmd, 20000);
+      
+      // 无论命令执行成功与否，一律剔除本地记录以作乐观展示（假设物理已失效）
+      if (keyManager) {
+        const node = keyManager.store.findById(req.params.id);
+        let currentSkills = node.skills || [];
+        const originalLen = currentSkills.length;
+        currentSkills = currentSkills.filter((s: any) => s.id !== skillId);
+        
+        if (currentSkills.length !== originalLen) {
+          keyManager.updateNodeSkills(req.params.id, currentSkills);
+        }
+      }
+      res.json(result);
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
   return router;
 }
 

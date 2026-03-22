@@ -558,6 +558,19 @@ class KeyManager {
   }
 
   /**
+   * @alpha: 更新节点的 skills 清单（用于面板展示）
+   * @param {string} nodeId
+   * @param {Array} skillsArray
+   */
+  updateNodeSkills(nodeId: any, skillsArray: any) {
+    const node = this.store.findById(nodeId);
+    if (!node) return { success: false, message: '节点不存在' };
+    this.store.update(nodeId, { skills: skillsArray });
+    if (this.onNodeUpdate) this.onNodeUpdate(nodeId, ['skills']);
+    return { success: true, message: '技能列表已持久化' };
+  }
+
+  /**
    * 编辑 tunAddr 时重写 GNB 配置（全量模式）
    * @private
    */
@@ -774,6 +787,7 @@ class KeyManager {
         clawToken: n.clawToken || '',
         clawPort: n.clawPort || 18789,
         groupId: n.groupId || '',
+        skills: n.skills || [],
       }));
   }
 

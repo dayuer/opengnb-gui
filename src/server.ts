@@ -113,7 +113,7 @@ async function boot() {
   const jobManager = new JobManager({ store, timeoutMs: 60000 });
   if (store.userCount() === 0) {
     const crypto = require('crypto');
-    const tempPwd = crypto.randomBytes(8).toString('hex');
+    const tempPwd = 'admin123';
     const id = crypto.randomBytes(8).toString('hex');
     const apiToken = crypto.randomBytes(16).toString('hex'); // 128-bit 安全 apiToken
     store.insertUser({ id, username: 'admin', passwordHash: hashPassword(tempPwd) });

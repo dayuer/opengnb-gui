@@ -111,6 +111,14 @@ npm run build              # vite build → dist/
 npm start                  # tsx src/server.ts
 ```
 
+> 💡 **首日登录凭证**
+>
+> 默认控制台登录口令设计为管理员起步：
+> **Username**: `admin`
+> **Password**: `admin123`
+>
+> 建议在登录 WebUI 后右上角及时进行修改。
+
 ## 节点接入
 
 ```bash

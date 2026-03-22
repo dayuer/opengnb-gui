@@ -1,5 +1,6 @@
 // @alpha: skills 页面模块 (TS 迁移 — Alpha pass)
 import { $, $$, L, refreshIcons, escHtml, showToast, formatBytes, formatUptime, pctColor, pctBg, safeAttr, cidrMatch, isValidCidr } from '../utils';
+import { App } from '../core';
 import { Modal } from '../modal';
 
 
@@ -665,10 +666,145 @@ export const Skills = {
     if (countEl) countEl.textContent = `${filtered.length} 个技能`;
   },
 
-  // --- 安装技能（占位） ---
-  _installSkill(skillId) {
+  // --- 安装技能（交互流与 UI） ---
+  async _installSkill(skillId) {
     const skill = this._skills.find(s => s.id === skillId);
     if (!skill) return;
-    showToast(`${skill.name} 安装功能开发中`, 'info');
+
+    try {
+      // 1. 抓取可用节点列表
+      const res = await App.authFetch('/api/nodes');
+      const data = await res.json();
+      const nodes = Array.isArray(data.data) ? data.data : (Array.isArray(data) ? data : []);
+
+      // 2. 构建 Stitch "Kinetic Command" 风格的独立模态框
+      const overlay = document.createElement('div');
+      overlay.className = 'fixed inset-0 z-[60] flex items-center justify-center bg-black/60 backdrop-blur-sm transition-opacity duration-300 opacity-0';
+      
+      const nodeHtml = nodes.length > 0 ? nodes.map(node => {
+        const isOnline = node.status === 'online';
+        const statusColor = isOnline ? 'bg-primary shadow-[0_0_8px_#b2a1ff]' : 'bg-danger shadow-[0_0_8px_#ff6e84]';
+        const statusText = isOnline ? 'Online' : 'Offline';
+        const textColor = isOnline ? 'text-primary' : 'text-danger';
+        
+        return `
+          <label class="group relative flex items-center justify-between p-4 rounded-lg bg-surface hover:bg-elevated cursor-pointer transition-all duration-200 border-l-2 border-transparent active:scale-[0.98] mb-2 last:mb-0">
+            <input class="peer hidden" name="node-select" type="radio" value="${escHtml(node.id || node.name)}"/>
+            <div class="flex items-center gap-4">
+              <div class="w-10 h-10 rounded-lg bg-elevated flex items-center justify-center text-text-secondary group-hover:scale-110 transition-transform">
+                <i data-lucide="dns" class="w-5 h-5"></i>
+              </div>
+              <div>
+                <div class="flex items-center gap-2">
+                  <span class="text-sm font-semibold text-text-primary">${escHtml(node.name || 'Unknown')}</span>
+                  <span class="flex h-2 w-2 rounded-full ${statusColor}"></span>
+                  <span class="text-[10px] uppercase tracking-widest ${textColor} font-bold">${statusText}</span>
+                </div>
+                <span class="text-xs font-mono text-text-muted">${escHtml(node.ip || node.id || 'N/A')}</span>
+              </div>
+            </div>
+            <div class="peer-checked:flex hidden h-6 w-6 items-center justify-center rounded-full bg-primary text-text-inverse">
+              <i data-lucide="check" class="w-3.5 h-3.5 font-bold"></i>
+            </div>
+            <div class="peer-checked:border-primary peer-checked:bg-primary/5 absolute inset-0 rounded-lg pointer-events-none transition-all"></div>
+          </label>
+        `;
+      }).join('') : `
+        <div class="py-8 text-center text-text-muted">
+          <i data-lucide="server-off" class="w-10 h-10 mx-auto mb-3 opacity-40"></i>
+          <p class="text-sm font-medium">当前没有可用的节点</p>
+        </div>
+      `;
+
+      overlay.innerHTML = `
+        <div class="w-full max-w-lg bg-surface border border-border-default/30 rounded-xl overflow-hidden shadow-ambient transform scale-95 transition-transform duration-300">
+          <div class="px-8 py-6 flex flex-col gap-1 bg-elevated/30 border-b border-border-default/20">
+            <div class="flex justify-between items-start">
+              <h2 class="text-xl font-bold text-text-primary tracking-tight" style="font-family: 'Space Grotesk', sans-serif">Install Skill to Node</h2>
+              <button class="modal-close text-text-muted hover:text-primary transition-colors cursor-pointer border-none bg-transparent">
+                <i data-lucide="x" class="w-5 h-5"></i>
+              </button>
+            </div>
+            <p class="text-text-secondary text-sm">选择目标节点来部署 <span class="text-primary font-medium">${escHtml(skill.name)}</span></p>
+          </div>
+          <div class="px-8 py-6 max-h-[400px] overflow-y-auto">
+            ${nodeHtml}
+          </div>
+          <div class="px-8 py-4 bg-elevated/30 border-t border-border-default/20 flex items-center justify-end gap-3">
+            <button class="modal-close px-5 py-2.5 rounded-full text-text-secondary font-semibold hover:bg-elevated border-none bg-transparent transition-all duration-200 cursor-pointer text-sm">取消</button>
+            <button class="modal-install px-6 py-2.5 rounded-full signature-gradient text-white font-bold shadow-lg shadow-primary/20 hover:shadow-primary/40 border-none active:scale-95 transition-all duration-200 flex items-center gap-2 cursor-pointer text-sm disabled:opacity-50">
+              <i data-lucide="zap" class="w-4 h-4"></i> 部署并安装
+            </button>
+          </div>
+        </div>
+      `;
+
+      document.body.appendChild(overlay);
+      refreshIcons();
+
+      // Animate In
+      requestAnimationFrame(() => {
+        overlay.classList.remove('opacity-0');
+        const modalBody = overlay.querySelector('div');
+        if (modalBody) {
+          modalBody.classList.remove('scale-95');
+          modalBody.classList.add('scale-100');
+        }
+      });
+
+      const closeHandler = () => {
+        overlay.classList.add('opacity-0');
+        const modalBody = overlay.querySelector('div');
+        if (modalBody) modalBody.classList.add('scale-95');
+        setTimeout(() => overlay.remove(), 300);
+      };
+
+      overlay.querySelectorAll('.modal-close').forEach(btn => btn.addEventListener('click', closeHandler));
+      // Optional: close on backdrop click (might conflict with dialog inner clicks if not careful)
+      overlay.addEventListener('mousedown', (e) => {
+        if (e.target === overlay) closeHandler();
+      });
+
+      // Submit handler
+      const installBtn = overlay.querySelector('.modal-install');
+      if (installBtn) {
+        installBtn.addEventListener('click', async () => {
+          const selected = overlay.querySelector('input[name="node-select"]:checked') as HTMLInputElement;
+          if (!selected) {
+            showToast('请先选择一个目标节点', 'info');
+            return;
+          }
+          const targetNodeId = selected.value;
+          
+          installBtn.setAttribute('disabled', 'true');
+          installBtn.innerHTML = '<i data-lucide="loader-2" class="w-4 h-4 animate-spin"></i> 部署中...';
+          refreshIcons();
+          
+          try {
+            // 调用后端的 Skill 安装 API (Phase 4 接口预留)
+            await App.authFetch(`/api/nodes/${targetNodeId}/skills`, {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ skillId: skill.id })
+            });
+            showToast(`指令已发送至 ${targetNodeId} 执行部署`, 'success');
+            skill.installed = true; // 乐观UI更新
+            const mainContent = document.getElementById('main-content');
+            if (mainContent) this._filterAndRender(mainContent);
+            closeHandler();
+          } catch (err: any) {
+            console.error('Install failed:', err);
+            showToast(err.message || '部署请求失败', 'error');
+            installBtn.removeAttribute('disabled');
+            installBtn.innerHTML = '<i data-lucide="zap" class="w-4 h-4"></i> 部署并安装';
+            refreshIcons();
+          }
+        });
+      }
+
+    } catch (e) {
+      console.error(e);
+      showToast('无法调取节点信息', 'error');
+    }
   },
 };
