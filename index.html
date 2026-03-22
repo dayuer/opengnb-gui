@@ -7,7 +7,9 @@
   <meta name="theme-color" content="#4b41e1" media="(prefers-color-scheme: light)">
   <meta name="theme-color" content="#1a1a2e" media="(prefers-color-scheme: dark)">
   <title>SynonClaw Console</title>
-  <link rel="icon" href="/favicon.svg" type="image/svg+xml">
+  <link rel="icon" href="/favicon.ico" sizes="48x48">
+  <link rel="icon" href="/favicon-32.png" type="image/png" sizes="32x32">
+  <link rel="apple-touch-icon" href="/apple-touch-icon.png">
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link href="https://fonts.googleapis.com/css2?family=Manrope:wght@400;500;600;700;800&family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
   <script src="https://unpkg.com/lucide@latest/dist/umd/lucide.min.js"></script>
@@ -178,9 +180,7 @@
     <main class="w-full max-w-[440px] z-10">
       <!-- Logo -->
       <div class="text-center mb-10 animate-fade-in-up">
-        <div class="inline-flex items-center justify-center p-3 mb-5 rounded-lg bg-surface shadow-ambient">
-          <i data-lucide="diamond" class="w-8 h-8 text-primary" aria-hidden="true"></i>
-        </div>
+        <img src="/logo-512.png" alt="SynonClaw" width="80" height="80" class="mx-auto mb-5">
         <h1 class="text-3xl font-bold tracking-tight text-text-primary mb-2">SynonClaw Console</h1>
         <p class="text-text-muted font-medium text-sm">P2P VPN 管理中控台</p>
       </div>
@@ -251,9 +251,7 @@
     <!-- 侧边栏 -->
     <nav id="sidebar" aria-label="主导航" class="w-60 bg-surface border-r border-border-default flex flex-col shrink-0 transition-transform duration-300 max-md:fixed max-md:inset-y-0 max-md:left-0 max-md:z-40 max-md:-translate-x-full max-md:data-[open]:translate-x-0">
       <div class="px-4 py-4 border-b border-border-subtle flex items-center gap-3">
-        <div class="w-9 h-9 rounded-lg signature-gradient flex items-center justify-center text-white shrink-0">
-          <i data-lucide="diamond" class="w-5 h-5" aria-hidden="true"></i>
-        </div>
+        <img src="/logo-36.png" alt="" width="36" height="36" class="w-9 h-9 rounded-lg shrink-0" aria-hidden="true">
         <div class="min-w-0">
           <div class="font-bold text-sm tracking-tight text-text-primary truncate">SynonClaw</div>
           <div class="text-xs text-text-muted uppercase tracking-widest">Console</div>

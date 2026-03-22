@@ -98,8 +98,9 @@ export const App = {
       this.hideLoginPage();
       WS.connect();
       this.switchPage('dashboard');
-    } catch (_) {
-      if (errEl) { errEl.textContent = '网络错误'; errEl.classList.remove('hidden'); }
+    } catch (e: any) {
+      const msg = e instanceof TypeError ? '无法连接服务器，请检查网络' : `登录失败: ${e.message || '未知错误'}`;
+      if (errEl) { errEl.textContent = msg; errEl.classList.remove('hidden'); }
       if (btn) btn.disabled = false;
       if (btnText) btnText.textContent = '登 录';
     }
