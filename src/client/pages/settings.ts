@@ -60,7 +60,7 @@ export const Settings = {
         <h2 class="text-xl font-bold font-headline mb-1">系统概览</h2>
         <p class="text-sm text-text-muted">系统运行状态和基础信息。</p>
       </div>
-      <div id="settings-health" class="text-text-muted text-sm">加载中...</div>
+      <div id="settings-health" class="text-text-muted text-sm">加载中…</div>
 
       <!-- 平台信息 -->
       <div class="border-t border-border-subtle pt-8">
@@ -77,7 +77,7 @@ export const Settings = {
       <div class="border-t border-border-subtle pt-8">
         <h3 class="text-sm font-bold uppercase tracking-widest text-text-muted mb-6">节点注册</h3>
         <div id="settings-token" class="space-y-4">
-          <div class="text-text-muted text-sm">加载中...</div>
+          <div class="text-text-muted text-sm">加载中…</div>
         </div>
       </div>
 
@@ -125,16 +125,16 @@ export const Settings = {
           <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
             <div class="space-y-2">
               <label class="block text-sm font-medium">当前密码</label>
-              <input class="w-full px-4 py-3 bg-elevated border border-border-default rounded-xl focus:ring-2 focus:ring-primary/20 focus:border-primary transition-all outline-none text-sm" type="password" id="pwd-old" required autocomplete="current-password" placeholder="输入当前密码">
+              <input class="w-full px-4 py-3 bg-elevated border border-border-default rounded-xl focus-visible:ring-2 focus-visible:ring-primary/20 focus-visible:border-primary transition-[box-shadow,border-color] outline-none text-sm" type="password" id="pwd-old" required autocomplete="current-password" placeholder="输入当前密码">
             </div>
             <div></div>
             <div class="space-y-2">
               <label class="block text-sm font-medium">新密码（至少 8 位）</label>
-              <input class="w-full px-4 py-3 bg-elevated border border-border-default rounded-xl focus:ring-2 focus:ring-primary/20 focus:border-primary transition-all outline-none text-sm" type="password" id="pwd-new" required minlength="8" autocomplete="new-password" placeholder="输入新密码">
+              <input class="w-full px-4 py-3 bg-elevated border border-border-default rounded-xl focus-visible:ring-2 focus-visible:ring-primary/20 focus-visible:border-primary transition-[box-shadow,border-color] outline-none text-sm" type="password" id="pwd-new" required minlength="8" autocomplete="new-password" placeholder="输入新密码">
             </div>
             <div class="space-y-2">
               <label class="block text-sm font-medium">确认新密码</label>
-              <input class="w-full px-4 py-3 bg-elevated border border-border-default rounded-xl focus:ring-2 focus:ring-primary/20 focus:border-primary transition-all outline-none text-sm" type="password" id="pwd-confirm" required minlength="8" autocomplete="new-password" placeholder="再次输入新密码">
+              <input class="w-full px-4 py-3 bg-elevated border border-border-default rounded-xl focus-visible:ring-2 focus-visible:ring-primary/20 focus-visible:border-primary transition-[box-shadow,border-color] outline-none text-sm" type="password" id="pwd-confirm" required minlength="8" autocomplete="new-password" placeholder="再次输入新密码">
             </div>
           </div>
           <div id="pwd-error" class="hidden text-danger text-xs"></div>
@@ -228,10 +228,10 @@ export const Settings = {
             </div>
             <span class="px-2.5 py-1 text-[10px] font-bold uppercase tracking-wider text-success bg-secondary-container rounded-full">Active</span>
           </div>
-          <div class="flex items-center bg-base border border-border-subtle rounded-lg cursor-pointer hover:border-primary transition group" onclick="navigator.clipboard.writeText('${escHtml(token)}');showToast('Token 已复制')">
-            <code class="flex-1 text-sm px-4 py-3 font-mono text-text-primary tracking-wide">${escHtml(token)}</code>
-            <span class="px-3 text-text-muted group-hover:text-primary [&_svg]:w-4 [&_svg]:h-4">${L('copy')}</span>
-          </div>
+          <button type="button" class="w-full flex items-center bg-base border border-border-subtle rounded-lg cursor-pointer hover:border-primary transition-colors group" onclick="navigator.clipboard.writeText('${safeAttr(token)}');showToast('Token 已复制')" aria-label="复制 API Token">
+            <code class="flex-1 text-sm px-4 py-3 font-mono text-text-primary tracking-wide text-left">${escHtml(token)}</code>
+            <span class="px-3 text-text-muted group-hover:text-primary [&_svg]:w-4 [&_svg]:h-4" aria-hidden="true">${L('copy')}</span>
+          </button>
         </div>
 
         <!-- 节点初始化命令 -->
@@ -245,10 +245,10 @@ export const Settings = {
               </div>
             </div>
           </div>
-          <div class="flex items-center bg-base border border-border-subtle rounded-lg cursor-pointer hover:border-primary transition group" onclick="navigator.clipboard.writeText(this.querySelector('code').textContent.trim());showToast('命令已复制')">
-            <code class="flex-1 text-xs px-4 py-3 font-mono text-text-primary break-all leading-relaxed">${escHtml(initCmd)}</code>
-            <span class="px-3 text-text-muted group-hover:text-primary [&_svg]:w-4 [&_svg]:h-4">${L('copy')}</span>
-          </div>
+          <button type="button" class="w-full flex items-center bg-base border border-border-subtle rounded-lg cursor-pointer hover:border-primary transition-colors group" onclick="navigator.clipboard.writeText(this.querySelector('code').textContent.trim());showToast('命令已复制')" aria-label="复制初始化命令">
+            <code class="flex-1 text-xs px-4 py-3 font-mono text-text-primary break-all leading-relaxed text-left">${escHtml(initCmd)}</code>
+            <span class="px-3 text-text-muted group-hover:text-primary [&_svg]:w-4 [&_svg]:h-4" aria-hidden="true">${L('copy')}</span>
+          </button>
         </div>`;
       refreshIcons();
     } catch (e) { wrap.innerHTML = `<div class="text-text-muted text-sm">加载失败: ${escHtml(e.message)}</div>`; }
@@ -272,7 +272,7 @@ export const Settings = {
     const errEl = $('#pwd-error');
     const btn = $('#pwd-submit-btn');
     if (newPwd !== confirmPwd) { if (errEl) { errEl.textContent = '两次输入的新密码不一致'; errEl.classList.remove('hidden'); } return; }
-    if (btn) { (btn as HTMLButtonElement).disabled = true; btn.textContent = '提交中...'; }
+    if (btn) { (btn as HTMLButtonElement).disabled = true; btn.textContent = '提交中…'; }
     if (errEl) errEl.classList.add('hidden');
     try {
       const res = await App.authFetch('/api/auth/change-password', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ oldPassword: oldPwd, newPassword: newPwd }) });

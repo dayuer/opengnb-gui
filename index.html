@@ -1,10 +1,13 @@
 <!DOCTYPE html>
-<html lang="zh-CN" class="light">
+<html lang="zh-CN" class="light" style="color-scheme: light dark">
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <meta name="description" content="SynonClaw Console — P2P VPN 节点管理中控台，实时监控、审批注册、AI 智能运维">
+  <meta name="theme-color" content="#4b41e1" media="(prefers-color-scheme: light)">
+  <meta name="theme-color" content="#1a1a2e" media="(prefers-color-scheme: dark)">
   <title>SynonClaw Console</title>
+  <link rel="icon" href="/favicon.svg" type="image/svg+xml">
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link href="https://fonts.googleapis.com/css2?family=Manrope:wght@400;500;600;700;800&family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
   <script src="https://unpkg.com/lucide@latest/dist/umd/lucide.min.js"></script>
@@ -37,7 +40,8 @@
       --color-text-inverse: #ffffff;
       /* 语义色 */
       --color-success: #006c4a;
-      --color-warning: #ba1a1a;
+      --color-warning: #c76e00;
+      --color-warning-container: #ffe0b2;
       --color-danger: #ba1a1a;
       --color-info: #4b41e1;
       --color-error-container: #ffdad6;
@@ -102,9 +106,66 @@
     .delay-100 { animation-delay: 100ms; }
     .delay-200 { animation-delay: 200ms; }
     .delay-300 { animation-delay: 300ms; }
+
+    /* 等宽数字 */
+    .tabular-nums { font-variant-numeric: tabular-nums; }
+
+    /* 尊重用户减弱动画偏好 */
+    @media (prefers-reduced-motion: reduce) {
+      *, *::before, *::after {
+        animation-duration: 0.01ms !important;
+        animation-iteration-count: 1 !important;
+        transition-duration: 0.01ms !important;
+      }
+    }
+
+    /* ── Dark Mode Token 覆盖 ── */
+    .dark {
+      --color-primary: #8b83ff;
+      --color-primary-light: #a5a0ff;
+      --color-primary-dark: #645efb;
+      --color-primary-subtle: rgba(139, 131, 255, 0.12);
+      --color-primary-container: #312d6e;
+      --color-secondary: #6edba5;
+      --color-secondary-container: #004d34;
+      --color-surface: #1a1a2e;
+      --color-elevated: #252540;
+      --color-base: #12121f;
+      --color-overlay: rgba(0, 0, 0, 0.7);
+      --color-surface-container: #1e1e34;
+      --color-border-default: #2e2e4a;
+      --color-border-subtle: #252540;
+      --color-border-focus: #8b83ff;
+      --color-text-primary: #e8e6f0;
+      --color-text-secondary: #a8a6b8;
+      --color-text-muted: #6e6d80;
+      --color-text-inverse: #12121f;
+      --color-success: #6edba5;
+      --color-warning: #ffb74d;
+      --color-warning-container: #4a3000;
+      --color-danger: #ff6b6b;
+      --color-info: #8b83ff;
+      --color-error-container: #4a1c1c;
+      --shadow-sm: 0 1px 3px rgba(0, 0, 0, 0.3);
+      --shadow-md: 0 4px 12px rgba(0, 0, 0, 0.4);
+      --shadow-lg: 0 10px 30px rgba(0, 0, 0, 0.3);
+      --shadow-glow: 0 0 20px rgba(139, 131, 255, 0.2);
+    }
+    .dark .glass-card {
+      background: rgba(26, 26, 46, 0.8);
+    }
+    .dark .bg-grid-pattern {
+      background-image: radial-gradient(circle, rgba(139, 131, 255, 0.1) 1px, transparent 1px);
+    }
+    .dark .signature-gradient {
+      background: linear-gradient(135deg, #645efb 0%, #8b83ff 100%);
+    }
   </style>
 </head>
-<body class="bg-base text-text-primary font-sans antialiased min-h-screen">
+<body class="bg-base text-text-primary font-sans antialiased min-h-screen" style="touch-action: manipulation">
+
+  <!-- Skip-link: 键盘用户跳过导航直达主内容 -->
+  <a href="#main-content" class="sr-only focus:not-sr-only focus:fixed focus:top-2 focus:left-2 focus:z-[999] focus:bg-primary focus:text-white focus:px-4 focus:py-2 focus:rounded-lg focus:text-sm focus:font-semibold">跳到主内容</a>
 
   <!-- ===== 登录页 ===== -->
   <div id="login-page" class="hidden fixed inset-0 z-50 flex flex-col items-center justify-center p-6">
@@ -118,7 +179,7 @@
       <!-- Logo -->
       <div class="text-center mb-10 animate-fade-in-up">
         <div class="inline-flex items-center justify-center p-3 mb-5 rounded-lg bg-surface shadow-ambient">
-          <i data-lucide="diamond" class="w-8 h-8 text-primary"></i>
+          <i data-lucide="diamond" class="w-8 h-8 text-primary" aria-hidden="true"></i>
         </div>
         <h1 class="text-3xl font-bold tracking-tight text-text-primary mb-2">SynonClaw Console</h1>
         <p class="text-text-muted font-medium text-sm">P2P VPN 管理中控台</p>
@@ -130,24 +191,24 @@
           <div>
             <label for="login-username" class="block text-xs font-semibold text-text-secondary uppercase tracking-wider mb-2 ml-0.5">用户名</label>
             <div class="relative">
-              <i data-lucide="user" class="absolute left-4 top-1/2 -translate-y-1/2 w-4 h-4 text-text-muted"></i>
-              <input type="text" id="login-username" placeholder="admin" autocomplete="username" required
-                class="w-full bg-base border-none rounded-lg pl-12 pr-4 py-3.5 text-sm text-text-primary placeholder:text-text-muted focus:ring-2 focus:ring-primary/30 outline-none transition-all font-medium">
+              <i data-lucide="user" class="absolute left-4 top-1/2 -translate-y-1/2 w-4 h-4 text-text-muted" aria-hidden="true"></i>
+              <input type="text" id="login-username" placeholder="admin" autocomplete="username" required spellcheck="false"
+                class="w-full bg-base border-none rounded-lg pl-12 pr-4 py-3.5 text-sm text-text-primary placeholder:text-text-muted focus-visible:ring-2 focus-visible:ring-primary/30 outline-none transition-[box-shadow,border-color] font-medium">
             </div>
           </div>
           <div>
             <label for="login-password" class="block text-xs font-semibold text-text-secondary uppercase tracking-wider mb-2 ml-0.5">密码</label>
             <div class="relative">
-              <i data-lucide="lock" class="absolute left-4 top-1/2 -translate-y-1/2 w-4 h-4 text-text-muted"></i>
+              <i data-lucide="lock" class="absolute left-4 top-1/2 -translate-y-1/2 w-4 h-4 text-text-muted" aria-hidden="true"></i>
               <input type="password" id="login-password" placeholder="••••••••" autocomplete="current-password" required
-                class="w-full bg-base border-none rounded-lg pl-12 pr-4 py-3.5 text-sm text-text-primary placeholder:text-text-muted focus:ring-2 focus:ring-primary/30 outline-none transition-all">
+                class="w-full bg-base border-none rounded-lg pl-12 pr-4 py-3.5 text-sm text-text-primary placeholder:text-text-muted focus-visible:ring-2 focus-visible:ring-primary/30 outline-none transition-[box-shadow,border-color]">
             </div>
           </div>
-          <div id="login-error" class="hidden text-danger text-xs"></div>
+          <div id="login-error" class="hidden text-danger text-xs" role="alert" aria-live="assertive"></div>
           <button type="submit" id="login-btn"
-            class="w-full signature-gradient text-white font-semibold py-3.5 rounded-lg shadow-lg shadow-primary/20 hover:scale-[1.01] active:scale-95 transition-all flex items-center justify-center gap-2 cursor-pointer disabled:opacity-50">
+            class="w-full signature-gradient text-white font-semibold py-3.5 rounded-lg shadow-lg shadow-primary/20 hover:scale-[1.01] active:scale-95 transition-transform flex items-center justify-center gap-2 cursor-pointer disabled:opacity-50">
             <span id="login-btn-text">登 录</span>
-            <i data-lucide="arrow-right" class="w-4 h-4"></i>
+            <i data-lucide="arrow-right" class="w-4 h-4" aria-hidden="true"></i>
           </button>
         </form>
       </div>
@@ -155,12 +216,12 @@
       <!-- 状态页脚 -->
       <div class="mt-8 flex items-center justify-center gap-5 animate-fade-in-up delay-200">
         <div class="flex items-center gap-2">
-          <span class="w-2 h-2 rounded-full bg-success animate-pulse"></span>
+          <span class="w-2 h-2 rounded-full bg-success animate-pulse" aria-hidden="true"></span>
           <span class="text-xs font-semibold text-text-muted uppercase tracking-widest">系统在线</span>
         </div>
         <div class="w-px h-3 bg-border-default"></div>
         <div class="flex items-center gap-1.5">
-          <i data-lucide="globe" class="w-3 h-3 text-text-muted"></i>
+          <i data-lucide="globe" class="w-3 h-3 text-text-muted" aria-hidden="true"></i>
           <span class="text-xs font-semibold text-text-muted uppercase tracking-widest">P2P Network</span>
         </div>
       </div>
@@ -188,32 +249,32 @@
   <!-- ===== 主应用 ===== -->
   <div id="app" class="hidden h-screen flex">
     <!-- 侧边栏 -->
-    <nav id="sidebar" class="w-60 bg-surface border-r border-border-default flex flex-col shrink-0 transition-all duration-300 max-md:fixed max-md:inset-y-0 max-md:left-0 max-md:z-40 max-md:-translate-x-full max-md:data-[open]:translate-x-0">
+    <nav id="sidebar" aria-label="主导航" class="w-60 bg-surface border-r border-border-default flex flex-col shrink-0 transition-transform duration-300 max-md:fixed max-md:inset-y-0 max-md:left-0 max-md:z-40 max-md:-translate-x-full max-md:data-[open]:translate-x-0">
       <div class="px-4 py-4 border-b border-border-subtle flex items-center gap-3">
         <div class="w-9 h-9 rounded-lg signature-gradient flex items-center justify-center text-white shrink-0">
-          <i data-lucide="diamond" class="w-5 h-5"></i>
+          <i data-lucide="diamond" class="w-5 h-5" aria-hidden="true"></i>
         </div>
         <div class="min-w-0">
           <div class="font-bold text-sm tracking-tight text-text-primary truncate">SynonClaw</div>
           <div class="text-xs text-text-muted uppercase tracking-widest">Console</div>
         </div>
       </div>
-      <ul id="nav-menu" class="flex-1 py-3 px-3 space-y-0.5 overflow-y-auto">
-        <li class="nav-item group flex items-center gap-3 px-3 py-2 rounded-lg text-sm cursor-pointer transition text-text-secondary hover:text-text-primary hover:bg-elevated data-[active]:bg-primary/10 data-[active]:text-primary" data-page="dashboard" data-active>
-          <i data-lucide="layout-dashboard" class="w-4 h-4"></i><span>仪表盘</span>
-        </li>
-        <li class="nav-item group flex items-center gap-3 px-3 py-2 rounded-lg text-sm cursor-pointer transition text-text-secondary hover:text-text-primary hover:bg-elevated data-[active]:bg-primary/10 data-[active]:text-primary" data-page="nodes">
-          <i data-lucide="globe" class="w-4 h-4"></i><span>节点管理</span>
-        </li>
-        <li class="nav-item group flex items-center gap-3 px-3 py-2 rounded-lg text-sm cursor-pointer transition text-text-secondary hover:text-text-primary hover:bg-elevated data-[active]:bg-primary/10 data-[active]:text-primary" data-page="users">
-          <i data-lucide="users" class="w-4 h-4"></i><span>团队设置</span>
-        </li>
-        <li class="nav-item group flex items-center gap-3 px-3 py-2 rounded-lg text-sm cursor-pointer transition text-text-secondary hover:text-text-primary hover:bg-elevated data-[active]:bg-primary/10 data-[active]:text-primary" data-page="settings">
-          <i data-lucide="settings" class="w-4 h-4"></i><span>系统设置</span>
-        </li>
-        <li class="nav-item group flex items-center gap-3 px-3 py-2 rounded-lg text-sm cursor-pointer transition text-text-secondary hover:text-text-primary hover:bg-elevated data-[active]:bg-primary/10 data-[active]:text-primary" data-page="skills">
-          <i data-lucide="sparkles" class="w-4 h-4"></i><span>技能商店</span>
-        </li>
+      <ul id="nav-menu" class="flex-1 py-3 px-3 space-y-0.5 overflow-y-auto" role="menubar">
+        <li role="none"><button class="nav-item w-full group flex items-center gap-3 px-3 py-2 rounded-lg text-sm cursor-pointer transition-colors text-text-secondary hover:text-text-primary hover:bg-elevated data-[active]:bg-primary/10 data-[active]:text-primary" data-page="dashboard" data-active role="menuitem">
+          <i data-lucide="layout-dashboard" class="w-4 h-4" aria-hidden="true"></i><span>仪表盘</span>
+        </button></li>
+        <li role="none"><button class="nav-item w-full group flex items-center gap-3 px-3 py-2 rounded-lg text-sm cursor-pointer transition-colors text-text-secondary hover:text-text-primary hover:bg-elevated data-[active]:bg-primary/10 data-[active]:text-primary" data-page="nodes" role="menuitem">
+          <i data-lucide="globe" class="w-4 h-4" aria-hidden="true"></i><span>节点管理</span>
+        </button></li>
+        <li role="none"><button class="nav-item w-full group flex items-center gap-3 px-3 py-2 rounded-lg text-sm cursor-pointer transition-colors text-text-secondary hover:text-text-primary hover:bg-elevated data-[active]:bg-primary/10 data-[active]:text-primary" data-page="users" role="menuitem">
+          <i data-lucide="users" class="w-4 h-4" aria-hidden="true"></i><span>团队设置</span>
+        </button></li>
+        <li role="none"><button class="nav-item w-full group flex items-center gap-3 px-3 py-2 rounded-lg text-sm cursor-pointer transition-colors text-text-secondary hover:text-text-primary hover:bg-elevated data-[active]:bg-primary/10 data-[active]:text-primary" data-page="settings" role="menuitem">
+          <i data-lucide="settings" class="w-4 h-4" aria-hidden="true"></i><span>系统设置</span>
+        </button></li>
+        <li role="none"><button class="nav-item w-full group flex items-center gap-3 px-3 py-2 rounded-lg text-sm cursor-pointer transition-colors text-text-secondary hover:text-text-primary hover:bg-elevated data-[active]:bg-primary/10 data-[active]:text-primary" data-page="skills" role="menuitem">
+          <i data-lucide="sparkles" class="w-4 h-4" aria-hidden="true"></i><span>技能商店</span>
+        </button></li>
       </ul>
       <div class="px-5 py-3 border-t border-border-subtle flex items-center gap-2 text-xs">
         <span id="connection-status" class="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium bg-danger/15 text-danger">断开</span>
@@ -222,31 +283,31 @@
     </nav>
 
     <!-- 侧边栏遮罩（移动端） -->
-    <div id="sidebar-backdrop" class="hidden fixed inset-0 bg-black/50 z-30 md:hidden" onclick="App.closeSidebar()"></div>
+    <button id="sidebar-backdrop" class="hidden fixed inset-0 bg-black/50 z-30 md:hidden border-none cursor-default" onclick="App.closeSidebar()" aria-label="关闭侧边栏"></button>
 
     <!-- 主内容区域 -->
     <div id="main-wrapper" class="flex-1 flex flex-col min-w-0">
       <!-- Header -->
       <header class="h-14 bg-surface/80 backdrop-blur border-b border-border-default flex items-center justify-between px-4 shrink-0 sticky top-0 z-20">
         <div class="flex items-center gap-3">
-          <button id="sidebar-toggle" class="p-1.5 rounded-lg text-text-secondary hover:text-text-primary hover:bg-elevated transition cursor-pointer md:hidden">
-            <i data-lucide="menu" class="w-5 h-5"></i>
+          <button id="sidebar-toggle" class="p-1.5 rounded-lg text-text-secondary hover:text-text-primary hover:bg-elevated transition-colors cursor-pointer md:hidden" aria-label="打开菜单">
+            <i data-lucide="menu" class="w-5 h-5" aria-hidden="true"></i>
           </button>
           <h1 id="page-title" class="text-base font-semibold">仪表盘</h1>
         </div>
         <div class="flex items-center gap-3">
-          <span id="pending-badge" class="hidden px-2.5 py-1 rounded-full text-xs font-medium bg-warning/15 text-warning cursor-pointer" onclick="App.switchPage('nodes');setTimeout(()=>{const s=document.getElementById('filter-status');if(s){s.value='pending';s.dispatchEvent(new Event('change'))}},100)">
+          <button id="pending-badge" class="hidden px-2.5 py-1 rounded-full text-xs font-medium bg-warning/15 text-warning cursor-pointer border-none" onclick="App.switchPage('nodes');setTimeout(()=>{const s=document.getElementById('filter-status');if(s){s.value='pending';s.dispatchEvent(new Event('change'))}},100)">
             待审批 <span id="pending-count">0</span>
-          </span>
+          </button>
           <!-- 用户菜单 -->
           <div class="relative" id="user-menu">
-            <button id="user-menu-trigger" onclick="App.toggleUserMenu()" class="flex items-center gap-2 px-2 py-1 rounded-lg hover:bg-elevated transition cursor-pointer">
-              <span class="w-7 h-7 rounded-full bg-primary/20 text-primary flex items-center justify-center text-xs font-semibold">AD</span>
+            <button id="user-menu-trigger" onclick="App.toggleUserMenu()" class="flex items-center gap-2 px-2 py-1 rounded-lg hover:bg-elevated transition-colors cursor-pointer" aria-haspopup="true" aria-expanded="false">
+              <span class="w-7 h-7 rounded-full bg-primary/20 text-primary flex items-center justify-center text-xs font-semibold" aria-hidden="true">AD</span>
               <div class="hidden sm:block text-left">
                 <div class="text-xs font-medium text-text-primary leading-tight">Admin</div>
                 <div class="text-xs text-text-muted">Admin</div>
               </div>
-              <i data-lucide="chevron-down" class="w-3.5 h-3.5 text-text-muted"></i>
+              <i data-lucide="chevron-down" class="w-3.5 h-3.5 text-text-muted" aria-hidden="true"></i>
             </button>
             <!-- 下拉菜单 -->
             <div id="user-dropdown" class="hidden absolute right-0 top-full mt-1 w-56 bg-surface border border-border-default rounded-lg shadow-lg py-1 z-50">
@@ -254,20 +315,20 @@
                 <div class="text-sm font-medium text-text-primary">Admin</div>
                 <div class="text-xs text-text-muted">SynonClaw Console 管理员</div>
               </div>
-              <button class="w-full flex items-center gap-2.5 px-4 py-2 text-xs text-text-secondary hover:text-text-primary hover:bg-elevated transition cursor-pointer" onclick="App.closeUserMenu()">
-                <i data-lucide="user" class="w-3.5 h-3.5"></i><span>个人资料</span>
+              <button class="w-full flex items-center gap-2.5 px-4 py-2 text-xs text-text-secondary hover:text-text-primary hover:bg-elevated transition-colors cursor-pointer" onclick="App.closeUserMenu()">
+                <i data-lucide="user" class="w-3.5 h-3.5" aria-hidden="true"></i><span>个人资料</span>
               </button>
 
-              <a class="flex items-center gap-2.5 px-4 py-2 text-xs text-text-secondary hover:text-text-primary hover:bg-elevated transition" href="https://github.com/gnbdev/opengnb" target="_blank" rel="noopener" onclick="App.closeUserMenu()">
-                <i data-lucide="github" class="w-3.5 h-3.5"></i><span>GitHub</span>
+              <a class="flex items-center gap-2.5 px-4 py-2 text-xs text-text-secondary hover:text-text-primary hover:bg-elevated transition-colors" href="https://github.com/gnbdev/opengnb" target="_blank" rel="noopener" onclick="App.closeUserMenu()">
+                <i data-lucide="github" class="w-3.5 h-3.5" aria-hidden="true"></i><span>GitHub</span>
               </a>
               <div class="border-t border-border-subtle my-1"></div>
-              <button class="w-full flex items-center gap-2.5 px-4 py-2 text-xs text-text-secondary hover:text-text-primary hover:bg-elevated transition cursor-pointer" onclick="App.toggleTheme()">
-                <i data-lucide="sun" id="theme-icon" class="w-3.5 h-3.5"></i><span id="theme-label">亮色模式</span>
+              <button class="w-full flex items-center gap-2.5 px-4 py-2 text-xs text-text-secondary hover:text-text-primary hover:bg-elevated transition-colors cursor-pointer" onclick="App.toggleTheme()">
+                <i data-lucide="sun" id="theme-icon" class="w-3.5 h-3.5" aria-hidden="true"></i><span id="theme-label">亮色模式</span>
               </button>
               <div class="border-t border-border-subtle my-1"></div>
-              <button class="w-full flex items-center gap-2.5 px-4 py-2 text-xs text-danger hover:bg-danger/10 transition cursor-pointer" onclick="App.logout()">
-                <i data-lucide="log-out" class="w-3.5 h-3.5"></i><span>退出登录</span>
+              <button class="w-full flex items-center gap-2.5 px-4 py-2 text-xs text-danger hover:bg-danger/10 transition-colors cursor-pointer" onclick="App.logout()">
+                <i data-lucide="log-out" class="w-3.5 h-3.5" aria-hidden="true"></i><span>退出登录</span>
               </button>
             </div>
           </div>
@@ -280,7 +341,7 @@
   </div>
 
   <!-- 全局弹窗 -->
-  <div id="modal-overlay" class="hidden fixed inset-0 z-50 flex items-center justify-center bg-overlay backdrop-blur-sm" onclick="if(event.target===this)App.closeModal()">
+  <div id="modal-overlay" class="hidden fixed inset-0 z-50 flex items-center justify-center bg-overlay backdrop-blur-sm" style="overscroll-behavior: contain" onclick="if(event.target===this)App.closeModal()" role="dialog" aria-modal="true">
     <div id="modal-content" class="bg-surface border border-border-default rounded-lg shadow-lg w-full max-w-md mx-4 p-6"></div>
   </div>
 

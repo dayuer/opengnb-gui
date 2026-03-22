@@ -89,6 +89,7 @@ set -e
 
 # 检测 Node.js 实际路径（兼容 nvm/fnm/系统安装）
 NODE_BIN=\$(command -v node)
+NODE_DIR=\$(dirname \$NODE_BIN)
 echo "      使用 Node: \$NODE_BIN (\$(node -v))"
 
 # systemd 服务
@@ -101,13 +102,14 @@ After=network.target
 Type=simple
 User=root
 WorkingDirectory=$APP_DIR
-ExecStart=\$NODE_BIN $APP_DIR/src/server.js
+ExecStart=\$NODE_BIN $APP_DIR/node_modules/.bin/tsx $APP_DIR/src/server.ts
 Restart=always
 RestartSec=5
 EnvironmentFile=-$APP_DIR/.env
 Environment=NODE_ENV=production
 Environment=PORT=$PORT
 Environment=DATA_DIR=$APP_DIR/data
+Environment=PATH=\$NODE_DIR:/usr/local/bin:/usr/bin:/bin
 
 [Install]
 WantedBy=multi-user.target

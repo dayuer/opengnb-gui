@@ -21,8 +21,8 @@ export const WS: WSModule = {
   connect() {
     const App = getApp();
     const proto = location.protocol === 'https:' ? 'wss:' : 'ws:';
-    const token = App.getToken();
-    this.ws = new WebSocket(`${proto}//${location.host}/ws${token ? '?token=' + encodeURIComponent(token) : ''}`);
+    // @security: token 不通过 URL 参数传递（避免日志泄露），仅通过首条消息认证
+    this.ws = new WebSocket(`${proto}//${location.host}/ws`);
 
     this.ws!.onopen = () => {
       this.retryDelay = 1000;

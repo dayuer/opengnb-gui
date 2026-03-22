@@ -45,12 +45,25 @@ export function pctBg(pct: number): string {
   return pct > 90 ? 'bg-danger' : pct > 70 ? 'bg-warning' : 'bg-success';
 }
 
+// Toast 无障碍容器 — 确保屏幕阅读器能朗读通知
+let _toastContainer: HTMLElement | null = null;
+function getToastContainer(): HTMLElement {
+  if (_toastContainer && document.body.contains(_toastContainer)) return _toastContainer;
+  _toastContainer = document.createElement('div');
+  _toastContainer.setAttribute('aria-live', 'polite');
+  _toastContainer.setAttribute('aria-atomic', 'false');
+  _toastContainer.className = 'fixed top-4 right-4 z-[9999] flex flex-col gap-2 pointer-events-none';
+  document.body.appendChild(_toastContainer);
+  return _toastContainer;
+}
+
 export function showToast(msg: string, type: 'success' | 'error' | 'info' = 'success'): void {
+  const container = getToastContainer();
   const el = document.createElement('div');
-  el.className = `fixed top-4 right-4 z-[9999] px-5 py-2.5 rounded-lg text-sm font-medium text-white shadow-lg transition-opacity duration-300 ${type === 'error' ? 'bg-danger' : 'bg-success'}`;
+  el.className = `px-5 py-2.5 rounded-lg text-sm font-medium text-white shadow-lg transition-opacity duration-300 pointer-events-auto ${type === 'error' ? 'bg-danger' : 'bg-success'}`;
   el.textContent = msg;
   el.style.opacity = '0';
-  document.body.appendChild(el);
+  container.appendChild(el);
   requestAnimationFrame(() => (el.style.opacity = '1'));
   setTimeout(() => {
     el.style.opacity = '0';

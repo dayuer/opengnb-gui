@@ -366,7 +366,7 @@ SVCUNIT`, log);
     // 获取 Gateway 端口
     const port = 18789;
 
-    // 触发事件，让 server.js 保存到节点配置
+    // 触发事件，让 server.ts 保存到节点配置
     this.emit('claw_ready', {
       nodeId: nodeConfig.id,
       token,

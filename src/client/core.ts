@@ -79,7 +79,7 @@ export const App = {
     const btn = $('#login-btn') as HTMLButtonElement | null;
     const btnText = $('#login-btn-text');
     if (btn) btn.disabled = true;
-    if (btnText) btnText.textContent = '登录中...';
+    if (btnText) btnText.textContent = '登录中…';
     try {
       const res = await fetch('/api/auth/login', {
         method: 'POST',
@@ -108,6 +108,8 @@ export const App = {
   // --- 路由 ---
   switchPage(page: string): void {
     this.currentPage = page;
+    // 路由持久化 — 刷新后恢复页面
+    if (location.hash !== '#' + page) location.hash = '#' + page;
     $$('.nav-item').forEach((item) => {
       if ((item as HTMLElement).dataset.page === page) item.setAttribute('data-active', '');
       else item.removeAttribute('data-active');
@@ -178,16 +180,16 @@ export const App = {
         Modal.show(`
           <h3 class="text-base font-semibold mb-4">API Token（节点初始化用）</h3>
           <label class="text-xs text-text-secondary block mb-1">API Token（永久有效）</label>
-          <div class="flex items-center bg-elevated border border-border-default rounded-lg cursor-pointer hover:border-primary transition group" onclick="navigator.clipboard.writeText('${escHtml(apiToken)}');showToast('已复制')">
-            <code class="flex-1 text-sm px-3 py-2.5 font-mono text-text-primary tracking-wide">${escHtml(apiToken)}</code>
-            <span class="px-3 text-text-muted group-hover:text-primary">${L('copy')}</span>
-          </div>
+          <button type="button" class="w-full flex items-center bg-elevated border border-border-default rounded-lg cursor-pointer hover:border-primary transition-colors group" onclick="navigator.clipboard.writeText('${safeAttr(apiToken)}');showToast('已复制')" aria-label="复制 API Token">
+            <code class="flex-1 text-sm px-3 py-2.5 font-mono text-text-primary tracking-wide text-left">${escHtml(apiToken)}</code>
+            <span class="px-3 text-text-muted group-hover:text-primary" aria-hidden="true">${L('copy')}</span>
+          </button>
           <div class="mt-4">
             <div class="text-xs text-text-muted mb-1">节点初始化命令:</div>
-            <div class="flex items-center bg-elevated border border-border-default rounded-lg cursor-pointer hover:border-primary transition group" onclick="navigator.clipboard.writeText(this.querySelector('code').textContent.trim());showToast('已复制')">
-              <code class="flex-1 text-xs px-3 py-2.5 text-text-primary break-all leading-relaxed">curl -sSL https://${location.host}/api/enroll/init.sh | TOKEN=${escHtml(apiToken)} bash</code>
-              <span class="px-3 text-text-muted group-hover:text-primary">${L('copy')}</span>
-            </div>
+            <button type="button" class="w-full flex items-center bg-elevated border border-border-default rounded-lg cursor-pointer hover:border-primary transition-colors group" onclick="navigator.clipboard.writeText(this.querySelector('code').textContent.trim());showToast('已复制')" aria-label="复制初始化命令">
+              <code class="flex-1 text-xs px-3 py-2.5 text-text-primary break-all leading-relaxed text-left">curl -sSL https://${location.host}/api/enroll/init.sh | TOKEN=${safeAttr(apiToken)} bash</code>
+              <span class="px-3 text-text-muted group-hover:text-primary" aria-hidden="true">${L('copy')}</span>
+            </button>
           </div>
           <div class="flex justify-end mt-5">
             <button class="px-4 py-2 text-sm rounded-lg bg-elevated hover:bg-border-default text-text-secondary transition cursor-pointer" onclick="App.closeModal()">关闭</button>
@@ -202,10 +204,15 @@ export const App = {
   getTheme(): string { return localStorage.getItem('gnb_theme') || 'dark'; },
 
   applyTheme(theme: string): void {
+    const htmlEl = document.documentElement;
     if (theme === 'light') {
-      document.documentElement.classList.remove('dark');
+      htmlEl.classList.remove('dark');
+      htmlEl.classList.add('light');
+      htmlEl.style.colorScheme = 'light';
     } else {
-      document.documentElement.classList.add('dark');
+      htmlEl.classList.add('dark');
+      htmlEl.classList.remove('light');
+      htmlEl.style.colorScheme = 'dark';
     }
     const icon = $('#theme-icon');
     const label = $('#theme-label');
@@ -230,13 +237,23 @@ export const App = {
       const menu = $('#user-menu');
       if (menu && !menu.contains(e.target as Node)) this.closeUserMenu();
     });
+    // hashchange 路由支持（前进/后退）
+    window.addEventListener('hashchange', () => {
+      const hash = location.hash.replace('#', '');
+      if (hash && hash !== this.currentPage && this.PAGE_TITLES[hash]) {
+        this.switchPage(hash);
+      }
+    });
     this.applyTheme(this.getTheme());
     if (!this.getToken()) {
       this.showLoginPage();
     } else {
       this.hideLoginPage();
       WS.connect();
-      this.switchPage('dashboard');
+      // 从 URL hash 恢复页面，默认 dashboard
+      const hashPage = location.hash.replace('#', '');
+      const startPage = (hashPage && this.PAGE_TITLES[hashPage]) ? hashPage : 'dashboard';
+      this.switchPage(startPage);
     }
   },
 };

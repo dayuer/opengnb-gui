@@ -17,6 +17,7 @@ npm-debug.log*
 
 # === OS ===
 .DS_Store
+.gemini
 Thumbs.db
 
 # === 编辑器 / IDE ===

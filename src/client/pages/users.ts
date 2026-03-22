@@ -47,7 +47,7 @@ export const Users = {
           <h1 class="text-3xl font-extrabold tracking-tight font-headline mb-2">团队设置</h1>
           <p class="text-text-muted max-w-lg leading-relaxed">管理团队成员、角色权限和组织信息。</p>
         </div>
-        <button class="px-5 py-2.5 signature-gradient text-white rounded-xl font-bold text-sm shadow-lg shadow-primary/20 hover:scale-[1.02] active:scale-95 transition-all flex items-center gap-2 cursor-pointer [&_svg]:w-4 [&_svg]:h-4" onclick="Users.showCreateModal()">
+        <button class="px-5 py-2.5 signature-gradient text-white rounded-xl font-bold text-sm shadow-lg shadow-primary/20 hover:scale-[1.02] active:scale-95 transition-transform flex items-center gap-2 cursor-pointer [&_svg]:w-4 [&_svg]:h-4" onclick="Users.showCreateModal()">
           ${L('user-plus')}<span>邀请成员</span>
         </button>
       </div>
@@ -57,7 +57,7 @@ export const Users = {
         <div class="flex items-center overflow-x-auto border-b border-border-subtle px-2">
           ${tabs.map(t => {
             const active = teamTab === t.id;
-            return `<button class="flex items-center gap-2 px-5 py-4 text-sm whitespace-nowrap transition-all cursor-pointer relative ${active ? 'text-primary font-bold' : 'text-text-muted hover:text-text-primary'} [&_svg]:w-4 [&_svg]:h-4" onclick="switchTeamTab('${t.id}')">
+            return `<button class="flex items-center gap-2 px-5 py-4 text-sm whitespace-nowrap transition-colors cursor-pointer relative ${active ? 'text-primary font-bold' : 'text-text-muted hover:text-text-primary'} [&_svg]:w-4 [&_svg]:h-4" onclick="switchTeamTab('${t.id}')">
               ${L(t.icon)}<span>${t.label}</span>
               ${active ? `<div class="absolute bottom-0 left-1/2 -translate-x-1/2 h-0.5 w-3/4 signature-gradient rounded-full"></div>` : ''}
             </button>`;
@@ -186,7 +186,7 @@ export const Users = {
         <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
           <div class="space-y-2">
             <label class="block text-sm font-medium">团队名称</label>
-            <input class="w-full px-4 py-3 bg-elevated border border-border-default rounded-xl text-sm outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary transition-all" value="SynonClaw Team" placeholder="输入团队名称">
+            <input class="w-full px-4 py-3 bg-elevated border border-border-default rounded-xl text-sm outline-none focus-visible:ring-2 focus-visible:ring-primary/20 focus-visible:border-primary transition-[box-shadow,border-color]" value="SynonClaw Team" placeholder="输入团队名称">
             <p class="text-xs text-text-muted">将显示在控制台标题和通知中</p>
           </div>
           <div class="space-y-2">
@@ -196,12 +196,12 @@ export const Users = {
           </div>
           <div class="space-y-2">
             <label class="block text-sm font-medium">管理员邮箱</label>
-            <input class="w-full px-4 py-3 bg-elevated border border-border-default rounded-xl text-sm outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary transition-all" placeholder="admin@example.com" type="email">
+            <input class="w-full px-4 py-3 bg-elevated border border-border-default rounded-xl text-sm outline-none focus-visible:ring-2 focus-visible:ring-primary/20 focus-visible:border-primary transition-[box-shadow,border-color]" placeholder="admin@example.com" type="email">
             <p class="text-xs text-text-muted">用于接收系统告警和通知</p>
           </div>
           <div class="space-y-2">
             <label class="block text-sm font-medium">地区</label>
-            <input class="w-full px-4 py-3 bg-elevated border border-border-default rounded-xl text-sm outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary transition-all" value="Asia Pacific" placeholder="团队所在地区">
+            <input class="w-full px-4 py-3 bg-elevated border border-border-default rounded-xl text-sm outline-none focus-visible:ring-2 focus-visible:ring-primary/20 focus-visible:border-primary transition-[box-shadow,border-color]" value="Asia Pacific" placeholder="团队所在地区">
             <p class="text-xs text-text-muted">影响默认节点区域分配</p>
           </div>
         </div>
@@ -234,7 +234,7 @@ export const Users = {
       </div>
 
       <div class="flex justify-end pt-4">
-        <button class="px-8 py-3 text-sm font-bold signature-gradient text-white rounded-xl shadow-lg shadow-primary/20 hover:scale-[1.02] active:scale-95 transition-all cursor-pointer" onclick="showToast('团队信息已保存')">保存设置</button>
+        <button class="px-8 py-3 text-sm font-bold signature-gradient text-white rounded-xl shadow-lg shadow-primary/20 hover:scale-[1.02] active:scale-95 transition-transform cursor-pointer" onclick="showToast('团队信息已保存')">保存设置</button>
       </div>
     </div>`;
   },
@@ -283,15 +283,15 @@ export const Users = {
       <div class="space-y-4">
         <div class="space-y-2">
           <label class="block text-sm font-medium">用户名</label>
-          <input type="text" id="new-username" placeholder="输入用户名" autofocus class="w-full bg-elevated border border-border-default rounded-xl px-4 py-3 text-sm outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary transition-all">
+          <input type="text" id="new-username" placeholder="输入用户名" autofocus class="w-full bg-elevated border border-border-default rounded-xl px-4 py-3 text-sm outline-none focus-visible:ring-2 focus-visible:ring-primary/20 focus-visible:border-primary transition-[box-shadow,border-color]">
         </div>
         <div class="space-y-2">
           <label class="block text-sm font-medium">初始密码（至少 8 位）</label>
-          <input type="password" id="new-password" placeholder="输入密码" class="w-full bg-elevated border border-border-default rounded-xl px-4 py-3 text-sm outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary transition-all">
+          <input type="password" id="new-password" placeholder="输入密码" class="w-full bg-elevated border border-border-default rounded-xl px-4 py-3 text-sm outline-none focus-visible:ring-2 focus-visible:ring-primary/20 focus-visible:border-primary transition-[box-shadow,border-color]">
         </div>
         <div class="space-y-2">
           <label class="block text-sm font-medium">角色权限</label>
-          <select id="new-role" class="w-full bg-elevated border border-border-default rounded-xl px-4 py-3 text-sm outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary transition-all cursor-pointer">
+          <select id="new-role" class="w-full bg-elevated border border-border-default rounded-xl px-4 py-3 text-sm outline-none focus-visible:ring-2 focus-visible:ring-primary/20 focus-visible:border-primary transition-[box-shadow,border-color] cursor-pointer">
             <option value="member">Member — 普通成员（只读权限）</option>
             <option value="admin">Admin — 管理员（管理权限）</option>
           </select>
@@ -301,7 +301,7 @@ export const Users = {
       </div>
       <div class="flex justify-end gap-3 mt-6">
         <button class="px-5 py-2.5 text-sm font-semibold text-text-muted hover:bg-elevated rounded-xl transition cursor-pointer" onclick="App.closeModal()">取消</button>
-        <button class="px-6 py-2.5 text-sm font-bold signature-gradient text-white rounded-xl shadow-lg shadow-primary/20 hover:scale-[1.02] active:scale-95 transition-all cursor-pointer" onclick="Users.createUser()">邀请</button>
+        <button class="px-6 py-2.5 text-sm font-bold signature-gradient text-white rounded-xl shadow-lg shadow-primary/20 hover:scale-[1.02] active:scale-95 transition-transform cursor-pointer" onclick="Users.createUser()">邀请</button>
       </div>
     `);
   },

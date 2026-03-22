@@ -464,7 +464,7 @@ export const Skills = {
           <div class="flex items-center gap-3">
             <div class="relative">
               <i data-lucide="search" class="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-text-muted pointer-events-none"></i>
-              <input id="skill-search" type="text" placeholder="搜索技能..."
+              <input id="skill-search" type="text" placeholder="搜索技能…"
                 class="pl-9 pr-4 py-2 w-56 text-sm border border-border-default rounded-lg bg-surface text-text-primary placeholder:text-text-muted focus:outline-none focus:ring-2 focus:ring-primary/30 focus:border-primary transition" />
             </div>
             <button class="inline-flex items-center gap-2 px-4 py-2 text-sm font-medium text-text-inverse bg-primary hover:bg-primary-dark rounded-lg transition cursor-pointer shadow-sm">
@@ -548,7 +548,7 @@ export const Skills = {
     }[skill.source] || 'bg-elevated text-text-muted';
 
     return `
-      <div class="group bg-surface border border-border-default rounded-xl p-5 hover:shadow-ambient hover:border-primary/20 transition-all duration-200 cursor-pointer animate-fade-in-up"
+      <div class="group bg-surface border border-border-default rounded-xl p-5 hover:shadow-ambient hover:border-primary/20 transition-[box-shadow,border-color] duration-200 cursor-pointer animate-fade-in-up"
            style="animation-delay: ${delay}ms" data-skill-id="${skill.id}">
         <!-- 头部: 图标 + 名称 + 版本 + 来源 -->
         <div class="flex items-start gap-3.5 mb-3">

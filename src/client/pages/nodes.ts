@@ -90,24 +90,24 @@ export const Nodes = {
     const f = App.nodeFilter;
     let html = `<div class="bg-surface rounded-xl shadow-ambient border border-border-default p-4 space-y-1 sticky top-20">
       <div class="text-xs font-bold text-text-muted uppercase tracking-widest mb-3 px-2">分组筛选</div>
-      <div class="flex items-center gap-2 px-3 py-2 rounded-lg text-sm cursor-pointer transition ${!f.groupId ? 'bg-primary/10 text-primary font-bold' : 'text-text-secondary hover:bg-elevated'}" onclick="Nodes.filterByGroup(null)">
+      <button type="button" class="w-full flex items-center gap-2 px-3 py-2 rounded-lg text-sm cursor-pointer transition-colors ${!f.groupId ? 'bg-primary/10 text-primary font-bold' : 'text-text-secondary hover:bg-elevated'}" onclick="Nodes.filterByGroup(null)">
         <span class="[&_svg]:w-4 [&_svg]:h-4">${L('layers')}</span> <span>全部节点</span> <span class="ml-auto text-xs font-bold">${totalNodes}</span>
-      </div>`;
+      </button>`;
     for (const g of App.nodeGroups) {
       const count = App.allNodesRaw.filter(n => n.groupId === g.id).length;
-      html += `<div class="flex items-center gap-2 px-3 py-2 rounded-lg text-sm cursor-pointer transition group/g ${f.groupId === g.id ? 'bg-primary/10 text-primary font-bold' : 'text-text-secondary hover:bg-elevated'}" onclick="Nodes.filterByGroup('${safeAttr(g.id)}')">
+      html += `<button type="button" class="w-full flex items-center gap-2 px-3 py-2 rounded-lg text-sm cursor-pointer transition-colors group/g ${f.groupId === g.id ? 'bg-primary/10 text-primary font-bold' : 'text-text-secondary hover:bg-elevated'}" onclick="Nodes.filterByGroup('${safeAttr(g.id)}')">
         <span class="w-2.5 h-2.5 rounded-full shrink-0" style="background:${escHtml(g.color)}"></span>
-        <span class="truncate flex-1">${escHtml(g.name)}</span>
+        <span class="truncate flex-1 text-left">${escHtml(g.name)}</span>
         <span class="text-xs font-bold">${count}</span>
         <span class="hidden group-hover/g:flex items-center gap-0.5 ml-1" onclick="event.stopPropagation()">
-          <button class="p-1 rounded text-text-muted hover:text-primary hover:bg-primary/10 transition cursor-pointer [&_svg]:w-3 [&_svg]:h-3" onclick="Groups.showEditModal('${safeAttr(g.id)}')" title="编辑">${L('pencil')}</button>
-          <button class="p-1 rounded text-text-muted hover:text-danger hover:bg-danger/10 transition cursor-pointer [&_svg]:w-3 [&_svg]:h-3" onclick="Groups.deleteGroup('${safeAttr(g.id)}')" title="删除">${L('trash-2')}</button>
+          <button class="p-1 rounded text-text-muted hover:text-primary hover:bg-primary/10 transition-colors cursor-pointer [&_svg]:w-3 [&_svg]:h-3" onclick="Groups.showEditModal('${safeAttr(g.id)}')" title="编辑">${L('pencil')}</button>
+          <button class="p-1 rounded text-text-muted hover:text-danger hover:bg-danger/10 transition-colors cursor-pointer [&_svg]:w-3 [&_svg]:h-3" onclick="Groups.deleteGroup('${safeAttr(g.id)}')" title="删除">${L('trash-2')}</button>
         </span>
-      </div>`;
+      </button>`;
     }
-    html += `<div class="flex items-center gap-2 px-3 py-2 rounded-lg text-sm cursor-pointer transition ${f.groupId === '__none' ? 'bg-primary/10 text-primary font-bold' : 'text-text-secondary hover:bg-elevated'}" onclick="Nodes.filterByGroup('__none')">
+    html += `<button type="button" class="w-full flex items-center gap-2 px-3 py-2 rounded-lg text-sm cursor-pointer transition-colors ${f.groupId === '__none' ? 'bg-primary/10 text-primary font-bold' : 'text-text-secondary hover:bg-elevated'}" onclick="Nodes.filterByGroup('__none')">
       <span class="[&_svg]:w-4 [&_svg]:h-4">${L('circle-off')}</span> <span>未分组</span> <span class="ml-auto text-xs font-bold">${ungrouped}</span>
-    </div>`;
+    </button>`;
     html += `<div class="border-t border-border-subtle mt-3 pt-3">
       <button class="w-full flex items-center gap-2 px-3 py-2 rounded-lg text-xs text-text-muted hover:text-primary hover:bg-primary/10 transition cursor-pointer [&_svg]:w-3.5 [&_svg]:h-3.5" onclick="Groups.showCreateModal()">${L('plus')} 新建分组</button>
     </div>`;
@@ -126,7 +126,7 @@ export const Nodes = {
             <span class="text-[10px] font-bold">${pct}%</span>
           </div>
           <div class="h-1 w-full bg-elevated rounded-full overflow-hidden">
-            <div class="h-full rounded-full transition-all" style="width:${pct}%;background:${escHtml(g.color)}"></div>
+            <div class="h-full rounded-full transition-[width]" style="width:${pct}%;background:${escHtml(g.color)}"></div>
           </div>
         </div>`;
       }
@@ -138,7 +138,7 @@ export const Nodes = {
             <span class="text-[10px] font-bold">${pct}%</span>
           </div>
           <div class="h-1 w-full bg-elevated rounded-full overflow-hidden">
-            <div class="h-full rounded-full bg-text-muted transition-all" style="width:${pct}%"></div>
+            <div class="h-full rounded-full bg-text-muted transition-[width]" style="width:${pct}%"></div>
           </div>
         </div>`;
       }
@@ -156,7 +156,7 @@ export const Nodes = {
     tb.innerHTML = `<div class="flex flex-wrap items-center justify-between gap-4 bg-surface p-4 rounded-xl shadow-ambient border border-border-default">
       <div class="flex items-center gap-2 bg-elevated px-4 py-2 rounded-lg w-full md:w-80">
         <span class="[&_svg]:w-4 [&_svg]:h-4 text-text-muted">${L('search')}</span>
-        <input type="text" placeholder="搜索节点名称/IP..." class="bg-transparent border-none text-sm w-full outline-none placeholder:text-text-muted" value="${escHtml(App.nodeFilter.keyword)}" oninput="Nodes.onSearch(this.value)">
+        <input type="text" placeholder="搜索节点名称/IP…" class="bg-transparent border-none text-sm w-full outline-none placeholder:text-text-muted" value="${escHtml(App.nodeFilter.keyword)}" oninput="Nodes.onSearch(this.value)">
       </div>
       <div class="flex items-center gap-2 overflow-x-auto pb-1 md:pb-0">
         <span class="text-xs font-bold text-text-muted uppercase tracking-widest mr-2">状态:</span>
@@ -444,7 +444,7 @@ export const Nodes = {
 
     if (ts.tab === 'overview') html += this._renderOverview(node);
     else if (ts.tab === 'terminal') html += this._renderTerminal(node);
-    else html += `<div class="text-text-muted text-sm">${L('loader')} 加载中...</div>`;
+    else html += `<div class="text-text-muted text-sm">${L('loader')} 加载中…</div>`;
 
     html += `</div></div>`;
     panel.innerHTML = html;
@@ -558,7 +558,7 @@ export const Nodes = {
       </div>
       <!-- 输入区域 -->
       <div class="px-4 py-3 border-t border-border-default bg-base flex gap-2.5 items-center">
-        <input id="chat-input-${nid}" type="text" placeholder="用自然语言描述运维任务..." class="flex-1 px-4 py-2 text-sm rounded-xl bg-surface border border-border-default focus:border-primary focus:ring-2 focus:ring-primary/20 outline-none transition-all placeholder:text-text-muted" onkeydown="if(event.key==='Enter'){Nodes.sendChat('${nid}');event.preventDefault()}" />
+        <input id="chat-input-${nid}" type="text" placeholder="用自然语言描述运维任务…" class="flex-1 px-4 py-2 text-sm rounded-xl bg-surface border border-border-default focus:border-primary focus:ring-2 focus:ring-primary/20 outline-none transition-[box-shadow,border-color] placeholder:text-text-muted" onkeydown="if(event.key==='Enter'){Nodes.sendChat('${nid}');event.preventDefault()}" />
         <span class="hidden sm:flex items-center gap-1 px-2 py-1 rounded-md bg-elevated text-[10px] text-text-muted font-medium [&_svg]:w-3 [&_svg]:h-3">${L('bot')} Claude Code</span>
         <button onclick="Nodes.sendChat('${nid}')" class="px-4 py-2 text-xs font-semibold rounded-xl signature-gradient text-white cursor-pointer flex items-center gap-1.5 [&_svg]:w-3.5 [&_svg]:h-3.5 hover:scale-[1.02] active:scale-95 transition-all shadow-sm shadow-primary/20">${L('send')} 发送</button>
       </div>
@@ -770,7 +770,7 @@ export const Nodes = {
       { key: 'channels', icon: 'radio', label: '渠道' },
     ];
     let html = `<div class="flex gap-1 mb-3">${subTabs.map(st => `<button class="px-2.5 py-1 text-xs rounded transition cursor-pointer ${subTab === st.key ? 'bg-primary/10 text-primary' : 'text-text-muted hover:text-text-primary hover:bg-elevated'}" onclick="Nodes.switchClawSubTab('${safeAttr(nodeId)}','${st.key}')">${L(st.icon)} ${st.label}</button>`).join('')}</div>
-    <div id="claw-content-${safeAttr(nodeId)}" class="text-sm text-text-muted">${L('loader')} 加载中...</div>`;
+    <div id="claw-content-${safeAttr(nodeId)}" class="text-sm text-text-muted">${L('loader')} 加载中…</div>`;
     container.innerHTML = html;
     refreshIcons();
 
@@ -781,7 +781,7 @@ export const Nodes = {
       const oc = monNode?.openclaw;
       if (oc && oc.running && oc.config) {
         const gw = oc.config.gateway || {};
-        const tokenPreview = gw.auth?.token ? gw.auth.token.substring(0, 12) + '...' : '无';
+        const tokenPreview = gw.auth?.token ? gw.auth.token.substring(0, 12) + '…' : '无';
         detail.innerHTML = `
           <div class="space-y-3">
             <div class="grid grid-cols-2 md:grid-cols-3 gap-3">
@@ -801,7 +801,7 @@ export const Nodes = {
       } else if (oc && !oc.running) {
         detail.innerHTML = `<div class="text-warning text-sm">${L('alert-triangle')} OpenClaw 未运行 (进程未检测到)</div>`;
       } else {
-        detail.innerHTML = `<div class="text-text-muted text-sm">${L('info')} 未检测到 OpenClaw 信息，等待 Agent 上报...</div>`;
+        detail.innerHTML = `<div class="text-text-muted text-sm">${L('info')} 未检测到 OpenClaw 信息，等待 Agent 上报…</div>`;
       }
       refreshIcons();
       return;
@@ -955,19 +955,19 @@ export const Nodes = {
         <div class="space-y-4">
           <div class="space-y-2">
             <label class="block text-sm font-medium">名称</label>
-            <input class="w-full bg-elevated border border-border-default rounded-lg px-4 py-2.5 text-sm outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary transition-all" name="name" value="${escHtml(node.name||'')}" required maxlength="64">
+            <input class="w-full bg-elevated border border-border-default rounded-lg px-4 py-2.5 text-sm outline-none focus-visible:ring-2 focus-visible:ring-primary/20 focus-visible:border-primary transition-[box-shadow,border-color]" name="name" value="${escHtml(node.name||'')}" required maxlength="64">
           </div>
           <div class="space-y-2">
             <label class="block text-sm font-medium">TUN 地址</label>
-            <input class="w-full bg-elevated border border-border-default rounded-lg px-4 py-2.5 text-sm outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary transition-all font-mono" name="tunAddr" value="${escHtml(node.tunAddr||'')}" required>
+            <input class="w-full bg-elevated border border-border-default rounded-lg px-4 py-2.5 text-sm outline-none focus-visible:ring-2 focus-visible:ring-primary/20 focus-visible:border-primary transition-[box-shadow,border-color] font-mono" name="tunAddr" value="${escHtml(node.tunAddr||'')}" required>
           </div>
           <div class="space-y-2">
             <label class="block text-sm font-medium">SSH 端口</label>
-            <input class="w-full bg-elevated border border-border-default rounded-lg px-4 py-2.5 text-sm outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary transition-all" name="sshPort" type="number" value="${node.sshPort||22}" min="1" max="65535" required>
+            <input class="w-full bg-elevated border border-border-default rounded-lg px-4 py-2.5 text-sm outline-none focus-visible:ring-2 focus-visible:ring-primary/20 focus-visible:border-primary transition-[box-shadow,border-color]" name="sshPort" type="number" value="${node.sshPort||22}" min="1" max="65535" required>
           </div>
           <div class="space-y-2">
             <label class="block text-sm font-medium">SSH 用户名</label>
-            <input class="w-full bg-elevated border border-border-default rounded-lg px-4 py-2.5 text-sm outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary transition-all" name="sshUser" value="${escHtml(node.sshUser||'synon')}" required>
+            <input class="w-full bg-elevated border border-border-default rounded-lg px-4 py-2.5 text-sm outline-none focus-visible:ring-2 focus-visible:ring-primary/20 focus-visible:border-primary transition-[box-shadow,border-color]" name="sshUser" value="${escHtml(node.sshUser||'synon')}" required>
           </div>
           <div id="edit-node-error" class="hidden text-danger text-xs"></div>
         </div>

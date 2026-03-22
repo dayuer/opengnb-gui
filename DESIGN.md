@@ -1,7 +1,7 @@
 # SynonClaw Console — Design System
 
 > 源自 Stitch 项目 `Cloud Cluster Login` (ID: `4567437340921825976`)
-> 主题：**亮色 (LIGHT)** | 字体：**Inter** | 圆角：**8px (ROUND_EIGHT)** | 主色：**#135bec**
+> 主题：**亮色 (LIGHT)** | 字体：**Inter** | 圆角：**8px (ROUND_EIGHT)** | 主色：**#4b41e1**
 
 ---
 
@@ -21,10 +21,10 @@
 
 | Token | 色值 | 用途 |
 |-------|------|------|
-| `primary` | `#135bec` | 按钮、链接、active 态 |
-| `primary-light` | `#3b7bf0` | hover 态、渐变终点 |
-| `primary-dark` | `#0e47bd` | pressed 态 |
-| `primary-subtle` | `rgba(19,91,236,0.08)` | 背景高亮 |
+| `primary` | `#4b41e1` | 按钮、链接、active 态 |
+| `primary-light` | `#645efb` | hover 态、渐变终点 |
+| `primary-dark` | `#3323cc` | pressed 态 |
+| `primary-subtle` | `rgba(75,65,225,0.08)` | 背景高亮 |
 
 ### 文字色 (Text)
 
@@ -41,14 +41,14 @@
 |-------|------|------|
 | `border-default` | `#e0e3e5` | 卡片边框、分割线 |
 | `border-subtle` | `#eceef0` | 更柔和的分割 |
-| `border-focus` | `#135bec` | focus 状态高亮 |
+| `border-focus` | `#4b41e1` | focus 状态高亮 |
 
 ### 语义色 (Semantic)
 
 | Token | 色值 | 用途 |
 |-------|------|------|
 | `success` | `#006c4a` | 在线、成功 |
-| `warning` | `#ba1a1a` | 告警 |
+| `warning` | `#c76e00` | 告警、待审批 |
 | `danger` | `#ba1a1a` | 错误、离线 |
 | `info` | `#4b41e1` | 信息提示 |
 
@@ -59,7 +59,7 @@
 | `shadow-sm` | `0 1px 3px rgba(25,28,30,0.06)` | 微小浮起 |
 | `shadow-md` | `0 4px 12px rgba(25,28,30,0.08)` | 卡片 |
 | `shadow-lg` | `0 10px 30px rgba(25,28,30,0.06)` | 弹窗 / overlay |
-| `shadow-glow` | `0 0 20px rgba(19,91,236,0.15)` | 品牌聚焦 |
+| `shadow-glow` | `0 0 20px rgba(75,65,225,0.15)` | 品牌聚焦 |
 
 ---
 
@@ -77,6 +77,7 @@
 - 使用 `letter-spacing: -0.02em` 于标题以获得高端编辑感
 - body 文字用 `text-secondary` 减少视觉疲劳
 - 标签使用 `uppercase tracking-wider font-semibold text-xs`
+- 数值显示使用 `font-variant-numeric: tabular-nums` 保证等宽对齐
 
 ---
 
@@ -95,7 +96,7 @@
 
 ```css
 .bg-grid-pattern {
-  background-image: radial-gradient(circle, rgba(19, 91, 236, 0.08) 1px, transparent 1px);
+  background-image: radial-gradient(circle, rgba(75, 65, 225, 0.08) 1px, transparent 1px);
   background-size: 32px 32px;
 }
 ```
@@ -103,7 +104,7 @@
 ### 品牌渐变
 
 ```css
-.signature-gradient { background: linear-gradient(135deg, #135bec 0%, #3b7bf0 100%); }
+.signature-gradient { background: linear-gradient(135deg, #4b41e1 0%, #645efb 100%); }
 ```
 
 ### 环境阴影
@@ -129,10 +130,10 @@
 
 ```css
 @theme {
-  --color-primary: #135bec;
-  --color-primary-light: #3b7bf0;
-  --color-primary-dark: #0e47bd;
-  --color-primary-subtle: rgba(19, 91, 236, 0.08);
+  --color-primary: #4b41e1;
+  --color-primary-light: #645efb;
+  --color-primary-dark: #3323cc;
+  --color-primary-subtle: rgba(75, 65, 225, 0.08);
   --color-surface: #ffffff;
   --color-elevated: #f2f4f6;
   --color-base: #f7f9fb;
@@ -143,7 +144,7 @@
   --color-text-muted: #767586;
   --color-text-inverse: #ffffff;
   --color-success: #006c4a;
-  --color-warning: #ba1a1a;
+  --color-warning: #c76e00;
   --color-danger: #ba1a1a;
   --color-info: #4b41e1;
   --font-sans: 'Inter', sans-serif;

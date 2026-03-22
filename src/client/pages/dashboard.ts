@@ -47,7 +47,7 @@ export const Dashboard = {
         <h1 class="text-3xl font-extrabold tracking-tight font-headline mb-2">节点管理仪表盘</h1>
         <p class="text-text-muted max-w-xl leading-relaxed">P2P VPN 集群总览 — 实时监控节点健康、资源使用和网络连接状态。</p>
       </div>
-      <button class="signature-gradient text-white px-5 py-2.5 rounded-lg font-bold text-sm shadow-ambient flex items-center gap-2 hover:scale-[1.02] active:scale-95 transition-all cursor-pointer" onclick="App.switchPage('settings')">
+      <button class="signature-gradient text-white px-5 py-2.5 rounded-lg font-bold text-sm shadow-ambient flex items-center gap-2 hover:scale-[1.02] active:scale-95 transition-transform cursor-pointer" onclick="App.switchPage('settings')">
         ${L('plus')}<span>注册节点</span>
       </button>
     </div>`;
@@ -160,18 +160,18 @@ export const Dashboard = {
         const gOnline = nodes.filter(n => n.online).length;
 
         // 分组行（Stitch event style）
-        html += `<div class="group flex items-center justify-between p-4 rounded-lg hover:bg-elevated transition cursor-pointer" onclick="Dashboard.toggleGroup('${safeAttr(gid)}')">
+        html += `<button type="button" class="w-full group flex items-center justify-between p-4 rounded-lg hover:bg-elevated transition-colors cursor-pointer" onclick="Dashboard.toggleGroup('${safeAttr(gid)}')">
           <div class="flex items-center gap-4">
             <div class="w-10 h-10 rounded-full ${gOnline === nodes.length ? 'bg-secondary-container text-success' : 'bg-surface-container text-text-muted'} flex items-center justify-center [&_svg]:w-5 [&_svg]:h-5">
               ${L(gOnline === nodes.length ? 'check-circle-2' : 'layers')}
             </div>
             <div>
-              <p class="text-sm font-bold">${escHtml(gName)}</p>
+              <p class="text-sm font-bold text-left">${escHtml(gName)}</p>
               <p class="text-xs text-text-muted">${gOnline}/${nodes.length} 在线</p>
             </div>
           </div>
-          <span class="text-xs font-bold text-text-muted uppercase tracking-widest">${L('chevron-down')}</span>
-        </div>`;
+          <span class="text-xs font-bold text-text-muted uppercase tracking-widest" aria-hidden="true">${L('chevron-down')}</span>
+        </button>`;
 
         // 展开的节点列表
         html += `<div id="group-acc-${safeAttr(gid)}" class="ml-14 space-y-0.5 mb-2">`;
@@ -179,13 +179,13 @@ export const Dashboard = {
           const si = node.sysInfo || {};
           const nCpu = si.cpuUsage ?? 0;
           const nMem = si.memTotalMB > 0 ? Math.round(si.memUsedMB / si.memTotalMB * 100) : 0;
-          html += `<div class="flex items-center gap-3 px-3 py-2 rounded-lg hover:bg-elevated/50 transition cursor-pointer" onclick="App.switchPage('nodes');setTimeout(()=>Nodes.expandRow('${safeAttr(node.id)}'),200)">
-            <span class="w-2 h-2 rounded-full shrink-0 ${node.online ? 'bg-success' : 'bg-danger'}"></span>
-            <span class="text-sm font-medium min-w-[100px]">${escHtml(node.name || node.id)}</span>
+          html += `<button type="button" class="w-full flex items-center gap-3 px-3 py-2 rounded-lg hover:bg-elevated/50 transition-colors cursor-pointer" onclick="App.switchPage('nodes');setTimeout(()=>Nodes.expandRow('${safeAttr(node.id)}'),200)">
+            <span class="w-2 h-2 rounded-full shrink-0 ${node.online ? 'bg-success' : 'bg-danger'}" aria-hidden="true"></span>
+            <span class="text-sm font-medium min-w-[100px] text-left">${escHtml(node.name || node.id)}</span>
             <span class="text-xs text-text-muted font-mono">${escHtml(node.tunAddr || '—')}</span>
             <div class="flex-1"></div>
             ${node.online ? `<span class="text-xs ${pctColor(nCpu)}">CPU ${nCpu}%</span><span class="text-xs ${pctColor(nMem)}">MEM ${nMem}%</span>` : '<span class="text-xs text-danger">离线</span>'}
-          </div>`;
+          </button>`;
         }
         html += `</div>`;
       }
@@ -216,7 +216,7 @@ export const Dashboard = {
           ${pendingArc > 0 ? `<circle cx="50" cy="50" r="40" fill="transparent" stroke="#ffb4ab" stroke-width="12" stroke-dasharray="${pendingArc} 251" stroke-dashoffset="-${onlineArc + offlineArc}"/>` : ''}
         </svg>
         <div class="absolute inset-0 flex flex-col items-center justify-center text-center">
-          <span class="text-2xl font-extrabold font-headline">${total}</span>
+          <span class="text-2xl font-extrabold font-headline tabular-nums">${total}</span>
           <span class="text-xs text-text-muted uppercase font-bold tracking-widest">节点</span>
         </div>
       </div>
@@ -260,7 +260,7 @@ export const Dashboard = {
         ${badge ? `<span class="text-xs font-bold uppercase tracking-widest ${badgeClass} px-2 py-0.5 rounded-full">${badge}</span>` : ''}
       </div>
       <p class="text-xs font-medium text-text-muted uppercase tracking-wider mb-1">${label}</p>
-      <h3 class="text-2xl font-bold">${value}</h3>
+      <h3 class="text-2xl font-bold tabular-nums">${value}</h3>
       ${footer || ''}
     </div>`;
   },

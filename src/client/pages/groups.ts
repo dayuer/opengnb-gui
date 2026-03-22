@@ -25,7 +25,7 @@ export const Groups = {
           <h1 class="text-3xl font-extrabold tracking-tight font-headline mb-2">节点分组</h1>
           <p class="text-text-muted max-w-lg leading-relaxed">按地域、职能或业务线组织你的节点，实现精细化管理。</p>
         </div>
-        <button class="px-5 py-2.5 signature-gradient text-white rounded-lg font-bold text-sm shadow-lg shadow-primary/20 hover:scale-[1.02] active:scale-95 transition-all flex items-center gap-2 cursor-pointer" onclick="Groups.showCreateModal()">
+        <button class="px-5 py-2.5 signature-gradient text-white rounded-lg font-bold text-sm shadow-lg shadow-primary/20 hover:scale-[1.02] active:scale-95 transition-transform flex items-center gap-2 cursor-pointer" onclick="Groups.showCreateModal()">
           ${L('plus')}<span>创建分组</span>
         </button>
       </div>
@@ -37,7 +37,7 @@ export const Groups = {
           ${groups.length > 0 ? groups.map(g => {
             const nodeCount = g.nodeCount ?? 0;
             const created = g.createdAt ? new Date(g.createdAt).toLocaleDateString() : '—';
-            return `<div class="bg-surface rounded-xl shadow-ambient border border-border-default p-6 hover:shadow-md transition-all group">
+            return `<div class="bg-surface rounded-xl shadow-ambient border border-border-default p-6 hover:shadow-md transition-shadow group">
               <div class="flex items-center justify-between">
                 <div class="flex items-center gap-4">
                   <div class="w-12 h-12 rounded-xl flex items-center justify-center text-white font-bold text-lg font-headline shadow-sm" style="background:${escHtml(g.color)}">
@@ -98,7 +98,7 @@ export const Groups = {
                     <span class="text-xs font-bold">${pct}%</span>
                   </div>
                   <div class="h-1.5 w-full bg-elevated rounded-full overflow-hidden">
-                    <div class="h-full rounded-full transition-all" style="width:${pct}%;background:${escHtml(g.color)}"></div>
+                    <div class="h-full rounded-full transition-[width]" style="width:${pct}%;background:${escHtml(g.color)}"></div>
                   </div>
                 </div>`;
               }).join('')}
@@ -128,7 +128,7 @@ export const Groups = {
       <div class="space-y-4">
         <div class="space-y-2">
           <label class="block text-sm font-medium">分组名称</label>
-          <input type="text" id="group-name-input" placeholder="例如：雅加达" autofocus class="w-full bg-elevated border border-border-default rounded-lg px-4 py-2.5 text-sm outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary transition-all">
+          <input type="text" id="group-name-input" placeholder="例如：雅加达" autofocus class="w-full bg-elevated border border-border-default rounded-lg px-4 py-2.5 text-sm outline-none focus-visible:ring-2 focus-visible:ring-primary/20 focus-visible:border-primary transition-[box-shadow,border-color]">
         </div>
         <div class="space-y-2">
           <label class="block text-sm font-medium">颜色</label>
@@ -137,7 +137,7 @@ export const Groups = {
       </div>
       <div class="flex justify-end gap-3 mt-6">
         <button class="px-5 py-2.5 text-sm font-semibold text-text-muted hover:bg-elevated rounded-lg transition cursor-pointer" onclick="App.closeModal()">取消</button>
-        <button class="px-6 py-2.5 text-sm font-bold signature-gradient text-white rounded-lg shadow-lg shadow-primary/20 hover:scale-[1.02] active:scale-95 transition-all cursor-pointer" onclick="Groups.createGroup()">创建</button>
+        <button class="px-6 py-2.5 text-sm font-bold signature-gradient text-white rounded-lg shadow-lg shadow-primary/20 hover:scale-[1.02] active:scale-95 transition-transform cursor-pointer" onclick="Groups.createGroup()">创建</button>
       </div>
     `);
   },
@@ -165,7 +165,7 @@ export const Groups = {
       <div class="space-y-4">
         <div class="space-y-2">
           <label class="block text-sm font-medium">分组名称</label>
-          <input type="text" id="edit-group-name" value="${escHtml(group.name)}" autofocus class="w-full bg-elevated border border-border-default rounded-lg px-4 py-2.5 text-sm outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary transition-all">
+          <input type="text" id="edit-group-name" value="${escHtml(group.name)}" autofocus class="w-full bg-elevated border border-border-default rounded-lg px-4 py-2.5 text-sm outline-none focus-visible:ring-2 focus-visible:ring-primary/20 focus-visible:border-primary transition-[box-shadow,border-color]">
         </div>
         <div class="space-y-2">
           <label class="block text-sm font-medium">颜色</label>
@@ -174,7 +174,7 @@ export const Groups = {
       </div>
       <div class="flex justify-end gap-3 mt-6">
         <button class="px-5 py-2.5 text-sm font-semibold text-text-muted hover:bg-elevated rounded-lg transition cursor-pointer" onclick="App.closeModal()">取消</button>
-        <button class="px-6 py-2.5 text-sm font-bold signature-gradient text-white rounded-lg shadow-lg shadow-primary/20 hover:scale-[1.02] active:scale-95 transition-all cursor-pointer" onclick="Groups.updateGroup('${safeAttr(groupId)}')">保存</button>
+        <button class="px-6 py-2.5 text-sm font-bold signature-gradient text-white rounded-lg shadow-lg shadow-primary/20 hover:scale-[1.02] active:scale-95 transition-transform cursor-pointer" onclick="Groups.updateGroup('${safeAttr(groupId)}')">保存</button>
       </div>
     `);
   },

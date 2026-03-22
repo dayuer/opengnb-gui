@@ -198,7 +198,7 @@ After=network.target
 Type=simple
 User=root
 WorkingDirectory=$APP_DIR
-ExecStart=$(which node) $APP_DIR/src/server.js
+ExecStart=$(which node) $APP_DIR/node_modules/.bin/tsx $APP_DIR/src/server.ts
 Restart=always
 RestartSec=5
 Environment=NODE_ENV=production
@@ -220,7 +220,7 @@ EOF
 name="gnb-console"
 description="SynonClaw Console Management Platform"
 command="/usr/bin/node"
-command_args="APP_DIR_PLACEHOLDER/src/server.js"
+command_args="APP_DIR_PLACEHOLDER/node_modules/.bin/tsx APP_DIR_PLACEHOLDER/src/server.ts"
 command_background=true
 pidfile="/run/${RC_SVCNAME}.pid"
 directory="APP_DIR_PLACEHOLDER"
@@ -245,7 +245,8 @@ INITEOF
     <key>Label</key><string>com.synonclaw.gnb-console</string>
     <key>ProgramArguments</key><array>
         <string>$(which node)</string>
-        <string>$APP_DIR/src/server.js</string>
+        <string>$APP_DIR/node_modules/.bin/tsx</string>
+        <string>$APP_DIR/src/server.ts</string>
     </array>
     <key>WorkingDirectory</key><string>$APP_DIR</string>
     <key>EnvironmentVariables</key><dict>

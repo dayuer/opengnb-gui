@@ -22,7 +22,7 @@ const b64urlDecode = (str: any) => Buffer.from(str, 'base64url');
 
 // --- JWT ---
 
-/** @alpha: 设置 JWT 密钥（由 server.js 在启动时调用） */
+/** @alpha: 设置 JWT 密钥（由 server.ts 在启动时调用） */
 function setJwtSecret(secret: any) {
   _jwtSecret = secret;
 }
