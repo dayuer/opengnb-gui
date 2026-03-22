@@ -302,6 +302,7 @@ DEPLOY_SERVER=<IP>  DEPLOY_DOMAIN=<域名>  bash scripts/deploy.sh
 
 | 日期 | 里程碑 | 说明 |
 |------|--------|------|
+| 03-22 | **v1.1.0-alpha: 技能中心落地** | 新增独立 `技能商店` 路由，接入真实底层的 `.online` 布尔精准探测，打通选节点 Modal 自动下发并重构了部署侧的 Vite 全链路。 |
 | 03-17 | Console 可行性 | GNB 架构调研 + Sidecar 方案评估 |
 | 03-18 | 全量测试覆盖 | 测试用例覆盖所有 services/routes/middleware |
 | 03-19 | 节点编辑 + 分组 | 在线编辑 + address.conf 联动 + CIDR 过滤 |
