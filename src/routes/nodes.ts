@@ -242,24 +242,36 @@ function createNodesRouter(monitor: any, sshManager: any, nodesConfig: any, keyM
       return res.status(404).json({ error: `节点 ${req.params.id} 未找到或暂离线` });
     }
 
-    // 构造安装命令
+    // @alpha: skills.sh / console 类技能为 prompt 或内置，不需要 SSH 远程安装
+    const isLocalOnly = source === 'skills.sh' || source === 'console';
+
+    // 构造安装命令（仅远程源需要）
     let cmd = '';
-    if (source.startsWith('http')) {
-      cmd = `curl -sSL ${source} | sudo bash`;
-    } else if (source === 'npm') {
-      cmd = `sudo npm install -g ${skillId}`;
-    } else if (source === 'openclaw') {
-      cmd = `sudo npm install -g @openclaw/${skillId}`;
-    } else {
-      return res.status(400).json({ error: '不支持的安装源: ' + source });
+    if (!isLocalOnly) {
+      if (source.startsWith('http')) {
+        cmd = `curl -sSL ${source} | sudo bash`;
+      } else if (source === 'npm') {
+        cmd = `sudo npm install -g ${skillId}`;
+      } else if (source === 'openclaw') {
+        cmd = `sudo npm install -g @openclaw/${skillId}`;
+      } else {
+        return res.status(400).json({ error: '不支持的安装源: ' + source });
+      }
     }
 
     try {
-      // 串行同步执行（容错时长 30s）
-      const result = await sshManager.exec(nodeConfig, cmd, 30000);
-      
-      // 执行成功 -> 更新持久化状态
-      if (result.code === 0 && keyManager) {
+      let result: any = { code: 0, stdout: 'local-only skill registered', stderr: '' };
+
+      // 远程源：SSH 执行安装命令
+      if (!isLocalOnly) {
+        result = await sshManager.exec(nodeConfig, cmd, 30000);
+        if (result.code !== 0) {
+          return res.status(500).json({ error: `安装执行败(code:${result.code})`, stdout: result.stdout, stderr: result.stderr });
+        }
+      }
+
+      // 更新持久化状态
+      if (keyManager) {
         const node = keyManager.store.findById(req.params.id);
         const currentSkills = node.skills || [];
         if (!currentSkills.find((s: any) => s.id === skillId)) {
@@ -271,10 +283,10 @@ function createNodesRouter(monitor: any, sshManager: any, nodesConfig: any, keyM
           });
           keyManager.updateNodeSkills(req.params.id, currentSkills);
         }
-      } else if (result.code !== 0) {
-        return res.status(500).json({ error: `安装执行败(code:${result.code})`, stdout: result.stdout, stderr: result.stderr });
+        // 广播 WS 更新，确保所有已连接客户端同步
+        if (keyManager.onChange) keyManager.onChange('skill_install', req.params.id);
       }
-      
+
       res.json(result);
     } catch (err: any) {
       res.status(500).json({ error: err.message });
@@ -309,6 +321,8 @@ function createNodesRouter(monitor: any, sshManager: any, nodesConfig: any, keyM
         
         if (currentSkills.length !== originalLen) {
           keyManager.updateNodeSkills(req.params.id, currentSkills);
+          // 广播 WS 更新
+          if (keyManager.onChange) keyManager.onChange('skill_uninstall', req.params.id);
         }
       }
       res.json(result);

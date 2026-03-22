@@ -511,9 +511,9 @@ export const Nodes = {
 
   // @alpha: AI Ops Terminal — Installed Skills (Stitch UI)
   _renderSkills(node) {
-    // 假设 node.skills 或从全局的假数据获取。为了 UI 展示 Beta 阶段，如果没有技能，则提供空状态，或者展示假技能。
-    // 在真实连通后，这里的数据应来自 node.skills。
-    const installedSkills = node.skills || [];
+    // 技能数据来自 allNodesRaw（SQLite 持久化层），而非 monitorNode（运行时指标）
+    const rawNode = App.allNodesRaw.find(n => n.id === node.id);
+    const installedSkills = rawNode?.skills || node.skills || [];
     const nid = safeAttr(node.id);
     
     let html = `

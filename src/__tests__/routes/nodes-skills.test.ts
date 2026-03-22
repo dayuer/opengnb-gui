@@ -38,7 +38,13 @@ function createTestApp(execMock) {
       keyManager.lastUpdatedSkills = skills;
       return { success: true };
     },
-    lastUpdatedSkills: null
+    onChange: (action, nodeId) => {
+      keyManager.lastChangeAction = action;
+      keyManager.lastChangeNodeId = nodeId;
+    },
+    lastUpdatedSkills: null,
+    lastChangeAction: null,
+    lastChangeNodeId: null,
   };
 
   app.use('/api/nodes', createNodesRouter(monitor, sshManager, nodesConfig, keyManager));
@@ -107,6 +113,57 @@ describe('Node Skills API', () => {
       assert.equal(res.statusCode, 400);
     });
 
+    it('should register skills.sh source locally without SSH exec', async () => {
+      let sshCalled = false;
+      const execMock = async () => { sshCalled = true; return { code: 0 }; };
+      const { app, keyManager } = createTestApp(execMock);
+
+      const res = await request(app, 'POST', '/api/nodes/n1/skills', {
+        body: {
+          skillId: 'agent-tools',
+          name: 'Agent Tools',
+          source: 'skills.sh',
+          version: '1.0.0'
+        }
+      });
+
+      assert.equal(res.statusCode, 200);
+      assert.equal(sshCalled, false); // skills.sh 不走 SSH
+      const skills = keyManager.lastUpdatedSkills;
+      assert.ok(skills);
+      assert.equal(skills[skills.length - 1].id, 'agent-tools');
+    });
+
+    it('should register console source locally without SSH exec', async () => {
+      let sshCalled = false;
+      const execMock = async () => { sshCalled = true; return { code: 0 }; };
+      const { app, keyManager } = createTestApp(execMock);
+
+      const res = await request(app, 'POST', '/api/nodes/n1/skills', {
+        body: {
+          skillId: 'built-in-monitor',
+          name: 'Built-in Monitor',
+          source: 'console'
+        }
+      });
+
+      assert.equal(res.statusCode, 200);
+      assert.equal(sshCalled, false); // console 不走 SSH
+      assert.ok(keyManager.lastUpdatedSkills);
+    });
+
+    it('should trigger onChange WS broadcast after install', async () => {
+      const execMock = async () => ({ code: 0, stdout: 'ok', stderr: '' });
+      const { app, keyManager } = createTestApp(execMock);
+
+      await request(app, 'POST', '/api/nodes/n1/skills', {
+        body: { skillId: 'ws-test', source: 'npm' }
+      });
+
+      assert.equal(keyManager.lastChangeAction, 'skill_install');
+      assert.equal(keyManager.lastChangeNodeId, 'n1');
+    });
+
     it('should return 500 if ssh execution fails', async () => {
       const execMock = async () => ({ code: 1, stdout: '', stderr: 'failed' });
       const { app, keyManager } = createTestApp(execMock);
@@ -142,6 +199,16 @@ describe('Node Skills API', () => {
       const skills = keyManager.lastUpdatedSkills;
       assert.ok(skills);
       assert.equal(skills.length, 0); // old-skill removed
+    });
+
+    it('should trigger onChange WS broadcast after uninstall', async () => {
+      const execMock = async () => ({ code: 0, stdout: 'ok', stderr: '' });
+      const { app, keyManager } = createTestApp(execMock);
+
+      await request(app, 'DELETE', '/api/nodes/n1/skills/old-skill', {});
+
+      assert.equal(keyManager.lastChangeAction, 'skill_uninstall');
+      assert.equal(keyManager.lastChangeNodeId, 'n1');
     });
 
     it('should reject invalid skill IDs', async () => {

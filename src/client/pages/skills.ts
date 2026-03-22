@@ -793,7 +793,21 @@ export const Skills = {
               const errData = await res.json().catch(() => ({}));
               throw new Error(errData.error || `Server responded with ${res.status}`);
             }
-            showToast(`指令已发送至 ${targetNodeId} 执行部署`, 'success');
+            // 乐观更新 allNodesRaw — 确保技能面板立即可见
+            const targetNode = App.allNodesRaw.find(n => n.id === targetNodeId);
+            if (targetNode) {
+              if (!targetNode.skills) targetNode.skills = [];
+              if (!targetNode.skills.find((s: any) => s.id === skill.id)) {
+                targetNode.skills.push({
+                  id: skill.id,
+                  name: skill.name,
+                  version: skill.version,
+                  icon: skill.icon,
+                  installedAt: new Date().toISOString(),
+                });
+              }
+            }
+            showToast(`技能 ${skill.name} 已成功安装到节点`, 'success');
             closeHandler();
           } catch (err: any) {
             console.error('Install failed:', err);
