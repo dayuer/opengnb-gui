@@ -1,6 +1,7 @@
 // @alpha: users 页面模块 (TS 迁移 — Alpha pass)
 import { $, $$, L, refreshIcons, escHtml, showToast, formatBytes, formatUptime, pctColor, pctBg, safeAttr, cidrMatch, isValidCidr } from '../utils';
 import { Modal } from '../modal';
+import { App } from '../core';
 
 
 // @alpha: 团队设置 — Stitch "Team Settings" 风格 (水平标签: 成员/角色/团队/邀请)
@@ -306,9 +307,9 @@ export const Users = {
   },
 
   async createUser() {
-    const username = $('#new-username')?.value?.trim();
-    const password = $('#new-password')?.value;
-    const role = $('#new-role')?.value || 'member';
+    const username = ($('#new-username') as HTMLInputElement)?.value?.trim();
+    const password = ($('#new-password') as HTMLInputElement)?.value;
+    const role = ($('#new-role') as HTMLSelectElement)?.value || 'member';
     const errEl = $('#create-user-error');
     if (!username || !password) return;
     try {
@@ -328,11 +329,11 @@ export const Users = {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ role: newRole }),
       });
-      if (!res.ok) { const data = await res.json(); showToast(data.error || '角色修改失败', 'danger'); return; }
+      if (!res.ok) { const data = await res.json(); showToast(data.error || '角色修改失败', 'error'); return; }
       showToast(`角色已更新为 ${newRole}`);
       _cachedUsers = null;
       await Users.render($('#main-content'));
-    } catch (e) { showToast(`角色修改失败: ${e.message}`, 'danger'); }
+    } catch (e: any) { showToast(`角色修改失败: ${e.message}`, 'error'); }
   },
 
   async deleteUser(id, username) {

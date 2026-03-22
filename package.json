@@ -2,13 +2,13 @@
   "name": "gnb-console",
   "version": "0.1.0",
   "description": "GNB Node Management Console — SSH-based remote monitoring via GNB TUN network",
-  "main": "src/server.js",
+  "main": "src/server.ts",
   "scripts": {
-    "dev": "node --watch src/server.js",
+    "dev": "tsx --watch src/server.ts",
     "dev:vite": "vite",
     "build": "vite build",
-    "start": "node src/server.js",
-    "test": "node --test 'src/__tests__/**/*.test.js'",
+    "start": "tsx src/server.ts",
+    "test": "node --import tsx --test 'src/__tests__/**/*.test.js'",
     "typecheck": "tsc --noEmit"
   },
   "keywords": [

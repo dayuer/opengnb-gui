@@ -1,6 +1,7 @@
 // @alpha: nodes 页面模块 (TS 迁移 — Alpha pass)
 import { $, $$, L, refreshIcons, escHtml, showToast, formatBytes, formatUptime, pctColor, pctBg, safeAttr, cidrMatch, isValidCidr } from '../utils';
 import { Modal } from '../modal';
+import { App } from '../core';
 
 
 // @alpha: 节点管理 — Stitch "Cluster Management" 风格
@@ -358,7 +359,7 @@ export const Nodes = {
 
     // --- 顶部汇总卡片 ---
     const elTotal = $('#summary-total');
-    if (elTotal) elTotal.textContent = allNodes.length;
+    if (elTotal) elTotal.textContent = String(allNodes.length);
     const elPending = $('#summary-pending');
     if (elPending) elPending.innerHTML = pending > 0
       ? `<span class="text-warning text-sm font-bold flex items-center gap-1">${L('clock')} ${pending} 待审批</span>`
@@ -377,7 +378,7 @@ export const Nodes = {
     const wrap = $('#nodes-table-wrap');
     if (!wrap) return;
     for (const card of wrap.querySelectorAll('[data-node-id]')) {
-      const nid = card.dataset.nodeId;
+      const nid = (card as HTMLElement).dataset.nodeId;
       const mon = monData.find(n => n.id === nid);
       if (!mon) continue;
       const si = mon.sysInfo || {};
@@ -389,14 +390,14 @@ export const Nodes = {
       if (cpuEl) cpuEl.textContent = `${cpu}%`;
       const cpuBar = card.querySelector('[data-cpu-bar]');
       if (cpuBar) {
-        cpuBar.style.width = `${Math.min(cpu, 100)}%`;
+        (cpuBar as HTMLElement).style.width = `${Math.min(cpu, 100)}%`;
         cpuBar.className = `h-full rounded-full transition-all ${cpu > 80 ? 'bg-warning' : 'bg-primary'}`;
       }
       const memEl = card.querySelector('[data-mem-pct]');
       if (memEl) memEl.textContent = `${mem}%`;
       const memBar = card.querySelector('[data-mem-bar]');
       if (memBar) {
-        memBar.style.width = `${Math.min(mem, 100)}%`;
+        (memBar as HTMLElement).style.width = `${Math.min(mem, 100)}%`;
         memBar.className = `h-full rounded-full transition-all ${mem > 80 ? 'bg-warning' : 'bg-primary'}`;
       }
       const latEl = card.querySelector('[data-latency]');
@@ -579,7 +580,7 @@ export const Nodes = {
     if (wrap) {
       const btn = wrap.querySelector('[title="最大化"], [title="还原"]');
       if (btn) {
-        btn.title = this._termMaximized ? '还原' : '最大化';
+        (btn as HTMLElement).title = this._termMaximized ? '还原' : '最大化';
         btn.innerHTML = L(this._termMaximized ? 'minimize-2' : 'maximize-2');
         refreshIcons();
       }
@@ -590,9 +591,9 @@ export const Nodes = {
   sendChat(nodeId) {
     const input = document.getElementById(`chat-input-${nodeId}`);
     if (!input) return;
-    const text = input.value.trim();
+    const text = (input as HTMLInputElement).value.trim();
     if (!text) return;
-    input.value = '';
+    (input as HTMLInputElement).value = '';
     const s = _chatSessions[nodeId];
     if (!s || !s.ws || s.ws.readyState !== 1) {
       this._appendMsg(nodeId, 'system', '⚠️ 未连接，请稍候重试');
@@ -895,7 +896,7 @@ export const Nodes = {
 
   // --- API 操作 ---
   async approve(id) {
-    event?.target?.closest('button')?.setAttribute('disabled', '');
+    (event?.target as HTMLElement)?.closest('button')?.setAttribute('disabled', '');
     try {
       const res = await App.authFetch(`/api/enroll/${encodeURIComponent(id)}/approve`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' });
       const data = await res.json();
@@ -910,7 +911,7 @@ export const Nodes = {
   },
 
   async reject(id) {
-    event?.target?.closest('button')?.setAttribute('disabled', '');
+    (event?.target as HTMLElement)?.closest('button')?.setAttribute('disabled', '');
     try {
       const res = await App.authFetch(`/api/enroll/${encodeURIComponent(id)}/reject`, { method: 'POST' });
       const data = await res.json();
@@ -981,21 +982,22 @@ export const Nodes = {
   async saveEdit(e, id) {
     e.preventDefault();
     const form = $('#edit-node-form');
-    if (!form.checkValidity()) { form.reportValidity(); return; }
+    if (!(form as HTMLFormElement).checkValidity()) { (form as HTMLFormElement).reportValidity(); return; }
     const btn = $('#edit-node-save-btn');
-    btn.disabled = true; btn.textContent = '保存中…';
+    (btn as HTMLButtonElement).disabled = true; (btn as HTMLButtonElement).textContent = '保存中…';
     const errEl = $('#edit-node-error');
     errEl.classList.add('hidden');
-    const body = { name: form.name.value.trim(), tunAddr: form.tunAddr.value.trim(), sshPort: parseInt(form.sshPort.value,10), sshUser: form.sshUser.value.trim() };
+    const f = form as any;
+    const body = { name: f.name.value.trim(), tunAddr: f.tunAddr.value.trim(), sshPort: parseInt(f.sshPort.value,10), sshUser: f.sshUser.value.trim() };
     try {
       const res = await fetch(`/api/nodes/${encodeURIComponent(id)}`, { method: 'PUT', headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + App.getToken() }, body: JSON.stringify(body) });
       const data = await res.json();
-      if (!res.ok) { errEl.textContent = data.hint || data.error || '保存失败'; errEl.classList.remove('hidden'); btn.disabled = false; btn.textContent = '保存'; return; }
+      if (!res.ok) { errEl.textContent = data.hint || data.error || '保存失败'; errEl.classList.remove('hidden'); (btn as HTMLButtonElement).disabled = false; (btn as HTMLButtonElement).textContent = '保存'; return; }
       const node = App.allNodesRaw.find(n => n.id === id);
       if (node) Object.assign(node, body);
       App.closeModal();
       this.renderTable(); this.renderPagination();
-    } catch (err) { errEl.textContent = '网络错误: ' + err.message; errEl.classList.remove('hidden'); btn.disabled = false; btn.textContent = '保存'; }
+    } catch (err: any) { errEl.textContent = '网络错误: ' + err.message; errEl.classList.remove('hidden'); (btn as HTMLButtonElement).disabled = false; (btn as HTMLButtonElement).textContent = '保存'; }
   },
 
   showMoveModal(id) {

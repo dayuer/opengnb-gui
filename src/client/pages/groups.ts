@@ -1,6 +1,8 @@
 // @alpha: groups 页面模块 (TS 迁移 — Alpha pass)
 import { $, $$, L, refreshIcons, escHtml, showToast, formatBytes, formatUptime, pctColor, pctBg, safeAttr, cidrMatch, isValidCidr } from '../utils';
 import { Modal } from '../modal';
+import { App } from '../core';
+import { Nodes } from './nodes';
 
 
 // @alpha: 分组管理 — Stitch "Team & Member Management" 风格
@@ -141,7 +143,7 @@ export const Groups = {
   },
 
   async createGroup() {
-    const name = $('#group-name-input')?.value?.trim();
+    const name = ($('#group-name-input') as HTMLInputElement)?.value?.trim();
     if (!name) { alert('名称不能为空'); return; }
     try {
       const res = await App.authFetch('/api/nodes/groups', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ name, color: Modal.pickedColor }) });
@@ -178,7 +180,7 @@ export const Groups = {
   },
 
   async updateGroup(groupId) {
-    const name = $('#edit-group-name')?.value?.trim();
+    const name = ($('#edit-group-name') as HTMLInputElement)?.value?.trim();
     if (!name) { alert('名称不能为空'); return; }
     try {
       const res = await App.authFetch(`/api/nodes/groups/${encodeURIComponent(groupId)}`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ name, color: Modal.pickedColor }) });

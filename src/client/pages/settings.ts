@@ -1,6 +1,7 @@
 // @alpha: settings 页面模块 (TS 迁移 — Alpha pass)
 import { $, $$, L, refreshIcons, escHtml, showToast, formatBytes, formatUptime, pctColor, pctBg, safeAttr, cidrMatch, isValidCidr } from '../utils';
 import { Modal } from '../modal';
+import { App } from '../core';
 
 
 // @alpha: 系统设置 — 3-Tab 精简重构（通用 + 安全 + 监控）
@@ -265,20 +266,20 @@ export const Settings = {
 
   async changePwd(e) {
     e.preventDefault();
-    const oldPwd = $('#pwd-old')?.value;
-    const newPwd = $('#pwd-new')?.value;
-    const confirmPwd = $('#pwd-confirm')?.value;
+    const oldPwd = ($('#pwd-old') as HTMLInputElement)?.value;
+    const newPwd = ($('#pwd-new') as HTMLInputElement)?.value;
+    const confirmPwd = ($('#pwd-confirm') as HTMLInputElement)?.value;
     const errEl = $('#pwd-error');
     const btn = $('#pwd-submit-btn');
     if (newPwd !== confirmPwd) { if (errEl) { errEl.textContent = '两次输入的新密码不一致'; errEl.classList.remove('hidden'); } return; }
-    if (btn) { btn.disabled = true; btn.textContent = '提交中...'; }
+    if (btn) { (btn as HTMLButtonElement).disabled = true; btn.textContent = '提交中...'; }
     if (errEl) errEl.classList.add('hidden');
     try {
       const res = await App.authFetch('/api/auth/change-password', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ oldPassword: oldPwd, newPassword: newPwd }) });
       const data = await res.json();
       if (!res.ok) { if (errEl) { errEl.textContent = data.error || '修改失败'; errEl.classList.remove('hidden'); } }
-      else { showToast('密码修改成功'); ['#pwd-old','#pwd-new','#pwd-confirm'].forEach(s => { if ($(s)) $(s).value = ''; }); }
+      else { showToast('密码修改成功'); ['#pwd-old','#pwd-new','#pwd-confirm'].forEach(s => { const el = $(s); if (el) (el as HTMLInputElement).value = ''; }); }
     } catch (err) { if (errEl) { errEl.textContent = '网络错误: ' + err.message; errEl.classList.remove('hidden'); } }
-    if (btn) { btn.disabled = false; btn.textContent = '修改密码'; }
+    if (btn) { (btn as HTMLButtonElement).disabled = false; btn.textContent = '修改密码'; }
   },
 };

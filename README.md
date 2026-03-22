@@ -72,7 +72,15 @@
 
 ```bash
 # 开发环境
-npm install && npm run dev    # http://localhost:3000
+npm install && npm run dev    # Express + tsx --watch → http://localhost:3000
+npm run dev:vite               # 前端 Vite HMR → http://localhost:5173
+
+# 类型检查
+npm run typecheck              # tsc --noEmit (strict: true)
+
+# 生产构建
+npm run build                  # vite build → dist/
+npm start                      # tsx src/server.ts (Express 服务 dist/)
 
 # 生产部署（一键安装）
 curl -sSL https://api.synonclaw.com/api/enroll/setup-console.sh | bash
@@ -131,33 +139,49 @@ opengnb-gui/
 │   ├── node-agent.sh               # 节点监控 Agent（推模式）
 │   ├── setup-console.sh            # Console 一键部署
 │   ├── deploy.sh                   # 增量部署
-│   ├── sync-mirror.sh              # GNB/OpenClaw 镜像同步
-│   └── migrate-data.js             # 数据迁移工具
+│   └── sync-mirror.sh              # GNB/OpenClaw 镜像同步
 │
 ├── src/
-│   ├── server.js                   # Express + WebSocket 入口
+│   ├── server.ts                   # Express + WebSocket 入口
 │   ├── services/
-│   │   ├── node-store.js           # SQLite (nodes/groups/metrics/audit/users)
-│   │   ├── key-manager.js          # 密钥 + 审批 + 分组 + address.conf 同步
-│   │   ├── gnb-monitor.js          # 推模式监控（被动接收 Agent 上报）
-│   │   ├── gnb-parser.js           # GNB 状态解析器
-│   │   ├── metrics-store.js        # 指标时序存储 + 趋势聚合
-│   │   ├── ssh-manager.js          # SSH 连接池（通过 GNB TUN）
-│   │   ├── provisioner.js          # 远程部署 OpenClaw
-│   │   ├── job-manager.js          # 异步任务（投递+回调+超时）
-│   │   ├── claw-rpc.js             # OpenClaw RPC 客户端
-│   │   ├── ai-ops.js               # Claude 智能运维（安全门控）
-│   │   ├── audit-logger.js         # 操作审计日志
-│   │   └── data-paths.js           # 集中路径管理
-│   └── routes/
-│       ├── enroll.js               # 注册审批（enrollToken + flexAuth）
-│       ├── nodes.js                # 节点管理（编辑 + 远程 TUN 同步）
-│       ├── auth.js                 # 登录认证
-│       ├── jobs.js                 # 异步 Job（回调 + clawToken 校验）
-│       ├── claw.js                 # OpenClaw 管理
-│       ├── groups.js               # 节点分组 CRUD
-│       ├── mirror.js               # 软件镜像下载
-│       └── ai.js                   # AI 运维 API
+│   │   ├── node-store.ts           # SQLite (nodes/groups/metrics/audit/users)
+│   │   ├── key-manager.ts          # 密钥 + 审批 + 分组 + address.conf 同步
+│   │   ├── gnb-monitor.ts          # 推模式监控（被动接收 Agent 上报）
+│   │   ├── gnb-parser.ts           # GNB 状态解析器
+│   │   ├── metrics-store.ts        # 指标时序存储 + 趋势聚合
+│   │   ├── ssh-manager.ts          # SSH 连接池（通过 GNB TUN）
+│   │   ├── provisioner.ts          # 远程部署 OpenClaw
+│   │   ├── job-manager.ts          # 异步任务（投递+回调+超时）
+│   │   ├── claw-rpc.ts             # OpenClaw RPC 客户端
+│   │   ├── ai-ops.ts               # Claude 智能运维（安全门控）
+│   │   ├── audit-logger.ts         # 操作审计日志
+│   │   └── data-paths.ts           # 集中路径管理
+│   ├── routes/
+│   │   ├── enroll.ts               # 注册审批（enrollToken + flexAuth）
+│   │   ├── nodes.ts                # 节点管理（编辑 + 远程 TUN 同步）
+│   │   ├── auth.ts                 # 登录认证
+│   │   ├── jobs.ts                 # 异步 Job（回调 + clawToken 校验）
+│   │   ├── claw.ts                 # OpenClaw 管理
+│   │   ├── groups.ts               # 节点分组 CRUD
+│   │   ├── mirror.ts               # 软件镜像下载
+│   │   └── ai.ts                   # AI 运维 API
+│   ├── client/                     # 前端 TypeScript (Vite ESM)
+│   │   ├── main.ts                 # 入口 + window 全局挂载
+│   │   ├── core.ts                 # 核心状态管理 + 路由
+│   │   ├── ws.ts                   # WebSocket 客户端
+│   │   ├── modal.ts                # 弹窗组件
+│   │   ├── utils.ts                # DOM/格式工具函数
+│   │   └── pages/
+│   │       ├── dashboard.ts        # 仪表盘
+│   │       ├── nodes.ts            # 节点管理 + AI Ops Terminal
+│   │       ├── users.ts            # 团队管理
+│   │       ├── settings.ts         # 系统设置
+│   │       ├── groups.ts           # 分组管理
+│   │       └── skills.ts           # 技能商店
+│   ├── types/
+│   │   ├── global.d.ts             # 全局类型声明 ($, $$, L 等)
+│   │   └── interfaces.ts           # 核心数据结构接口
+│   └── __tests__/                  # 174 个测试用例
 │
 ├── data/
 │   ├── registry/nodes.db           # SQLite 主库
@@ -165,24 +189,18 @@ opengnb-gui/
 │   ├── logs/ops/                   # 运维终端日志
 │   └── mirror/                     # GNB/OpenClaw 二进制镜像
 │
-├── public/                         # Web Dashboard
-│   ├── index.html                  # SPA 入口 (Tailwind v4 @theme)
-│   └── js/
-│       ├── app.js                  # 应用入口 + WebSocket
-│       ├── core.js                 # 核心状态管理
-│       ├── nodes.js                # 节点管理 + AI Ops Terminal
-│       ├── dashboard.js            # 仪表盘
-│       ├── settings.js             # 系统设置
-│       ├── users.js                # 团队管理
-│       ├── groups.js               # 分组管理
-│       ├── ws.js                   # WebSocket 客户端
-│       ├── modal.js                # 弹窗组件
-│       └── utils.js                # 工具函数
+├── public/
+│   └── index.html                  # SPA 入口 (Tailwind v4 @theme)
+│
+├── dist/                           # vite build 产物（生产模式）
+│
+├── tsconfig.json                   # 前端 TS 配置
+├── tsconfig.server.json            # 后端 TS 配置 (strict: true)
+├── vite.config.ts                  # Vite 构建配置
 │
 └── team/                           # 团队协作文档
     ├── requirements.md             # 当前需求
     ├── ba-scenarios.md             # 业务场景矩阵
-    ├── changelog.md                # 变更日志
     └── archive/                    # 已归档 Sprint
 ```
 
@@ -252,6 +270,7 @@ npm test    # 174 tests, 100% pass
 | 03-20 | Stitch 设计系统 | 亮色主题 + Indigo Cloud 配色 + Glassmorphism |
 | 03-20 | AI Terminal v1 | Claude Code 流式 Chat UI + WebSocket |
 | 03-21 | AI Ops Terminal | Stitch 设计对齐 — 深色头部 + premium 气泡 + 零行内 style |
+| 03-22 | TypeScript 全迁移 | JS→TS (strict: true) + Vite + 核心接口定义 + tsc 零错误 |
 
 ## License
 

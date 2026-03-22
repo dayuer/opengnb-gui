@@ -1,6 +1,7 @@
 // @alpha: dashboard 页面模块 (TS 迁移 — Alpha pass)
 import { $, $$, L, refreshIcons, escHtml, showToast, formatBytes, formatUptime, pctColor, pctBg, safeAttr, cidrMatch, isValidCidr } from '../utils';
 import { Modal } from '../modal';
+import { App } from '../core';
 
 
 // @alpha: 仪表盘 — Stitch "Global Management Dashboard" 风格
