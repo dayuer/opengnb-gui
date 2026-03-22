@@ -120,8 +120,10 @@
         transition-duration: 0.01ms !important;
       }
     }
+  </style>
 
-    /* ── Dark Mode Token 覆盖 ── */
+  <!-- Dark Mode 覆盖 — 独立于 Tailwind 处理，确保 CSS 变量正确覆盖 -->
+  <style>
     .dark {
       --color-primary: #8b83ff;
       --color-primary-light: #a5a0ff;
