@@ -166,8 +166,10 @@ class GnbMonitor extends EventEmitter {
    * @private
    */
   _parseSysInfo(stdout) {
+    // 防御：如果已经是对象直接返回（兼容非 agent 来源）
+    if (stdout && typeof stdout === 'object') return stdout;
     const info = {};
-    const lines = (stdout || '').split('\n');
+    const lines = String(stdout || '').split('\n');
     for (const line of lines) {
       const match = line.match(/^::(\w+)::(.*)$/);
       if (!match) continue;
