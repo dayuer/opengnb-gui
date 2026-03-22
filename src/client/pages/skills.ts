@@ -783,11 +783,20 @@ export const Skills = {
           
           try {
             // 调用后端的 Skill 安装 API (Phase 4 接口预留)
-            await App.authFetch(`/api/nodes/${targetNodeId}/skills`, {
+            const res = await App.authFetch(`/api/nodes/${targetNodeId}/skills`, {
               method: 'POST',
               headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({ skillId: skill.id })
+              body: JSON.stringify({ 
+                skillId: skill.id,
+                source: skill.source,
+                version: skill.version,
+                name: skill.name
+              })
             });
+            if (!res.ok) {
+              const errData = await res.json().catch(() => ({}));
+              throw new Error(errData.error || `Server responded with ${res.status}`);
+            }
             showToast(`指令已发送至 ${targetNodeId} 执行部署`, 'success');
             skill.installed = true; // 乐观UI更新
             const mainContent = document.getElementById('main-content');

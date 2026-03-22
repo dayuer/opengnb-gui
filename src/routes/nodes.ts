@@ -248,8 +248,10 @@ function createNodesRouter(monitor: any, sshManager: any, nodesConfig: any, keyM
       cmd = `curl -sSL ${source} | sudo bash`;
     } else if (source === 'npm') {
       cmd = `sudo npm install -g ${skillId}`;
+    } else if (source === 'openclaw') {
+      cmd = `sudo npm install -g @openclaw/${skillId}`;
     } else {
-      return res.status(400).json({ error: '不支持的安装源' });
+      return res.status(400).json({ error: '不支持的安装源: ' + source });
     }
 
     try {
