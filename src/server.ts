@@ -14,6 +14,7 @@ const Provisioner = require('./services/provisioner');
 const MirrorUpdater = require('./services/mirror-updater');
 const AuditLogger = require('./services/audit-logger');
 const MetricsStore = require('./services/metrics-store');
+const SkillsStore = require('./services/skills-store');
 const createNodesRouter = require('./routes/nodes');
 const createAiRouter = require('./routes/ai');
 const createEnrollRouter = require('./routes/enroll');
@@ -21,6 +22,7 @@ const createMirrorRouter = require('./routes/mirror');
 const createClawRouter = require('./routes/claw');
 const createAuthRouter = require('./routes/auth');
 const createJobsRouter = require('./routes/jobs');
+const createSkillsRouter = require('./routes/skills');
 const ClawRPC = require('./services/claw-rpc');
 const { requireAuth, requireAdmin, initToken, getAdminToken, setJwtSecret, setStore, hashPassword, verifyJwt } = require('./middleware/auth');
 const { createRateLimit } = require('./middleware/rate-limit');
@@ -284,6 +286,11 @@ async function boot() {
 
   // 镜像下载 — 公开
   app.use('/api/mirror', createMirrorRouter(DATA_DIR));
+
+  // 技能注册表 — 需认证
+  const skillsStore = new SkillsStore(path.join(DATA_DIR, 'skills.db'));
+  skillsStore.init();
+  app.use('/api/skills', requireAuth, createSkillsRouter(skillsStore));
 
   // OpenClaw 管理 — 需认证
   app.use('/api/claw', requireAuth, audit.middleware('claw'), createClawRouter({
