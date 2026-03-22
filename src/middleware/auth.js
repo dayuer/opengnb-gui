@@ -118,8 +118,8 @@ function requireAuth(req, res, next) {
     return next();
   }
 
-  // 2. 尝试 apiToken（10 字符短 token）
-  if (_store && token.length <= 20) {
+  // 2. 尝试 apiToken（hex 编码，最长 64 字符）
+  if (_store && token.length <= 64) {
     const user = _store._stmts.findUserByApiToken.get(token);
     if (user) {
       req.user = { userId: user.id, username: user.username, role: user.role };
