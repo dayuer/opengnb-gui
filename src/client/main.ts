@@ -1,4 +1,5 @@
 // @alpha: 前端入口 — ESM 模块聚合 + window 全局挂载
+import './styles.css';
 import { $, $$, L, refreshIcons, escHtml, showToast, formatBytes, formatUptime, pctColor, pctBg, safeAttr, cidrMatch, ipToInt, isValidCidr } from './utils';
 import { App } from './core';
 import { WS } from './ws';
