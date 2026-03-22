@@ -208,7 +208,7 @@ async function boot() {
     let isAdmin = false;
     if (adminToken && token === adminToken) {
       isAdmin = true;
-    } else if (store && token.length <= 20) {
+    } else if (store && token.length <= 64) {
       const user = store._stmts.findUserByApiToken?.get(token);
       if (user) isAdmin = true;
     } else {
@@ -342,7 +342,7 @@ async function boot() {
     const payload = verifyJwt(token);
     if (payload) return { valid: true, userId: payload.userId || '' };
     // apiToken
-    if (store && token.length <= 20) {
+    if (store && token.length <= 64) {
       const user = store._stmts.findUserByApiToken?.get(token);
       if (user) return { valid: true, userId: user.id };
     }
