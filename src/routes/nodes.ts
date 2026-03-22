@@ -242,8 +242,8 @@ function createNodesRouter(monitor: any, sshManager: any, nodesConfig: any, keyM
       return res.status(404).json({ error: `节点 ${req.params.id} 未找到或暂离线` });
     }
 
-    // @alpha: skills.sh / console 类技能为 prompt 或内置，不需要 SSH 远程安装
-    const isLocalOnly = source === 'skills.sh' || source === 'console';
+    // @alpha: skills.sh / console / openclaw 类技能为 prompt 或平台能力，不需要 SSH 远程安装
+    const isLocalOnly = source === 'skills.sh' || source === 'console' || source === 'openclaw';
 
     // 构造安装命令（仅远程源需要）
     // @fix: 用 bash -lc 包裹以加载 login profile（NVM/fnm 环境下 npm 不在默认 PATH）
