@@ -288,6 +288,7 @@ SVCUNIT`, log);
 
     const clawConfig = JSON.stringify({
       gateway: {
+        mode: 'local',
         port: 18789, bind: 'lan',
         auth: { mode: 'token', token },
       },

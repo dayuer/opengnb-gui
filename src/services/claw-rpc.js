@@ -19,8 +19,8 @@ class ClawRPC {
   }
 
   /**
-   * 通过 SSH 代理调用终端 OpenClaw HTTP API
-   * @param {object} nodeConfig - 节点 SSH 配置（含 clawToken, clawPort）
+   * 通过 TUN 网络直接调用终端 OpenClaw HTTP API
+   * @param {object} nodeConfig - 节点配置（含 clawToken, clawPort, tunAddr）
    * @param {string} endpoint - API 路径 (e.g. '/status', '/v1/models')
    * @param {string} [method='GET'] - HTTP 方法
    * @param {object|null} [body=null] - POST body
@@ -31,21 +31,35 @@ class ClawRPC {
     const token = nodeConfig.clawToken;
     if (!token) throw new Error(`节点 ${nodeConfig.id} 未配置 OpenClaw Token`);
 
-    let cmd = `curl -s -m 10 -H "Authorization: Bearer ${token}"`;
-    if (method !== 'GET') {
-      cmd += ` -X ${method}`;
-    }
-    if (body) {
-      cmd += ` -H "Content-Type: application/json" -d '${JSON.stringify(body)}'`;
-    }
-    cmd += ` http://127.0.0.1:${port}${endpoint}`;
+    const tunAddr = nodeConfig.tunAddr;
+    if (!tunAddr) throw new Error(`节点 ${nodeConfig.id} 未配置 TUN 地址`);
 
-    const result = await this.sshManager.exec(nodeConfig, cmd, 15000);
-    const output = (result && result.stdout) ? result.stdout.trim() : (typeof result === 'string' ? result.trim() : '');
+    const url = `http://${tunAddr}:${port}${endpoint}`;
+    const options = {
+      method,
+      headers: { 'Authorization': `Bearer ${token}` },
+    };
+    if (body) {
+      options.headers['Content-Type'] = 'application/json';
+      options.body = JSON.stringify(body);
+    }
+
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 10000);
+    options.signal = controller.signal;
+
     try {
-      return JSON.parse(output);
-    } catch {
-      return { raw: output };
+      const resp = await fetch(url, options);
+      clearTimeout(timeout);
+      const text = await resp.text();
+      try {
+        return JSON.parse(text);
+      } catch {
+        return { raw: text };
+      }
+    } catch (err) {
+      clearTimeout(timeout);
+      throw new Error(`OpenClaw HTTP 调用失败 (${tunAddr}:${port}): ${err.message}`);
     }
   }
 

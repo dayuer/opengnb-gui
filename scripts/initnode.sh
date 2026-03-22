@@ -479,6 +479,7 @@ if [ "$CLAW_INSTALLED" = "true" ]; then
     cat > "$CLAW_CONFIG_DIR/openclaw.json" << CLAWEOF
 {
   "gateway": {
+    "mode": "local",
     "port": $CLAW_PORT,
     "bind": "lan",
     "auth": {

@@ -20,6 +20,7 @@ const App = {
     nodes: '节点管理',
     users: '团队设置',
     settings: '系统设置',
+    skills: '技能商店',
   },
 
   // --- 认证 ---
@@ -105,6 +106,7 @@ const App = {
       case 'users':     Users.render(container); break;
       case 'groups':    this.switchPage('nodes'); return; // @alpha: 分组已融合到节点管理
       case 'settings':  Settings.render(container); break;
+      case 'skills':    Skills.render(container); break;
       default:
         container.innerHTML = `<div class="flex flex-col items-center justify-center h-64 text-text-muted">
           <span class="text-4xl mb-2">${L('lock')}</span><span>未知页面</span></div>`;
