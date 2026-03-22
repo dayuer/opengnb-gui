@@ -420,16 +420,20 @@ chmod 600 "$AUTH_KEYS"
 chown -R "$SSH_USER:$SSH_USER" "$SSH_DIR"
 
 # ============================================
-# Step 9: 安装 OpenClaw（Console 镜像优先 → npm 回退）
+# Step 9: 安装 OpenClaw（版本检测 + Console 镜像优先 → npm 回退）
 # ============================================
 echo "[9/12] 安装 OpenClaw..."
 
-CLAW_VER=$(openclaw --version 2>/dev/null || echo "NOT_FOUND")
-if echo "$CLAW_VER" | grep -qi "not_found"; then
-    # 策略 A: 从 Console 镜像下载 tarball
-    CLAW_INSTALLED=false
-    MIRROR_LIST=$(curl -sf -m 5 "$API_BASE/api/mirror/openclaw" 2>/dev/null || echo "{}")
-    CLAW_TGZ=$(echo "$MIRROR_LIST" | python3 -c "
+# 查询 Console 镜像获取最新版本
+MIRROR_LIST=$(curl -sf -m 5 "$API_BASE/api/mirror/openclaw" 2>/dev/null || echo "{}")
+LATEST_VER=$(echo "$MIRROR_LIST" | python3 -c "
+import sys,json
+try:
+    d=json.load(sys.stdin)
+    print(d.get('version','unknown'))
+except: print('unknown')
+" 2>/dev/null)
+CLAW_TGZ=$(echo "$MIRROR_LIST" | python3 -c "
 import sys,json
 try:
     d=json.load(sys.stdin)
@@ -439,6 +443,26 @@ try:
 except: print('')
 " 2>/dev/null)
 
+# 检测本地已安装版本
+CLAW_VER=$(openclaw --version 2>/dev/null | head -1 | awk '{print $2}' || echo "NOT_FOUND")
+# 去掉可能的前导字符 (e.g. "OpenClaw 2026.3.13 (xxx)" → "2026.3.13")
+CLAW_VER=$(echo "$CLAW_VER" | grep -oE '[0-9]+\.[0-9]+\.[0-9]+' || echo "NOT_FOUND")
+
+NEED_INSTALL=false
+if [ "$CLAW_VER" = "NOT_FOUND" ] || [ -z "$CLAW_VER" ]; then
+    echo "      OpenClaw 未安装"
+    NEED_INSTALL=true
+elif [ "$LATEST_VER" != "unknown" ] && [ "$CLAW_VER" != "$LATEST_VER" ]; then
+    echo "      本地版本 $CLAW_VER ≠ 最新 $LATEST_VER，升级中..."
+    npm uninstall -g openclaw 2>/dev/null || true
+    NEED_INSTALL=true
+else
+    echo "      OpenClaw $CLAW_VER 已是最新"
+fi
+
+CLAW_INSTALLED=false
+if [ "$NEED_INSTALL" = "true" ]; then
+    # 策略 A: 从 Console 镜像下载 tarball
     if [ -n "$CLAW_TGZ" ]; then
         echo "      从 Console 镜像下载: $CLAW_TGZ"
         if curl -sf -m 120 "$API_BASE/api/mirror/openclaw/$CLAW_TGZ" -o "/tmp/$CLAW_TGZ"; then
@@ -457,10 +481,9 @@ except: print('')
     if [ "$CLAW_INSTALLED" != "true" ]; then
         echo "      ⚠️ OpenClaw 安装失败，跳过（可稍后通过 Console 终端安装）"
     else
-        echo "      ✅ OpenClaw $(openclaw --version 2>/dev/null) 已安装"
+        echo "      ✅ OpenClaw $(openclaw --version 2>/dev/null | head -1) 已安装"
     fi
 else
-    echo "      OpenClaw $CLAW_VER 已存在"
     CLAW_INSTALLED=true
 fi
 
