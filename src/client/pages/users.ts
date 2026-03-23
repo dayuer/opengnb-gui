@@ -11,17 +11,16 @@ let teamTab = 'members';
 let _cachedUsers = null;
 let _renderSeq = 0;
 
-function switchTeamTab(tab) {
-  if (tab === teamTab) return;
-  teamTab = tab;
-  if (_cachedUsers !== null) {
-    Users._renderContent($('#main-content'), _cachedUsers);
-  } else {
-    Users.render($('#main-content'));
-  }
-}
-
 export const Users = {
+  switchTeamTab(tab: string) {
+    if (tab === teamTab) return;
+    teamTab = tab;
+    if (_cachedUsers !== null) {
+      Users._renderContent($('#main-content'), _cachedUsers);
+    } else {
+      Users.render($('#main-content'));
+    }
+  },
   async render(container) {
     const seq = ++_renderSeq;
     const usersRes = await App.authFetch('/api/auth/users').catch(() => null);
@@ -57,7 +56,7 @@ export const Users = {
         <div class="flex items-center overflow-x-auto border-b border-border-subtle px-2">
           ${tabs.map(t => {
             const active = teamTab === t.id;
-            return `<button class="flex items-center gap-2 px-5 py-4 text-sm whitespace-nowrap transition-colors cursor-pointer relative ${active ? 'text-primary font-bold' : 'text-text-muted hover:text-text-primary'} [&_svg]:w-4 [&_svg]:h-4" onclick="switchTeamTab('${t.id}')">
+            return `<button class="flex items-center gap-2 px-5 py-4 text-sm whitespace-nowrap transition-colors cursor-pointer relative ${active ? 'text-primary font-bold' : 'text-text-muted hover:text-text-primary'} [&_svg]:w-4 [&_svg]:h-4" onclick="Users.switchTeamTab('${t.id}')">
               ${L(t.icon)}<span>${t.label}</span>
               ${active ? `<div class="absolute bottom-0 left-1/2 -translate-x-1/2 h-0.5 w-3/4 signature-gradient rounded-full"></div>` : ''}
             </button>`;
