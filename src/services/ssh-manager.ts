@@ -28,7 +28,7 @@ class SSHManager {
     if (!this._knownHostsPath) return {};
     try {
       return JSON.parse(fs.readFileSync(this._knownHostsPath, 'utf-8'));
-    } catch (_) { return {}; }
+    } catch (_e) { log.debug('known_hosts 解析失败，使用空对象', (_e as Error)?.message); return {}; }
   }
 
   /** @private 保存已知主机指纹 */
@@ -57,7 +57,7 @@ class SSHManager {
 
     // 旧连接不可用时清理
     if (entry) {
-      try { entry.client.end(); } catch (_) { /* 忽略 */ }
+      try { entry.client.end(); } catch (_e) { log.debug('旧连接清理忽略', (_e as Error)?.message); }
       this.pool.delete(key);
     }
 
@@ -305,7 +305,7 @@ echo "JOB_DISPATCHED:${jobId}"`;
   disconnect(nodeId: any) {
     const entry = this.pool.get(nodeId);
     if (entry) {
-      try { entry.client.end(); } catch (_) { /* 忽略 */ }
+      try { entry.client.end(); } catch (_e) { log.debug('断开连接忽略', (_e as Error)?.message); }
       this.pool.delete(nodeId);
       log.info(`已断开节点 ${nodeId} 的连接`);
     }
@@ -316,7 +316,7 @@ echo "JOB_DISPATCHED:${jobId}"`;
    */
   closeAll() {
     for (const [, entry] of this.pool) {
-      try { entry.client.end(); } catch (_) { /* 忽略 */ }
+      try { entry.client.end(); } catch (_e) { log.debug('关闭连接忽略', (_e as Error)?.message); }
     }
     this.pool.clear();
   }

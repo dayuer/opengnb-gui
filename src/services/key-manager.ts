@@ -312,7 +312,7 @@ class KeyManager {
         const match = existing.match(/^i\|.*$/m);
         if (match) indexLine = match[0];
       }
-    } catch (_) { /* 使用默认值 */ }
+    } catch (_e) { log.debug('配置解析失败，使用默认值', (_e as Error)?.message); }
 
     const lines = [indexLine];
     // Console 自身

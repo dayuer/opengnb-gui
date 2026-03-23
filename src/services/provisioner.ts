@@ -453,7 +453,8 @@ SVCUNIT`, log);
     try {
       const result = await this.sshManager.exec(nodeConfig, command, 15000);
       return result.stdout;
-    } catch (_) {
+    } catch (_e) {
+      // 静默执行设计上不抛异常，返回空字符串作为回退值
       return '';
     }
   }
