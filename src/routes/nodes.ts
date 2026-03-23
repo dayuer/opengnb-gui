@@ -318,6 +318,13 @@ function createNodesRouter(monitor: any, sshManager: any, nodesConfig: any, keyM
     res.json({ tasks });
   });
 
+  // DELETE /api/nodes/:id/tasks/:taskId — 删除指定任务
+  router.delete('/:id/tasks/:taskId', (req: any, res: any) => {
+    const ok = monitor.deleteTask(req.params.taskId, req);
+    if (!ok) return res.status(404).json({ error: '任务不存在' });
+    res.json({ message: '任务已删除' });
+  });
+
   return router;
 }
 

@@ -32,6 +32,7 @@ function prepareTaskStatements(db: any) {
     deleteOld: db.prepare(
       `DELETE FROM agent_tasks WHERE completedAt IS NOT NULL AND completedAt < ?`
     ),
+    deleteById: db.prepare('DELETE FROM agent_tasks WHERE taskId = ?'),
   };
 }
 
@@ -64,6 +65,10 @@ const taskMethods = {
   // 清理旧任务（已完成超过 N 天）
   taskDeleteOldBefore(isoDate: string) {
     return this._stmts.deleteOld.run(isoDate);
+  },
+  // 删除单条任务
+  taskDelete(taskId: string) {
+    return this._stmts.deleteById.run(taskId);
   },
 };
 

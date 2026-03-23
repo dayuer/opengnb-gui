@@ -521,6 +521,21 @@ export const NodeDetailPanel = {
         const typeLabel = task.type === 'skill_install' ? '安装' : task.type === 'skill_uninstall' ? '卸载' : task.type;
         const animClass = task.status === 'dispatched' ? ' animate-spin' : '';
 
+        // 操作按钮（失败/已完成可重试 + 非 dispatched 可删除）
+        let actionBtns = '';
+        const canRetry = (task.status === 'failed' || task.status === 'completed') && task.type === 'skill_install' && task.skillId;
+        const canDelete = task.status !== 'dispatched';
+        if (canRetry || canDelete) {
+          actionBtns = `<div class="flex items-center gap-1 mt-1">`;
+          if (canRetry) {
+            actionBtns += `<button onclick="NodeDetailPanel.reinstallTask('${nodeId}','${safeAttr(task.skillId)}','${safeAttr(task.skillName || task.skillId)}')" class="text-[10px] px-1.5 py-0.5 rounded bg-blue-500/10 text-blue-400 hover:bg-blue-500/20 transition-colors duration-150" title="重新安装">重试</button>`;
+          }
+          if (canDelete) {
+            actionBtns += `<button onclick="NodeDetailPanel.deleteTask('${nodeId}','${task.taskId}')" class="text-[10px] px-1.5 py-0.5 rounded bg-red-500/10 text-red-400 hover:bg-red-500/20 transition-colors duration-150" title="删除任务">删除</button>`;
+          }
+          actionBtns += `</div>`;
+        }
+
         html += `
           <div class="flex items-center gap-3 px-4 py-3 rounded-lg bg-elevated/40 border border-border-default/20">
             <span class="[&_svg]:w-4 [&_svg]:h-4 ${st.color}${animClass}">${L(st.icon)}</span>
@@ -534,6 +549,7 @@ export const NodeDetailPanel = {
             <div class="text-right shrink-0">
               <span class="text-xs font-medium ${st.color}">${st.label}</span>
               <p class="text-[10px] text-text-muted mt-0.5">${timeStr}</p>
+              ${actionBtns}
             </div>
           </div>`;
 
@@ -579,6 +595,42 @@ export const NodeDetailPanel = {
     if (timer) {
       clearInterval(timer);
       this._taskPollTimers.delete(nodeId);
+    }
+  },
+
+  /** 重新安装（下发新任务） */
+  async reinstallTask(nodeId: string, skillId: string, skillName: string) {
+    try {
+      const res = await App.authFetch(`/api/nodes/${nodeId}/skills`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ skillId, source: 'openclaw', name: skillName }),
+      });
+      const data = await res.json();
+      if (res.ok) {
+        showToast(`重新安装已入队: ${skillName}`, 'success');
+      } else {
+        showToast(data.error || '重新安装失败', 'error');
+      }
+      this.loadTaskQueue(nodeId);
+    } catch (e: any) {
+      showToast('重新安装失败: ' + e.message, 'error');
+    }
+  },
+
+  /** 删除任务记录 */
+  async deleteTask(nodeId: string, taskId: string) {
+    try {
+      const res = await App.authFetch(`/api/nodes/${nodeId}/tasks/${taskId}`, { method: 'DELETE' });
+      if (res.ok) {
+        showToast('任务已删除', 'success');
+      } else {
+        const data = await res.json();
+        showToast(data.error || '删除失败', 'error');
+      }
+      this.loadTaskQueue(nodeId);
+    } catch (e: any) {
+      showToast('删除失败: ' + e.message, 'error');
     }
   },
 

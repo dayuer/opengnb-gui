@@ -312,6 +312,20 @@ class GnbMonitor extends EventEmitter {
       } : undefined,
     }));
   }
+
+  /**
+   * 删除指定任务
+   */
+  deleteTask(taskId: string, req?: any): boolean {
+    if (!this._store) return false;
+    const task = this._store.taskFind(taskId);
+    if (!task) return false;
+    this._store.taskDelete(taskId);
+    if (this._audit) {
+      this._audit.log('task_delete', { taskId, nodeId: task.nodeId, type: task.type, skillName: task.skillName }, req);
+    }
+    return true;
+  }
 }
 
 module.exports = GnbMonitor;
