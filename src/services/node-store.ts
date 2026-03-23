@@ -166,6 +166,30 @@ class NodeStore {
     try { this.db.exec(`ALTER TABLE users ADD COLUMN apiToken TEXT DEFAULT ''`); } catch { /* 列已存在 */ }
     try { this.db.exec(`ALTER TABLE nodes ADD COLUMN ownerId TEXT DEFAULT ''`); } catch { /* 列已存在 */ }
     try { this.db.exec(`ALTER TABLE nodes ADD COLUMN skills TEXT DEFAULT '[]'`); } catch { /* 列已存在 */ }
+
+    // @v4: 独立建表迁移 — 防御大 exec 块在旧 DB 上跳过新表
+    try {
+      this.db.exec(`
+        CREATE TABLE IF NOT EXISTS agent_tasks (
+          taskId TEXT PRIMARY KEY,
+          nodeId TEXT NOT NULL,
+          type TEXT NOT NULL,
+          command TEXT NOT NULL,
+          skillId TEXT DEFAULT '',
+          skillName TEXT DEFAULT '',
+          status TEXT DEFAULT 'queued',
+          timeoutMs INTEGER DEFAULT 60000,
+          resultCode INTEGER,
+          resultStdout TEXT,
+          resultStderr TEXT,
+          queuedAt TEXT NOT NULL,
+          dispatchedAt TEXT,
+          completedAt TEXT
+        );
+        CREATE INDEX IF NOT EXISTS idx_tasks_node_status ON agent_tasks(nodeId, status);
+        CREATE INDEX IF NOT EXISTS idx_tasks_queued ON agent_tasks(queuedAt);
+      `);
+    } catch { /* 表已存在 */ }
   }
 
   /** @private 预编译常用语句（组合子模块的 statements） */
