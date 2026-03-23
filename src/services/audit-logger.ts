@@ -1,4 +1,6 @@
 'use strict';
+const { createLogger } = require('./logger');
+const log = createLogger('AuditLogger');
 
 /**
  * 审计日志服务
@@ -36,7 +38,7 @@ class AuditLogger {
       });
       this._rotateIfNeeded();
     } catch (err: any) {
-      console.error(`[AuditLogger] 写入失败: ${err.message}`);
+      log.error(`写入失败: ${err.message}`);
     }
   }
 

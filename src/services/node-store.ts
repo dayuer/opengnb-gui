@@ -3,6 +3,8 @@
 const Database = require('better-sqlite3');
 const path = require('path');
 const fs = require('fs');
+const { createLogger } = require('./logger');
+const log = createLogger('NodeStore');
 
 /**
  * SQLite 节点存储层
@@ -263,7 +265,7 @@ class NodeStore {
       }
     });
     insertMany(nodes);
-    console.log(`[NodeStore] 已从 JSON 迁移 ${nodes.length} 个节点`);
+    log.info(`已从 JSON 迁移 ${nodes.length} 个节点`);
   }
 
   /**
@@ -278,7 +280,7 @@ class NodeStore {
     ).all();
     if (oldNodes.length === 0) return;
 
-    console.log(`[NodeStore] 发现 ${oldNodes.length} 个旧式 ID 节点，开始迁移...`);
+    log.info(`发现 ${oldNodes.length} 个旧式 ID 节点，开始迁移...`);
     const txn = this.db.transaction(() => {
       for (const node of oldNodes) {
         const newId = 'node-' + crypto.randomBytes(9).toString('base64url');
@@ -305,11 +307,11 @@ class NodeStore {
           ...node, id: newId, name, ready: node.ready ? 1 : 0, skills: node.skills || '[]', ownerId: node.ownerId || '',
         });
 
-        console.log(`[NodeStore] 迁移: ${oldId} → ${newId} (name: ${name})`);
+        log.info(`迁移: ${oldId} → ${newId} (name: ${name})`);
       }
     });
     txn();
-    console.log(`[NodeStore] 旧式 ID 迁移完成`);
+    log.info('旧式 ID 迁移完成');
   }
 
   /**

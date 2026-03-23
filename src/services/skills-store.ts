@@ -4,6 +4,8 @@ const Database = require('better-sqlite3');
 const path = require('path');
 const fs = require('fs');
 const crypto = require('crypto');
+const { createLogger } = require('./logger');
+const log = createLogger('SkillsStore');
 
 /**
  * 技能注册表 — SQLite 持久化层
@@ -163,7 +165,7 @@ class SkillsStore {
       }
     });
     insertMany(builtins);
-    console.log(`[SkillsStore] 预装 ${builtins.length} 个内置技能`);
+    log.info(`预装 ${builtins.length} 个内置技能`);
   }
 
   /** 关闭数据库 */

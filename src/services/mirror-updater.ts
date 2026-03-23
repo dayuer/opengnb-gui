@@ -3,6 +3,8 @@
 const path = require('path');
 const fs = require('fs');
 const { execFile } = require('child_process');
+const { createLogger } = require('./logger');
+const log = createLogger('MirrorUpdater');
 
 /**
  * OpenClaw 镜像自动更新服务
@@ -29,7 +31,7 @@ class MirrorUpdater {
     // 延迟 30s 执行首次检查（不阻塞启动）
     setTimeout(() => this._check(), 30000);
     this._timer = setInterval(() => this._check(), this.intervalMs);
-    console.log(`[MirrorUpdater] 已启动，每 ${Math.round(this.intervalMs / 3600000)}h 检查 openclaw 更新`);
+    log.info(`已启动，每 ${Math.round(this.intervalMs / 3600000)}h 检查 openclaw 更新`);
   }
 
   /**
@@ -57,19 +59,19 @@ class MirrorUpdater {
       // 查询 npm registry 最新版本
       const remoteVer = await this._npmLatestVersion('openclaw');
       if (!remoteVer) {
-        console.log('[MirrorUpdater] 无法获取 openclaw 最新版本（网络不通？），跳过');
+        log.warn('无法获取 openclaw 最新版本（网络不通？），跳过');
         return;
       }
 
       if (remoteVer === localVer) {
-        console.log(`[MirrorUpdater] openclaw@${localVer} 已是最新`);
+        log.info(`openclaw@${localVer} 已是最新`);
         return;
       }
 
-      console.log(`[MirrorUpdater] 发现新版本 openclaw@${remoteVer} (本地: ${localVer || '无'})`);
+      log.info(`发现新版本 openclaw@${remoteVer} (本地: ${localVer || '无'})`);
       await this._pack(remoteVer);
     } catch (err: any) {
-      console.error(`[MirrorUpdater] 检查失败: ${err.message}`);
+      log.error(`检查失败: ${err.message}`);
     }
   }
 
@@ -126,7 +128,7 @@ class MirrorUpdater {
         }
 
         const size = fs.statSync(dst).size;
-        console.log(`[MirrorUpdater] ✅ openclaw@${version} 已缓存 (${Math.round(size / 1024)}KB)`);
+        log.info(`✅ openclaw@${version} 已缓存 (${Math.round(size / 1024)}KB)`);
         this._cleanup(tmpDir);
         resolve();
       });
@@ -135,7 +137,7 @@ class MirrorUpdater {
 
   /** @private */
   _cleanup(dir: string) {
-    try { fs.rmSync(dir, { recursive: true, force: true }); } catch (_) { /* ignore */ }
+    try { fs.rmSync(dir, { recursive: true, force: true }); } catch (_e) { log.debug('清理失败', (_e as Error)?.message); }
   }
 }
 

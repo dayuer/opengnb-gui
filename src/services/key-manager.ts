@@ -6,6 +6,8 @@ const path = require('path');
 const { execSync } = require('child_process');
 const { resolvePaths, ensureDataDirs } = require('./data-paths');
 const NodeStore = require('./node-store');
+const { createLogger } = require('./logger');
+const log = createLogger('KeyManager');
 
 // @alpha: passcode 有效期（毫秒）
 const PASSCODE_TTL_MS = 30 * 60 * 1000; // 30 分钟
@@ -91,9 +93,9 @@ class KeyManager {
 
     if (!fs.existsSync(this.privateKeyPath)) {
       this._generateKeyPair();
-      console.log('[KeyManager] 已生成新的 ED25519 密钥对');
+      log.info('已生成新的 ED25519 密钥对');
     } else {
-      console.log('[KeyManager] 已加载现有密钥对');
+      log.info('已加载现有密钥对');
     }
 
     // @alpha V2: 初始化 SQLite 存储
@@ -102,7 +104,7 @@ class KeyManager {
     const approved = this.store.countByStatus('approved');
     const pending = this.store.countByStatus('pending');
     const groupCount = this.store.allGroups().length;
-    console.log(`[KeyManager] ${approved} 个已审批节点, ${pending} 个待审批, ${groupCount} 个分组 (SQLite)`);
+    log.info(`${approved} 个已审批节点, ${pending} 个待审批, ${groupCount} 个分组 (SQLite)`);
   }
 
   /** @private */
@@ -347,7 +349,7 @@ class KeyManager {
   _writeFullGnbConf() {
     try {
       if (!fs.existsSync(this.gnbConfDir)) {
-        console.log(`[GNB] 配置目录不存在: ${this.gnbConfDir}，跳过`);
+        log.warn(`配置目录不存在: ${this.gnbConfDir}，跳过`);
         return;
       }
       const fullConf = this.generateFullAddressConf();
@@ -356,16 +358,16 @@ class KeyManager {
       // route.conf = 全量（去掉 i| 行）
       const routeContent = fullConf.split('\n').filter(l => !l.startsWith('i|')).join('\n');
       fs.writeFileSync(path.join(this.gnbConfDir, 'route.conf'), routeContent);
-      console.log(`[GNB] 配置已全量重写`);
+      log.info('GNB 配置已全量重写');
 
       try {
         execSync('systemctl restart gnb', { timeout: 10000 });
-        console.log('[GNB] 服务已重启');
+        log.info('GNB 服务已重启');
       } catch (e: any) {
-        console.log(`[GNB] 重启跳过: ${e.message}`);
+        log.warn(`GNB 重启跳过: ${e.message}`);
       }
     } catch (err: any) {
-      console.error(`[GNB] 全量重写失败: ${err.message}`);
+      log.error(`GNB 全量重写失败: ${err.message}`);
     }
   }
 
@@ -431,13 +433,13 @@ class KeyManager {
     if (!fs.existsSync(ed25519Dir)) fs.mkdirSync(ed25519Dir, { recursive: true });
     const keyPath = path.join(ed25519Dir, `${node.gnbNodeId}.public`);
     fs.writeFileSync(keyPath, pubKey.trim());
-    console.log(`[GNB] 已保存节点 ${nodeId} (gnb ${node.gnbNodeId}) 的公钥`);
+    log.info(`已保存节点 ${nodeId} (gnb ${node.gnbNodeId}) 的公钥`);
 
     // 保存公钥后重启 GNB 以加载
     try {
       execSync('systemctl restart gnb', { timeout: 10000 });
     } catch (e: any) {
-      console.log(`[GNB] 重启服务跳过: ${e.message}`);
+      log.warn(`GNB 重启服务跳过: ${e.message}`);
     }
 
     return { success: true, message: '公钥已保存' };
@@ -803,7 +805,7 @@ class KeyManager {
       clawToken: token || node.clawToken,
       clawPort: port || node.clawPort,
     });
-    console.log(`[KeyManager] 节点 ${nodeId} OpenClaw 配置已更新 (token: ${token ? token.substring(0, 8) + '...' : 'none'})`);
+    log.info(`节点 ${nodeId} OpenClaw 配置已更新 (token: ${token ? token.substring(0, 8) + '...' : 'none'})`);
     return true;
   }
 

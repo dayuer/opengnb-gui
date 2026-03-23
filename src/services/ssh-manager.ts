@@ -3,6 +3,8 @@
 const { Client } = require('ssh2');
 const fs = require('fs');
 const path = require('path');
+const { createLogger } = require('./logger');
+const log = createLogger('SSH');
 
 /**
  * SSH 连接池管理器
@@ -35,7 +37,7 @@ class SSHManager {
     try {
       fs.writeFileSync(this._knownHostsPath, JSON.stringify(this._knownHosts, null, 2), { mode: 0o600 });
     } catch (err: any) {
-      console.error(`[SSH] 保存 known_hosts 失败: ${err.message}`);
+      log.error(`保存 known_hosts 失败: ${err.message}`);
     }
   }
 
@@ -116,12 +118,12 @@ class SSHManager {
             const host = nodeConfig.tunAddr;
             if (this._knownHosts[host]) {
               if (this._knownHosts[host] !== fp) {
-                console.error(`[SSH] ⚠️ 主机密钥变更! ${host} 旧=${this._knownHosts[host].substring(0, 16)}... 新=${fp.substring(0, 16)}...`);
-                console.error(`[SSH] 可能存在中间人攻击，请人工确认!`);
+                log.error(`⚠️ 主机密钥变更! ${host} 旧=${this._knownHosts[host].substring(0, 16)}... 新=${fp.substring(0, 16)}...`);
+                log.error('可能存在中间人攻击，请人工确认!');
                 // TOFU: 仍然允许连接但强烈告警
               }
             } else {
-              console.log(`[SSH] 首次连接 ${host}，记录指纹: ${fp.substring(0, 16)}...`);
+              log.info(`首次连接 ${host}，记录指纹: ${fp.substring(0, 16)}...`);
               this._knownHosts[host] = fp;
               this._saveKnownHosts();
             }
@@ -305,7 +307,7 @@ echo "JOB_DISPATCHED:${jobId}"`;
     if (entry) {
       try { entry.client.end(); } catch (_) { /* 忽略 */ }
       this.pool.delete(nodeId);
-      console.log(`[SSH] 已断开节点 ${nodeId} 的连接`);
+      log.info(`已断开节点 ${nodeId} 的连接`);
     }
   }
 

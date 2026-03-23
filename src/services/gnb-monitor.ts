@@ -1,6 +1,8 @@
 'use strict';
 
 const EventEmitter = require('events');
+const { createLogger } = require('./logger');
+const log = createLogger('GnbMonitor');
 
 /**
  * GNB 节点监控服务（V3 推模式）
@@ -30,7 +32,7 @@ class GnbMonitor extends EventEmitter {
    * 启动超时检测循环
    */
   start() {
-    console.log(`[GnbMonitor] 推模式已启动，${this.staleTimeoutMs / 1000}s 无上报判定离线`);
+    log.info(`推模式已启动，${this.staleTimeoutMs / 1000}s 无上报判定离线`);
     this._staleTimer = setInterval(() => this._checkStale(), 10000);
   }
 
@@ -42,7 +44,7 @@ class GnbMonitor extends EventEmitter {
       clearInterval(this._staleTimer);
       this._staleTimer = null;
     }
-    console.log('[GnbMonitor] 已停止');
+    log.info('已停止');
   }
 
   /**
