@@ -248,8 +248,15 @@ function createNodesRouter(monitor: any, sshManager: any, nodesConfig: any, keyM
     if (source === 'openclaw-bundled') {
       // stock 内置插件：用 enable（不需要 plugins.allow 白名单）
       command = `openclaw plugins enable ${skillId}`;
+    } else if (source === 'clawhub') {
+      // ClawHub 第三方插件：clawhub install
+      command = `clawhub install ${skillId}`;
+    } else if (source === 'github') {
+      // GitHub 仓库直装：openclaw plugins install github:user/repo
+      const repo = req.body.githubRepo || skillId;
+      command = `openclaw plugins install github:${repo}`;
     } else if (source === 'openclaw') {
-      // 第三方插件：先安装，再加入 plugins.allow 白名单
+      // 旧版 openclaw 第三方（向后兼容）
       command = [
         `openclaw plugins install ${skillId}`,
         `ALLOW=$(openclaw config get plugins.allow 2>/dev/null || echo '[]')`,
@@ -298,9 +305,13 @@ function createNodesRouter(monitor: any, sshManager: any, nodesConfig: any, keyM
 
     const crypto = require('crypto');
     const uninstallSource = req.body?.source || req.query?.source || '';
-    // stock 插件用 disable，第三方用 uninstall + 移除白名单
+    // 根据 source 类型生成卸载命令
     let uninstallCmd: string;
-    if (uninstallSource === 'openclaw') {
+    if (uninstallSource === 'clawhub') {
+      uninstallCmd = `clawhub uninstall ${skillId}`;
+    } else if (uninstallSource === 'github') {
+      uninstallCmd = `openclaw plugins uninstall ${skillId}`;
+    } else if (uninstallSource === 'openclaw') {
       uninstallCmd = [
         `openclaw plugins uninstall ${skillId}`,
         `ALLOW=$(openclaw config get plugins.allow 2>/dev/null || echo '[]')`,

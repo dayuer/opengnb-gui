@@ -3,7 +3,7 @@ node_modules/
 
 # === 运行时数据（SSH 密钥 / 节点注册 / 备份） ===
 data/
-doc/
+docs/
 team/
 
 # === 环境变量 ===

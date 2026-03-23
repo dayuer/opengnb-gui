@@ -37,7 +37,8 @@ export const Skills = {
 
   // 来源标签
   _sourceLabels: {
-    openclaw: 'ClawHub', 'skills.sh': 'skills.sh', npm: 'npm', console: 'Console', custom: '自定义',
+    clawhub: 'ClawHub', 'openclaw-bundled': 'OpenClaw', openclaw: 'OpenClaw', github: 'GitHub',
+    'skills.sh': 'skills.sh', npm: 'npm', console: 'Console', custom: '自定义',
   } as Record<string, string>,
 
   // 安装方式标签
