@@ -201,7 +201,28 @@ if [ -z "$PAYLOAD" ]; then
   exit 1
 fi
 
-HTTP_CODE=$(curl -s -o /dev/null -w '%{http_code}' \
+# --- 注入上次执行的任务结果（如有） ---
+TASK_RESULTS_FILE="/tmp/.agent_task_results.json"
+if [ -f "$TASK_RESULTS_FILE" ]; then
+  TASK_RESULTS=$(cat "$TASK_RESULTS_FILE" 2>/dev/null || echo "[]")
+  rm -f "$TASK_RESULTS_FILE"
+  # 将 taskResults 注入 payload
+  PAYLOAD=$(echo "$PAYLOAD" | python3 -c "
+import sys, json
+payload = json.load(sys.stdin)
+try:
+    results = json.loads('''${TASK_RESULTS}''')
+    if results:
+        payload['taskResults'] = results
+except:
+    pass
+print(json.dumps(payload))
+" 2>/dev/null || echo "$PAYLOAD")
+fi
+
+# --- 上报并读取响应（含待执行任务） ---
+RESPONSE_FILE="/tmp/.agent_response.json"
+HTTP_CODE=$(curl -s -w '%{http_code}' -o "$RESPONSE_FILE" \
   -X POST \
   -H "Content-Type: application/json" \
   -H "Authorization: Bearer ${TOKEN}" \
@@ -211,4 +232,82 @@ HTTP_CODE=$(curl -s -o /dev/null -w '%{http_code}' \
 
 if [ "$HTTP_CODE" != "200" ]; then
   echo "[agent] 上报失败 HTTP ${HTTP_CODE}" >&2
+  rm -f "$RESPONSE_FILE"
+  exit 0
+fi
+
+# --- 解析并执行下发的任务 ---
+if [ -f "$RESPONSE_FILE" ]; then
+  TASKS=$(python3 -c "
+import json, sys
+try:
+    resp = json.load(open('$RESPONSE_FILE'))
+    tasks = resp.get('tasks', [])
+    if tasks:
+        print(json.dumps(tasks))
+    else:
+        print('')
+except:
+    print('')
+" 2>/dev/null)
+
+  if [ -n "$TASKS" ] && [ "$TASKS" != "[]" ]; then
+    echo "[agent] 收到 $(echo "$TASKS" | python3 -c "import sys,json; print(len(json.load(sys.stdin)))" 2>/dev/null || echo "?") 个待执行任务"
+
+    # 逐个执行任务并收集结果
+    python3 -c "
+import json, subprocess, sys
+from datetime import datetime
+
+tasks = json.loads('''${TASKS}''')
+results = []
+
+for task in tasks:
+    tid = task.get('taskId', '')
+    cmd = task.get('command', '')
+    timeout = task.get('timeoutMs', 60000) / 1000
+
+    print(f'[agent] 执行任务 {tid}: {cmd}', file=sys.stderr)
+
+    try:
+        # bash -lc 加载环境（NVM/fnm/openclaw 等）
+        proc = subprocess.run(
+            ['bash', '-lc', cmd],
+            capture_output=True, text=True,
+            timeout=timeout
+        )
+        results.append({
+            'taskId': tid,
+            'code': proc.returncode,
+            'stdout': proc.stdout[:2000],
+            'stderr': proc.stderr[:2000],
+            'completedAt': datetime.utcnow().isoformat() + 'Z'
+        })
+        status = '成功' if proc.returncode == 0 else f'失败(code:{proc.returncode})'
+        print(f'[agent] 任务 {tid} {status}', file=sys.stderr)
+    except subprocess.TimeoutExpired:
+        results.append({
+            'taskId': tid,
+            'code': -1,
+            'stdout': '',
+            'stderr': f'超时 ({timeout}s)',
+            'completedAt': datetime.utcnow().isoformat() + 'Z'
+        })
+        print(f'[agent] 任务 {tid} 超时', file=sys.stderr)
+    except Exception as e:
+        results.append({
+            'taskId': tid,
+            'code': -2,
+            'stdout': '',
+            'stderr': str(e),
+            'completedAt': datetime.utcnow().isoformat() + 'Z'
+        })
+
+# 保存结果供下次上报
+with open('$TASK_RESULTS_FILE', 'w') as f:
+    json.dump(results, f)
+" 2>&1
+  fi
+
+  rm -f "$RESPONSE_FILE"
 fi

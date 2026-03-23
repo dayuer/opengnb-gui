@@ -178,7 +178,7 @@ function createNodesRouter(monitor: any, sshManager: any, nodesConfig: any, keyM
   // POST /api/nodes/:id/exec — 执行远程命令（仅允许安全命令）
 
   // 精确命令白名单
-  const SAFE_COMMANDS = {
+  const SAFE_COMMANDS: Record<string, RegExp> = {
     'gnb_ctl':     /^gnb_ctl(\s+[\w-]+)*$/,
     'ping':        /^ping(\s+-c\s+\d{1,3})?\s+[\w.:/-]+$/,
     'traceroute':  /^traceroute\s+[\w.:/-]+$/,
@@ -190,7 +190,7 @@ function createNodesRouter(monitor: any, sshManager: any, nodesConfig: any, keyM
     'df':          /^df(\s+-[a-z]+)?(\s+\/[\w/]*)?$/i,
   };
 
-  const SHELL_META = /[;|&`$(){}!><\n\r\\\\'\"]/;
+  const SHELL_META = /[;&`$(){}!><\n\r\\'"]/;
 
   router.post('/:id/exec', async (req: any, res: any) => {
     const { command } = req.body;
@@ -227,120 +227,83 @@ function createNodesRouter(monitor: any, sshManager: any, nodesConfig: any, keyM
   });
 
   // ═══════════════════════════════════════
-  // @alpha: 技能管理 (Skills)
+  // Agent 任务队列版技能管理
   // ═══════════════════════════════════════
 
-  // POST /api/nodes/:id/skills — 推送安装技能
+  // POST /api/nodes/:id/skills — 下发安装技能（入队 Agent 任务队列）
   router.post('/:id/skills', async (req: any, res: any) => {
     const { skillId, source, version, name } = req.body;
     if (!skillId || !source) {
       return res.status(400).json({ error: '缺少 skillId 或 source 参数' });
     }
 
-    const nodeConfig = nodesConfig.find((n: any) => n.id === req.params.id);
+    const nodeId = req.params.id;
+    const nodeConfig = nodesConfig.find((n: any) => n.id === nodeId);
     if (!nodeConfig) {
-      return res.status(404).json({ error: `节点 ${req.params.id} 未找到或暂离线` });
+      return res.status(404).json({ error: `节点 ${nodeId} 未找到或暂离线` });
     }
 
-    // 仅 console 类技能为平台内置能力，不需要 SSH 远程安装
-    const isLocalOnly = source === 'console';
-
-    // 构造安装命令（仅远程源需要）
-    // @fix: bash -lc 包裹以加载 login profile（NVM/fnm 环境下 npm/openclaw 不在默认 PATH）
-    let cmd = '';
-    if (!isLocalOnly) {
-      let innerCmd = '';
-      if (source === 'openclaw' || source === 'openclaw-bundled') {
-        // OpenClaw 原生 CLI 安装（skills 只有 list/info/check，安装走 plugins install）
-        innerCmd = `openclaw plugins install ${skillId}`;
-      } else if (source === 'skills.sh') {
-        // skills.sh 生态安装（slug 格式: user/repo@skill-name）
-        const slug = req.body.slug || skillId;
-        innerCmd = `npx -y skills add ${slug}`;
-      } else if (source === 'npm') {
-        innerCmd = `sudo $(which npm) install -g ${skillId} --registry=https://registry.npmmirror.com`;
-      } else if (source.startsWith('http')) {
-        innerCmd = `curl -sSL ${source} | sudo bash`;
-      } else {
-        return res.status(400).json({ error: '不支持的安装源: ' + source });
-      }
-      // bash -lc 确保 .bashrc/.profile 被加载（NVM 等工具依赖此机制）
-      cmd = `bash -lc '${innerCmd.replace(/'/g, "'\"'\"'")}'`;
+    // 构造安装命令
+    let command = '';
+    if (source === 'openclaw' || source === 'openclaw-bundled') {
+      command = `openclaw plugins install ${skillId}`;
+    } else if (source === 'skills.sh') {
+      const slug = req.body.slug || skillId;
+      command = `npx -y skills add ${slug}`;
+    } else if (source === 'npm') {
+      command = `npm install -g ${skillId} --registry=https://registry.npmmirror.com`;
+    } else if (source === 'console') {
+      return res.json({ taskId: 'local', status: 'completed', message: '平台内置技能，无需远程安装' });
+    } else if (source.startsWith('http')) {
+      command = `curl -sSL ${source} | bash`;
+    } else {
+      return res.status(400).json({ error: '不支持的安装源: ' + source });
     }
 
-    try {
-      let result: any = { code: 0, stdout: 'local-only skill registered', stderr: '' };
+    const crypto = require('crypto');
+    const task = {
+      taskId: crypto.randomUUID(),
+      type: 'skill_install',
+      command,
+      skillId,
+      skillName: name || skillId,
+      timeoutMs: 120000,
+    };
 
-      // 远程源：SSH 执行安装命令
-      if (!isLocalOnly) {
-        result = await sshManager.exec(nodeConfig, cmd, 60000);
-        if (result.code !== 0) {
-          console.error(`[Skills] 安装失败 node=${req.params.id} cmd=${cmd} code=${result.code} stderr=${result.stderr}`);
-          return res.status(500).json({ error: `安装执行失败(code:${result.code}): ${result.stderr || result.stdout || '未知错误'}`, stdout: result.stdout, stderr: result.stderr });
-        }
-      }
-
-      // 更新持久化状态
-      if (keyManager) {
-        const node = keyManager.store.findById(req.params.id);
-        const currentSkills = node.skills || [];
-        if (!currentSkills.find((s: any) => s.id === skillId)) {
-          currentSkills.push({
-            id: skillId,
-            name: name || skillId,
-            version: version || 'latest',
-            installedAt: new Date().toISOString()
-          });
-          keyManager.updateNodeSkills(req.params.id, currentSkills);
-        }
-        // 广播 WS 更新，确保所有已连接客户端同步
-        if (keyManager.onChange) keyManager.onChange('skill_install', req.params.id);
-      }
-
-      res.json(result);
-    } catch (err: any) {
-      res.status(500).json({ error: err.message });
-    }
+    monitor.enqueueTask(nodeId, task);
+    res.json({ taskId: task.taskId, status: 'queued', message: '安装任务已入队，等待节点执行' });
   });
 
-  // DELETE /api/nodes/:id/skills/:skillId — 卸载技能
+  // DELETE /api/nodes/:id/skills/:skillId — 下发卸载技能
   router.delete('/:id/skills/:skillId', async (req: any, res: any) => {
-    const nodeConfig = nodesConfig.find((n: any) => n.id === req.params.id);
+    const nodeId = req.params.id;
+    const nodeConfig = nodesConfig.find((n: any) => n.id === nodeId);
     if (!nodeConfig) {
-      return res.status(404).json({ error: `节点 ${req.params.id} 未找到或不可达` });
+      return res.status(404).json({ error: `节点 ${nodeId} 未找到或不可达` });
     }
 
     const skillId = req.params.skillId;
-    
-    if (!/^[a-zA-Z0-9_@/.\\-]+$/.test(skillId)) {
+    if (!/^[a-zA-Z0-9_@/.\-]+$/.test(skillId)) {
       return res.status(400).json({ error: '技能 ID 格式包含非法符号' });
     }
 
-    // fallback: 目前统一认为是全局 npm 包
-    // @fix: bash -lc 确保 NVM 环境加载（与安装一致）
-    const innerCmd = `sudo $(which npm) uninstall -g ${skillId} || echo "Skill likely not an NPM package"`;
-    const cmd = `bash -lc '${innerCmd.replace(/'/g, "'\"'\"'")}'`;
+    const crypto = require('crypto');
+    const task = {
+      taskId: crypto.randomUUID(),
+      type: 'skill_uninstall',
+      command: `openclaw plugins uninstall ${skillId}`,
+      skillId,
+      timeoutMs: 60000,
+    };
 
-    try {
-      const result = await sshManager.exec(nodeConfig, cmd, 30000);
-      
-      // 无论命令执行成功与否，一律剔除本地记录以作乐观展示（假设物理已失效）
-      if (keyManager) {
-        const node = keyManager.store.findById(req.params.id);
-        let currentSkills = node.skills || [];
-        const originalLen = currentSkills.length;
-        currentSkills = currentSkills.filter((s: any) => s.id !== skillId);
-        
-        if (currentSkills.length !== originalLen) {
-          keyManager.updateNodeSkills(req.params.id, currentSkills);
-          // 广播 WS 更新
-          if (keyManager.onChange) keyManager.onChange('skill_uninstall', req.params.id);
-        }
-      }
-      res.json(result);
-    } catch (err: any) {
-      res.status(500).json({ error: err.message });
-    }
+    monitor.enqueueTask(nodeId, task);
+    res.json({ taskId: task.taskId, status: 'queued', message: '卸载任务已入队' });
+  });
+
+  // GET /api/nodes/:id/tasks — 查询节点任务队列状态
+  router.get('/:id/tasks', (req: any, res: any) => {
+    const tasks = monitor.getNodeTasks(req.params.id);
+    res.json({ tasks });
   });
 
   return router;

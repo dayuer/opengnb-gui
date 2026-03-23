@@ -18,6 +18,7 @@ class GnbMonitor extends EventEmitter {
   metricsStore: any;
   latestState: Map<string, any>;
   _staleTimer: any;
+  _taskQueues: Map<string, any[]>;
 
   constructor(nodesConfig: any[], options: any = {}) {
     super();
@@ -26,6 +27,7 @@ class GnbMonitor extends EventEmitter {
     this.metricsStore = options.metricsStore || null;
     this.latestState = new Map();
     this._staleTimer = null;
+    this._taskQueues = new Map();
   }
 
   /**
@@ -215,6 +217,87 @@ class GnbMonitor extends EventEmitter {
       }
     }
     return info;
+  }
+
+  // ═══════════════════════════════════════
+  //  Agent 任务队列
+  // ═══════════════════════════════════════
+
+  /**
+   * 入队：将任务加入指定节点的待执行队列
+   */
+  enqueueTask(nodeId: string, task: any) {
+    if (!this._taskQueues.has(nodeId)) {
+      this._taskQueues.set(nodeId, []);
+    }
+    const entry = {
+      ...task,
+      status: 'queued',       // queued → dispatched → completed/failed/timeout
+      queuedAt: new Date().toISOString(),
+    };
+    this._taskQueues.get(nodeId)!.push(entry);
+    log.info(`任务入队 node=${nodeId} taskId=${task.taskId} type=${task.type} cmd=${task.command}`);
+    this.emit('taskQueued', { nodeId, task: entry });
+    return entry;
+  }
+
+  /**
+   * 出队：返回指定节点的待执行任务（状态为 queued 的）
+   * 返回后标记为 dispatched（已下发）
+   */
+  getPendingTasks(nodeId: string): any[] {
+    const queue = this._taskQueues.get(nodeId) || [];
+    const pending = queue.filter((t: any) => t.status === 'queued');
+    // 标记为已下发
+    for (const t of pending) {
+      t.status = 'dispatched';
+      t.dispatchedAt = new Date().toISOString();
+    }
+    return pending.map((t: any) => ({
+      taskId: t.taskId,
+      type: t.type,
+      command: t.command,
+      timeoutMs: t.timeoutMs || 60000,
+    }));
+  }
+
+  /**
+   * 处理 agent 上报的任务执行结果
+   */
+  processTaskResults(nodeId: string, results: any[]) {
+    const queue = this._taskQueues.get(nodeId) || [];
+    for (const result of results) {
+      const task = queue.find((t: any) => t.taskId === result.taskId);
+      if (!task) continue;
+      task.status = result.code === 0 ? 'completed' : 'failed';
+      task.result = result;
+      task.completedAt = result.completedAt || new Date().toISOString();
+      log.info(`任务${task.status} node=${nodeId} taskId=${result.taskId} code=${result.code}`);
+      this.emit('taskCompleted', { nodeId, task });
+    }
+  }
+
+  /**
+   * 获取指定节点的任务列表（含所有状态）
+   */
+  getNodeTasks(nodeId: string): any[] {
+    return this._taskQueues.get(nodeId) || [];
+  }
+
+  /**
+   * 清理已完成超过 5 分钟的任务（避免内存泄漏）
+   */
+  _cleanOldTasks() {
+    const cutoff = Date.now() - 5 * 60 * 1000;
+    for (const [nodeId, queue] of this._taskQueues) {
+      const filtered = queue.filter((t: any) => {
+        if (t.status === 'completed' || t.status === 'failed') {
+          return new Date(t.completedAt).getTime() > cutoff;
+        }
+        return true;
+      });
+      this._taskQueues.set(nodeId, filtered);
+    }
   }
 }
 

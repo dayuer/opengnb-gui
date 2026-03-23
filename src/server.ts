@@ -203,8 +203,16 @@ async function boot() {
         node = allNodes.find((n: any) => n.name === nodeId && n.status === 'approved');
       }
       if (node) {
+        // 处理 agent 上报的任务执行结果
+        if (Array.isArray(req.body.taskResults) && req.body.taskResults.length > 0) {
+          monitor.processTaskResults(node.id, req.body.taskResults);
+        }
+
         monitor.ingest(node.id, req.body);
-        return res.json({ success: true, nodeId: node.id });
+
+        // Piggyback: 在响应中下发待执行任务
+        const tasks = monitor.getPendingTasks(node.id);
+        return res.json({ success: true, nodeId: node.id, tasks });
       }
     }
 
