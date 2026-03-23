@@ -471,7 +471,10 @@ export const NodeDetailPanel = {
     return html;
   },
 
-  /** 异步加载并渲染任务队列 */
+  /** 任务队列轮询定时器（per-node） */
+  _taskPollTimers: new Map<string, number>(),
+
+  /** 异步加载并渲染任务队列（有 pending 任务时自动轮询） */
   async loadTaskQueue(nodeId: string) {
     const wrap = document.getElementById(`task-queue-${nodeId}`);
     if (!wrap) return;
@@ -483,6 +486,7 @@ export const NodeDetailPanel = {
 
       if (!tasks || tasks.length === 0) {
         wrap.innerHTML = '';
+        this._stopTaskPoll(nodeId);
         return;
       }
 
@@ -505,8 +509,10 @@ export const NodeDetailPanel = {
         </div>
         <div class="space-y-3">`;
 
+      let hasPending = false;
       for (const task of tasks) {
         const st = statusMap[task.status] || statusMap.queued;
+        if (task.status === 'queued' || task.status === 'dispatched') hasPending = true;
         const timeStr = task.completedAt
           ? new Date(task.completedAt).toLocaleTimeString()
           : task.dispatchedAt
@@ -541,8 +547,38 @@ export const NodeDetailPanel = {
       html += `</div></div>`;
       wrap.innerHTML = html;
       refreshIcons();
+
+      // 有 pending 任务时启动轮询，否则停止
+      if (hasPending) {
+        this._startTaskPoll(nodeId);
+      } else {
+        this._stopTaskPoll(nodeId);
+      }
     } catch {
       wrap.innerHTML = '';
+    }
+  },
+
+  /** 启动任务队列轮询（10s 间隔） */
+  _startTaskPoll(nodeId: string) {
+    if (this._taskPollTimers.has(nodeId)) return; // 已在轮询
+    const timer = window.setInterval(() => {
+      // 面板已关闭则停止
+      if (!document.getElementById(`task-queue-${nodeId}`)) {
+        this._stopTaskPoll(nodeId);
+        return;
+      }
+      this.loadTaskQueue(nodeId);
+    }, 10000);
+    this._taskPollTimers.set(nodeId, timer);
+  },
+
+  /** 停止任务队列轮询 */
+  _stopTaskPoll(nodeId: string) {
+    const timer = this._taskPollTimers.get(nodeId);
+    if (timer) {
+      clearInterval(timer);
+      this._taskPollTimers.delete(nodeId);
     }
   },
 
