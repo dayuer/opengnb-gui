@@ -528,10 +528,10 @@ export const NodeDetailPanel = {
         if (canRetry || canDelete) {
           actionBtns = `<div class="flex items-center gap-1 mt-1">`;
           if (canRetry) {
-            actionBtns += `<button onclick="NodeDetailPanel.reinstallTask('${nodeId}','${safeAttr(task.skillId)}','${safeAttr(task.skillName || task.skillId)}')" class="text-[10px] px-1.5 py-0.5 rounded bg-blue-500/10 text-blue-400 hover:bg-blue-500/20 transition-colors duration-150" title="重新安装">重试</button>`;
+            actionBtns += `<button onclick="Nodes.reinstallTask('${nodeId}','${safeAttr(task.skillId)}','${safeAttr(task.skillName || task.skillId)}')" class="text-[10px] px-1.5 py-0.5 rounded bg-blue-500/10 text-blue-400 hover:bg-blue-500/20 transition-colors duration-150" title="重新安装">重试</button>`;
           }
           if (canDelete) {
-            actionBtns += `<button onclick="NodeDetailPanel.deleteTask('${nodeId}','${task.taskId}')" class="text-[10px] px-1.5 py-0.5 rounded bg-red-500/10 text-red-400 hover:bg-red-500/20 transition-colors duration-150" title="删除任务">删除</button>`;
+            actionBtns += `<button onclick="Nodes.deleteTask('${nodeId}','${task.taskId}')" class="text-[10px] px-1.5 py-0.5 rounded bg-red-500/10 text-red-400 hover:bg-red-500/20 transition-colors duration-150" title="删除任务">删除</button>`;
           }
           actionBtns += `</div>`;
         }

@@ -441,6 +441,8 @@ export const Nodes = {
   quickCmd(nodeId: any, prompt: any) { NodeDetailPanel.quickCmd(nodeId, prompt); },
   toggleTerminalSize(nodeId: any) { NodeDetailPanel.toggleTerminalSize(nodeId); },
   uninstallSkill(nodeId: any, skillId: any) { NodeDetailPanel.uninstallSkill(nodeId, skillId); },
+  reinstallTask(nodeId: any, skillId: any, skillName: any) { NodeDetailPanel.reinstallTask(nodeId, skillId, skillName); },
+  deleteTask(nodeId: any, taskId: any) { NodeDetailPanel.deleteTask(nodeId, taskId); },
 
   filterByGroup(gid: any) { App.nodeFilter.groupId = gid; App.nodePagination.page = 1; App.selectedIds.clear(); this.renderSidebar(); this.renderTable(); this.renderPagination(); },
   onSearch(v: any) { App.nodeFilter.keyword = v; App.nodePagination.page = 1; this.renderTable(); this.renderPagination(); },
