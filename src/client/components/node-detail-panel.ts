@@ -44,6 +44,7 @@ export const NodeDetailPanel = {
 
     if (ts.tab === 'claw') this.loadClawTab(node.id, ts.clawSubTab);
     if (ts.tab === 'terminal') this.initChat(node.id);
+    if (ts.tab === 'skills') this.loadTaskQueue(node.id);
   },
 
   // ═══════════════════════════════════════
@@ -155,6 +156,13 @@ export const NodeDetailPanel = {
       }
       html += `</div>`;
     }
+
+    // 任务队列占位
+    html += `
+    <div id="task-queue-${nid}" class="mt-6">
+      <div class="text-xs text-text-muted"><span class="[&_svg]:w-3 [&_svg]:h-3 inline-block animate-spin">${L('loader-2')}</span> 加载任务队列...</div>
+    </div>`;
+
     html += `</div>`;
     return html;
   },
@@ -461,6 +469,81 @@ export const NodeDetailPanel = {
     html = html.replace(/\*\*([^*]+)\*\*/g, '<strong class="text-text-primary font-semibold">$1</strong>');
     html = html.replace(/\n/g, '<br>');
     return html;
+  },
+
+  /** 异步加载并渲染任务队列 */
+  async loadTaskQueue(nodeId: string) {
+    const wrap = document.getElementById(`task-queue-${nodeId}`);
+    if (!wrap) return;
+
+    try {
+      const res = await App.authFetch(`/api/nodes/${nodeId}/tasks`);
+      if (!res.ok) { wrap.innerHTML = ''; return; }
+      const { tasks } = await res.json();
+
+      if (!tasks || tasks.length === 0) {
+        wrap.innerHTML = '';
+        return;
+      }
+
+      const statusMap: Record<string, { label: string; color: string; icon: string }> = {
+        queued:     { label: '等待下发', color: 'text-amber-400',   icon: 'clock' },
+        dispatched: { label: '执行中',   color: 'text-blue-400',    icon: 'loader-2' },
+        completed:  { label: '已完成',   color: 'text-emerald-400', icon: 'check-circle' },
+        failed:     { label: '失败',     color: 'text-red-400',     icon: 'x-circle' },
+        timeout:    { label: '超时',     color: 'text-orange-400',  icon: 'alert-triangle' },
+      };
+
+      let html = `
+      <div class="px-6 pb-6 pt-4 bg-surface/30 rounded-xl border border-border-default/20">
+        <div class="flex items-center justify-between mb-4 border-b border-border-default/20 pb-3">
+          <h4 class="text-lg font-headline font-bold tracking-tight text-text-primary flex items-center gap-2">
+            <span class="[&_svg]:w-4 [&_svg]:h-4">${L('list-todo')}</span>
+            任务队列
+            <span class="text-xs font-normal text-text-muted">(${tasks.length})</span>
+          </h4>
+        </div>
+        <div class="space-y-3">`;
+
+      for (const task of tasks) {
+        const st = statusMap[task.status] || statusMap.queued;
+        const timeStr = task.completedAt
+          ? new Date(task.completedAt).toLocaleTimeString()
+          : task.dispatchedAt
+            ? new Date(task.dispatchedAt).toLocaleTimeString()
+            : new Date(task.queuedAt).toLocaleTimeString();
+        const typeLabel = task.type === 'skill_install' ? '安装' : task.type === 'skill_uninstall' ? '卸载' : task.type;
+        const animClass = task.status === 'dispatched' ? ' animate-spin' : '';
+
+        html += `
+          <div class="flex items-center gap-3 px-4 py-3 rounded-lg bg-elevated/40 border border-border-default/20">
+            <span class="[&_svg]:w-4 [&_svg]:h-4 ${st.color}${animClass}">${L(st.icon)}</span>
+            <div class="flex-1 min-w-0">
+              <div class="flex items-center gap-2">
+                <span class="text-xs font-mono px-1.5 py-0.5 rounded bg-surface text-text-muted">${typeLabel}</span>
+                <span class="text-sm text-text-primary font-medium truncate">${escHtml(task.skillName || task.skillId || '')}</span>
+              </div>
+              <p class="text-[10px] text-text-muted font-mono mt-1 truncate">${escHtml(task.command || '')}</p>
+            </div>
+            <div class="text-right shrink-0">
+              <span class="text-xs font-medium ${st.color}">${st.label}</span>
+              <p class="text-[10px] text-text-muted mt-0.5">${timeStr}</p>
+            </div>
+          </div>`;
+
+        // 失败任务显示错误详情
+        if (task.status === 'failed' && task.result?.stderr) {
+          html += `
+          <div class="ml-7 px-3 py-2 rounded bg-red-500/5 border border-red-500/10 text-[11px] font-mono text-red-300 whitespace-pre-wrap break-all max-h-20 overflow-auto">${escHtml(task.result.stderr.slice(0, 500))}</div>`;
+        }
+      }
+
+      html += `</div></div>`;
+      wrap.innerHTML = html;
+      refreshIcons();
+    } catch {
+      wrap.innerHTML = '';
+    }
   },
 
   /** 技能卸载 */
