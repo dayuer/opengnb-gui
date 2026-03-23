@@ -111,6 +111,7 @@ WorkingDirectory=$APP_DIR
 ExecStart=\$NODE_BIN $APP_DIR/node_modules/.bin/tsx $APP_DIR/src/server.ts
 Restart=always
 RestartSec=5
+TimeoutStopSec=10
 EnvironmentFile=-$APP_DIR/.env
 Environment=NODE_ENV=production
 Environment=PORT=$PORT

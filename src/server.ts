@@ -366,7 +366,11 @@ async function boot() {
     monitor.stop();
     mirrorUpdater.stop();
     sshManager.closeAll();
+    // 关闭 WebSocket 连接，解除 server.close() 阻塞
+    wsHandlers.wss.clients.forEach((ws: any) => ws.terminate());
     server.close(() => process.exit(0));
+    // 兜底：5 秒后强制退出（防止连接泄漏阻塞）
+    setTimeout(() => process.exit(0), 5000).unref();
   };
   process.on('SIGINT', shutdown);
   process.on('SIGTERM', shutdown);

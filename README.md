@@ -174,6 +174,7 @@ opengnb-gui/
 ├── scripts/
 │   ├── initnode.sh                  # 节点初始化（10 步）
 │   ├── node-agent.sh                # 节点监控 Agent（推模式）
+│   ├── init-db.ts                   # 数据库 schema 初始化/迁移脚本
 │   ├── setup-console.sh             # Console 一键部署
 │   ├── deploy.sh                    # 增量部署（git push + SSH）
 │   ├── sync-mirror.sh               # GNB/OpenClaw 镜像同步
@@ -184,9 +185,10 @@ opengnb-gui/
 │   ├── services/
 │   │   ├── node-store.ts            # SQLite 数据层
 │   │   ├── key-manager.ts           # 密钥 + 审批 + address.conf 同步
-│   │   ├── gnb-monitor.ts           # 推模式监控（被动接收 Agent 上报）
+│   │   ├── gnb-monitor.ts           # 推模式监控 + Agent 任务队列
 │   │   ├── gnb-parser.ts            # GNB 状态解析器
 │   │   ├── metrics-store.ts         # 指标时序存储 + 趋势聚合
+│   │   ├── skills-store.ts          # 技能注册表（共享 DB 模式）
 │   │   ├── ssh-manager.ts           # SSH 连接池（通过 GNB TUN）
 │   │   ├── provisioner.ts           # 远程部署 OpenClaw
 │   │   ├── job-manager.ts           # 异步任务（投递+回调+超时）
@@ -227,7 +229,7 @@ opengnb-gui/
 │   └── __tests__/                   # TypeScript 测试（16 文件）
 │
 ├── data/                            # 运行时数据（自动创建）
-│   ├── registry/nodes.db            # SQLite 主库
+│   ├── registry/nodes.db            # SQLite 主库（9 表：nodes/groups/metrics/users/jobs/audit_logs/skills/agent_tasks）
 │   ├── security/ssh/                # Console ED25519 密钥对
 │   ├── logs/ops/                    # 运维终端日志
 │   └── mirror/                      # GNB/OpenClaw 二进制镜像
@@ -296,12 +298,13 @@ cp .env.example .env
 DEPLOY_SERVER=<IP>  DEPLOY_DOMAIN=<域名>  bash scripts/deploy.sh
 ```
 
-部署脚本执行 5 步：推送代码 → 检查环境 → 安装依赖 → 配置 systemd + nginx → HTTPS 证书。
+部署脚本执行 5 步：推送代码 → 检查环境 → 安装依赖 + `init-db.ts` 迁移 → 配置 systemd + nginx → HTTPS 证书。
 
 ## 版本演进
 
 | 日期 | 里程碑 | 说明 |
 |------|--------|------|
+| 03-23 | **数据库合并 + 任务持久化** | skills.db 合入 nodes.db、agent_tasks SQLite 持久化、init-db.ts 迁移脚本、优雅关闭修复 |
 | 03-22 | **v1.1.0-alpha: 技能中心落地** | 新增独立 `技能商店` 路由，接入真实底层的 `.online` 布尔精准探测，打通选节点 Modal 自动下发并重构了部署侧的 Vite 全链路。 |
 | 03-17 | Console 可行性 | GNB 架构调研 + Sidecar 方案评估 |
 | 03-18 | 全量测试覆盖 | 测试用例覆盖所有 services/routes/middleware |
