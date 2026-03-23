@@ -245,8 +245,11 @@ function createNodesRouter(monitor: any, sshManager: any, nodesConfig: any, keyM
 
     // 构造安装命令
     let command = '';
-    if (source === 'openclaw' || source === 'openclaw-bundled') {
-      // 先安装插件，再将其加入 plugins.allow 白名单（config set 会验证插件是否存在）
+    if (source === 'openclaw-bundled') {
+      // stock 内置插件：用 enable（不需要 plugins.allow 白名单）
+      command = `openclaw plugins enable ${skillId}`;
+    } else if (source === 'openclaw') {
+      // 第三方插件：先安装，再加入 plugins.allow 白名单
       command = [
         `openclaw plugins install ${skillId}`,
         `ALLOW=$(openclaw config get plugins.allow 2>/dev/null || echo '[]')`,
@@ -294,16 +297,24 @@ function createNodesRouter(monitor: any, sshManager: any, nodesConfig: any, keyM
     }
 
     const crypto = require('crypto');
-    const task = {
-      taskId: crypto.randomUUID(),
-      type: 'skill_uninstall',
-      // 先卸载，再从 plugins.allow 白名单移除
-      command: [
+    const uninstallSource = req.body?.source || req.query?.source || '';
+    // stock 插件用 disable，第三方用 uninstall + 移除白名单
+    let uninstallCmd: string;
+    if (uninstallSource === 'openclaw') {
+      uninstallCmd = [
         `openclaw plugins uninstall ${skillId}`,
         `ALLOW=$(openclaw config get plugins.allow 2>/dev/null || echo '[]')`,
         `UPDATED=$(echo "$ALLOW" | jq --arg p "${skillId}" 'if type == "array" then [.[] | select(. != $p)] else [] end')`,
         `openclaw config set plugins.allow "$UPDATED" --strict-json`,
-      ].join(' && '),
+      ].join(' && ');
+    } else {
+      // 默认（含 openclaw-bundled）用 disable
+      uninstallCmd = `openclaw plugins disable ${skillId}`;
+    }
+    const task = {
+      taskId: crypto.randomUUID(),
+      type: 'skill_uninstall',
+      command: uninstallCmd,
       skillId,
       timeoutMs: 60000,
     };
