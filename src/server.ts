@@ -264,6 +264,10 @@ async function boot() {
   skillsStore.init();
   app.use('/api/skills', requireAuth, createSkillsRouter(skillsStore));
 
+  // ClawHub 代理 — 需认证
+  const createClawHubRouter = require('./routes/clawhub');
+  app.use('/api/clawhub', requireAuth, createClawHubRouter());
+
   // OpenClaw 管理 — 需认证
   app.use('/api/claw', requireAuth, audit.middleware('claw'), createClawRouter({
     clawRPC,
