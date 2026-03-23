@@ -110,6 +110,13 @@ echo "${GNB_ADDRS}" > "${_TMP}_addr"
 echo "${SYS_INFO}" > "${_TMP}_sys"
 echo "${CLAW_CONFIG}" > "${_TMP}_claw"
 
+# 采集全局 npm 包列表（用于 skill 检测）
+NPM_GLOBAL_JSON=""
+if command -v npm &>/dev/null; then
+  NPM_GLOBAL_JSON=$(bash -lc 'npm list -g --json --depth=0 2>/dev/null' || true)
+fi
+echo "${NPM_GLOBAL_JSON}" > "${_TMP}_npm"
+
 PAYLOAD=$(python3 << PYEOF
 import json, os, sys
 def read(p):
@@ -124,12 +131,46 @@ try:
         claw_config = json.loads(raw)
 except: pass
 
+# 从 npm 全局包列表提取已安装的 skills
+installed_skills = []
+try:
+    npm_raw = read("${_TMP}_npm")
+    if npm_raw.startswith('{'):
+        npm_data = json.loads(npm_raw)
+        deps = npm_data.get('dependencies', {})
+        for pkg_name, pkg_info in deps.items():
+            ver = pkg_info.get('version', 'unknown')
+            installed_skills.append({
+                'id': pkg_name,
+                'name': pkg_name,
+                'version': ver,
+                'source': 'npm'
+            })
+except: pass
+
+# 从 OpenClaw 配置中提取 prompt 类 skills（如果有自定义 skills 配置）
+try:
+    claw_skills = claw_config.get('skills', [])
+    if isinstance(claw_skills, list):
+        for s in claw_skills:
+            if isinstance(s, dict) and s.get('id'):
+                sid = s['id']
+                if not any(x['id'] == sid for x in installed_skills):
+                    installed_skills.append({
+                        'id': sid,
+                        'name': s.get('name', sid),
+                        'version': s.get('version', 'v1.0'),
+                        'source': s.get('source', 'openclaw')
+                    })
+except: pass
+
 claw_obj = {
     'running': "$CLAW_RUNNING" == "true",
     'pid': "${CLAW_PID}" if "${CLAW_PID}" else None,
     'configPath': "${CLAW_CONFIG_PATH:-}" if "${CLAW_CONFIG_PATH:-}" else None,
     'config': claw_config,
-    'rpcOk': "$CLAW_RPC_OK" == "true"
+    'rpcOk': "$CLAW_RPC_OK" == "true",
+    'installedSkills': installed_skills
 }
 
 payload = {
@@ -142,7 +183,7 @@ payload = {
 print(json.dumps(payload))
 PYEOF
 )
-rm -f "${_TMP}_gnb" "${_TMP}_addr" "${_TMP}_sys" "${_TMP}_claw"
+rm -f "${_TMP}_gnb" "${_TMP}_addr" "${_TMP}_sys" "${_TMP}_claw" "${_TMP}_npm"
 
 if [ -z "$PAYLOAD" ]; then
   echo "[agent] JSON 组装失败" >&2

@@ -61,6 +61,14 @@ class GnbMonitor extends EventEmitter {
     const addrData = parseGnbCtlAddressList(report.gnbAddresses || '');
     const sysInfo = this._parseSysInfo(report.sysInfo || '');
 
+    // 从 agent 上报提取实际安装的 skills（来源：npm 全局包 + openclaw 配置）
+    const agentSkills = (report.openclaw?.installedSkills || []).map((s: any) => ({
+      id: s.id || s.name,
+      name: s.name || s.id,
+      version: s.version || 'unknown',
+      source: s.source || 'npm',
+    }));
+
     const state = {
       online: true,
       lastUpdate: now,
@@ -70,6 +78,7 @@ class GnbMonitor extends EventEmitter {
       addresses: addrData,
       sysInfo,
       openclaw: report.openclaw || null,
+      skills: agentSkills,
       error: null as any,
     };
 
@@ -125,7 +134,6 @@ class GnbMonitor extends EventEmitter {
         id,
         name: config?.name || id,
         tunAddr: config?.tunAddr || '',
-        skills: config?.skills || [],
         ...state,
       });
     }

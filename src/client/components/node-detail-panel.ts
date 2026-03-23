@@ -104,8 +104,9 @@ export const NodeDetailPanel = {
   },
 
   renderSkills(node: any) {
-    const rawNode = App.allNodesRaw.find((n: any) => n.id === node.id);
-    const installedSkills = rawNode?.skills || node.skills || [];
+    // 优先从监控数据（agent 上报）获取 skills，降级到 DB 记录
+    const monNode = App.nodesData.find((n: any) => n.id === node.id);
+    const installedSkills = monNode?.skills || node.skills || [];
     const nid = safeAttr(node.id);
 
     let html = `
