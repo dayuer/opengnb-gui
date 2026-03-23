@@ -331,7 +331,8 @@ export const SkillModals = {
                 installType: skill.installType,
                 version: skill.version,
                 name: skill.name,
-                slug: skill.slug
+                slug: skill.slug,
+                githubRepo: skill.githubRepo || '',
               })
             });
             if (!res.ok) {

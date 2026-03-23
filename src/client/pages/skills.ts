@@ -15,6 +15,10 @@ export const Skills = {
   _activeCategory: 'all',
   _searchKeyword: '',
   _loading: false,
+  _activeTab: 'local' as 'local' | 'clawhub' | 'github',
+  _clawhubResults: [] as any[],
+  _clawhubSearching: false,
+  _clawhubQuery: '',
 
   // --- 分类定义 ---
   _categories: [
@@ -61,6 +65,9 @@ export const Skills = {
     this._activeCategory = 'all';
     this._searchKeyword = '';
     this._loading = true;
+    this._activeTab = 'local';
+    this._clawhubResults = [];
+    this._clawhubQuery = '';
 
     container.innerHTML = this._renderShell();
     this._bindEvents(container);
@@ -80,11 +87,6 @@ export const Skills = {
             <p class="text-sm text-text-muted mt-1">发现和安装 AI 技能，扩展节点管理能力</p>
           </div>
           <div class="flex items-center gap-3">
-            <div class="relative">
-              <i data-lucide="search" class="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-text-muted pointer-events-none"></i>
-              <input id="skill-search" type="text" placeholder="搜索技能…"
-                class="pl-9 pr-4 py-2 w-56 text-sm border border-border-default rounded-lg bg-surface text-text-primary placeholder:text-text-muted focus:outline-none focus:ring-2 focus:ring-primary/30 focus:border-primary transition" />
-            </div>
             <button id="btn-publish-skill" class="inline-flex items-center gap-2 px-4 py-2 text-sm font-medium text-text-inverse bg-primary hover:bg-primary-dark rounded-lg transition cursor-pointer shadow-sm">
               <i data-lucide="upload" class="w-4 h-4"></i>
               <span>发布技能</span>
@@ -93,8 +95,40 @@ export const Skills = {
         </div>
       </div>
 
-      <!-- 分类筛选 -->
+      <!-- Tab 导航 -->
       <div class="px-6 pb-4">
+        <div id="skill-tabs" class="flex items-center gap-1 p-1 bg-elevated rounded-lg w-fit">
+          <button class="skill-tab-btn px-4 py-2 text-sm font-medium rounded-md transition cursor-pointer bg-surface text-text-primary shadow-sm" data-tab="local">
+            <i data-lucide="database" class="w-3.5 h-3.5 inline mr-1.5"></i>本地技能库
+          </button>
+          <button class="skill-tab-btn px-4 py-2 text-sm font-medium rounded-md transition cursor-pointer text-text-muted hover:text-text-primary" data-tab="clawhub">
+            <i data-lucide="globe" class="w-3.5 h-3.5 inline mr-1.5"></i>ClawHub 商店
+          </button>
+          <button class="skill-tab-btn px-4 py-2 text-sm font-medium rounded-md transition cursor-pointer text-text-muted hover:text-text-primary" data-tab="github">
+            <i data-lucide="github" class="w-3.5 h-3.5 inline mr-1.5"></i>GitHub 安装
+          </button>
+        </div>
+      </div>
+
+      <!-- Tab 内容区 -->
+      <div id="skill-tab-content">
+        ${this._renderLocalTab()}
+      </div>
+    `;
+  },
+
+  /** 本地技能库 Tab */
+  _renderLocalTab() {
+    return `
+      <!-- 搜索 + 分类 -->
+      <div class="px-6 pb-3">
+        <div class="flex items-center gap-3 mb-3">
+          <div class="relative flex-1 max-w-xs">
+            <i data-lucide="search" class="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-text-muted pointer-events-none"></i>
+            <input id="skill-search" type="text" placeholder="搜索本地技能…"
+              class="pl-9 pr-4 py-2 w-full text-sm border border-border-default rounded-lg bg-surface text-text-primary placeholder:text-text-muted focus:outline-none focus:ring-2 focus:ring-primary/30 focus:border-primary transition" />
+          </div>
+        </div>
         <div id="skill-categories" class="flex flex-wrap gap-2">
           ${this._categories.map(c => `
             <button class="skill-cat-btn inline-flex items-center gap-1.5 px-3.5 py-1.5 text-sm font-medium rounded-full transition cursor-pointer
@@ -119,6 +153,73 @@ export const Skills = {
         <div class="flex items-center justify-center py-20 text-text-muted">
           <i data-lucide="loader-2" class="w-6 h-6 animate-spin mr-2"></i>
           <span>加载技能列表…</span>
+        </div>
+      </div>
+    `;
+  },
+
+  /** ClawHub 商店 Tab */
+  _renderClawHubTab() {
+    return `
+      <div class="px-6 pb-4">
+        <div class="flex items-center gap-3 mb-4">
+          <div class="relative flex-1 max-w-md">
+            <i data-lucide="search" class="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-text-muted pointer-events-none"></i>
+            <input id="clawhub-search" type="text" placeholder="在 ClawHub 中搜索技能…"
+              value="${escHtml(this._clawhubQuery)}"
+              class="pl-9 pr-4 py-2.5 w-full text-sm border border-border-default rounded-lg bg-surface text-text-primary placeholder:text-text-muted focus:outline-none focus:ring-2 focus:ring-primary/30 focus:border-primary transition" />
+          </div>
+          <button id="btn-clawhub-search" class="inline-flex items-center gap-2 px-4 py-2.5 text-sm font-medium rounded-lg bg-primary text-text-inverse hover:bg-primary-dark transition cursor-pointer shadow-sm border-none">
+            <i data-lucide="search" class="w-4 h-4"></i>搜索
+          </button>
+        </div>
+        <p class="text-xs text-text-muted mb-4">
+          <i data-lucide="info" class="w-3 h-3 inline mr-1"></i>
+          搜索 ClawHub 公开技能注册表（13000+ 技能），一键安装到目标节点
+        </p>
+      </div>
+      <div id="clawhub-results" class="px-6 pb-8">
+        ${this._clawhubSearching
+          ? '<div class="flex items-center justify-center py-16 text-text-muted"><i data-lucide="loader-2" class="w-6 h-6 animate-spin mr-2"></i>搜索中…</div>'
+          : this._clawhubResults.length > 0
+            ? this._renderGrid(this._clawhubResults)
+            : '<div class="flex flex-col items-center justify-center py-16 text-text-muted"><i data-lucide="search" class="w-12 h-12 mb-3 opacity-30"></i><p class="text-base font-medium">输入关键词搜索 ClawHub</p><p class="text-sm mt-1">如：browser, slack, telegram, voice</p></div>'
+        }
+      </div>
+    `;
+  },
+
+  /** GitHub 安装 Tab */
+  _renderGithubTab() {
+    return `
+      <div class="px-6 pb-4">
+        <div class="bg-surface border border-border-default rounded-xl p-6">
+          <h3 class="text-base font-semibold text-text-primary mb-2">
+            <i data-lucide="github" class="w-5 h-5 inline mr-2"></i>从 GitHub 安装
+          </h3>
+          <p class="text-sm text-text-muted mb-4">输入 GitHub 仓库地址，一键安装 OpenClaw 插件到目标节点</p>
+          <div class="flex items-center gap-3 mb-4">
+            <div class="relative flex-1">
+              <i data-lucide="link" class="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-text-muted pointer-events-none"></i>
+              <input id="github-url" type="text" placeholder="github:user/repo 或 https://github.com/user/repo"
+                class="pl-9 pr-4 py-2.5 w-full text-sm border border-border-default rounded-lg bg-surface text-text-primary placeholder:text-text-muted focus:outline-none focus:ring-2 focus:ring-primary/30 focus:border-primary transition font-mono" />
+            </div>
+          </div>
+          <div id="github-preview" class="hidden">
+          </div>
+          <div class="flex items-center gap-3">
+            <button id="btn-github-install" class="inline-flex items-center gap-2 px-4 py-2.5 text-sm font-medium rounded-lg bg-primary text-text-inverse hover:bg-primary-dark transition cursor-pointer shadow-sm border-none">
+              <i data-lucide="download" class="w-4 h-4"></i>安装到节点
+            </button>
+          </div>
+          <div class="mt-4 p-3 bg-elevated rounded-lg">
+            <p class="text-xs text-text-muted font-medium mb-2">支持的格式：</p>
+            <ul class="text-xs text-text-muted space-y-1">
+              <li><code class="px-1 py-0.5 bg-surface rounded text-text-secondary font-mono">github:user/repo</code></li>
+              <li><code class="px-1 py-0.5 bg-surface rounded text-text-secondary font-mono">https://github.com/user/repo</code></li>
+              <li><code class="px-1 py-0.5 bg-surface rounded text-text-secondary font-mono">user/repo</code></li>
+            </ul>
+          </div>
         </div>
       </div>
     `;
@@ -178,7 +279,10 @@ export const Skills = {
 
     // 来源徽章颜色
     const sourceBadgeClass: Record<string, string> = {
+      clawhub: 'bg-blue-50 text-blue-700',
+      'openclaw-bundled': 'bg-cyan-50 text-cyan-700',
       openclaw: 'bg-blue-50 text-blue-700',
+      github: 'bg-gray-50 text-gray-700',
       'skills.sh': 'bg-violet-50 text-violet-700',
       npm: 'bg-red-50 text-red-700',
       console: 'bg-emerald-50 text-emerald-700',
@@ -246,7 +350,25 @@ export const Skills = {
 
   // --- 事件绑定 ---
   _bindEvents(container: any) {
-    // 分类筛选
+    // Tab 切换
+    container.querySelector('#skill-tabs')?.addEventListener('click', (e: any) => {
+      const btn = e.target.closest('.skill-tab-btn');
+      if (!btn || !btn.dataset.tab) return;
+      this._activeTab = btn.dataset.tab;
+      this._updateTabs(container);
+    });
+
+    // 本地技能事件（分类 + 搜索）
+    this._bindLocalEvents(container);
+
+    // 发布技能按钮
+    container.querySelector('#btn-publish-skill')?.addEventListener('click', () => {
+      this._showPublishModal(container);
+    });
+  },
+
+  /** 本地技能 Tab 事件 */
+  _bindLocalEvents(container: any) {
     container.querySelector('#skill-categories')?.addEventListener('click', (e: any) => {
       const btn = e.target.closest('.skill-cat-btn');
       if (!btn) return;
@@ -255,7 +377,6 @@ export const Skills = {
       this._filterAndRender(container);
     });
 
-    // 搜索
     const searchInput = container.querySelector('#skill-search');
     if (searchInput) {
       let timer: any = null;
@@ -267,11 +388,92 @@ export const Skills = {
         }, 200);
       });
     }
+  },
 
-    // 发布技能按钮
-    container.querySelector('#btn-publish-skill')?.addEventListener('click', () => {
-      this._showPublishModal(container);
+  /** ClawHub Tab 事件 */
+  _bindClawHubEvents(container: any) {
+    const searchInput = container.querySelector('#clawhub-search');
+    const searchBtn = container.querySelector('#btn-clawhub-search');
+    const doSearch = async () => {
+      const q = searchInput?.value?.trim();
+      if (!q) return;
+      this._clawhubQuery = q;
+      this._clawhubSearching = true;
+      this._updateTabContent(container);
+      try {
+        const res = await App.authFetch(`/api/clawhub/search?q=${encodeURIComponent(q)}`);
+        const data = await res.json();
+        this._clawhubResults = data.skills || [];
+      } catch (err: any) {
+        showToast('ClawHub 搜索失败: ' + (err.message || '网络错误'), 'error');
+        this._clawhubResults = [];
+      }
+      this._clawhubSearching = false;
+      this._updateTabContent(container);
+    };
+    searchBtn?.addEventListener('click', doSearch);
+    searchInput?.addEventListener('keydown', (e: any) => { if (e.key === 'Enter') doSearch(); });
+  },
+
+  /** GitHub Tab 事件 */
+  _bindGithubEvents(container: any) {
+    container.querySelector('#btn-github-install')?.addEventListener('click', async () => {
+      const input = container.querySelector('#github-url') as HTMLInputElement;
+      let val = (input?.value || '').trim();
+      if (!val) { showToast('请输入 GitHub 仓库地址', 'error'); return; }
+
+      // 标准化：提取 user/repo
+      val = val.replace(/^https?:\/\/github\.com\//, '').replace(/^github:/, '').replace(/\.git$/, '').replace(/\/$/, '');
+      const parts = val.split('/');
+      if (parts.length < 2) { showToast('格式无效，需要 user/repo 形式', 'error'); return; }
+      const repo = parts.slice(0, 2).join('/');
+      const skillId = parts[1]; // 用 repo 名作为 skillId
+
+      await SkillModals.showInstallModal({
+        id: skillId,
+        name: repo,
+        source: 'github',
+        githubRepo: repo,
+        description: `从 GitHub 安装: ${repo}`,
+        icon: 'github',
+        iconGradient: 'linear-gradient(135deg, #1e293b 0%, #475569 100%)',
+      }, this._installTypeLabels);
     });
+  },
+
+  /** Tab 样式更新 + 内容切换 */
+  _updateTabs(container: any) {
+    // 更新 Tab 按钮样式
+    container.querySelectorAll('.skill-tab-btn').forEach((btn: any) => {
+      const isActive = btn.dataset.tab === this._activeTab;
+      if (isActive) {
+        btn.className = 'skill-tab-btn px-4 py-2 text-sm font-medium rounded-md transition cursor-pointer bg-surface text-text-primary shadow-sm';
+      } else {
+        btn.className = 'skill-tab-btn px-4 py-2 text-sm font-medium rounded-md transition cursor-pointer text-text-muted hover:text-text-primary';
+      }
+    });
+    this._updateTabContent(container);
+  },
+
+  /** 更新 Tab 内容区 */
+  _updateTabContent(container: any) {
+    const contentEl = container.querySelector('#skill-tab-content');
+    if (!contentEl) return;
+
+    if (this._activeTab === 'local') {
+      contentEl.innerHTML = this._renderLocalTab();
+      refreshIcons();
+      this._bindLocalEvents(container);
+      this._filterAndRender(container);
+    } else if (this._activeTab === 'clawhub') {
+      contentEl.innerHTML = this._renderClawHubTab();
+      refreshIcons();
+      this._bindClawHubEvents(container);
+    } else if (this._activeTab === 'github') {
+      contentEl.innerHTML = this._renderGithubTab();
+      refreshIcons();
+      this._bindGithubEvents(container);
+    }
   },
 
   // --- 分类按钮样式更新 ---
