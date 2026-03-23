@@ -110,15 +110,15 @@ echo "${GNB_ADDRS}" > "${_TMP}_addr"
 echo "${SYS_INFO}" > "${_TMP}_sys"
 echo "${CLAW_CONFIG}" > "${_TMP}_claw"
 
-# 采集全局 npm 包列表（用于 skill 检测）
-NPM_GLOBAL_JSON=""
-if command -v npm &>/dev/null; then
-  NPM_GLOBAL_JSON=$(bash -lc 'npm list -g --json --depth=0 2>/dev/null' || true)
+# 采集 OpenClaw 已安装的 skills（使用原生 CLI）
+CLAW_SKILLS_RAW=""
+if command -v openclaw &>/dev/null; then
+  CLAW_SKILLS_RAW=$(openclaw skills list 2>/dev/null || true)
 fi
-echo "${NPM_GLOBAL_JSON}" > "${_TMP}_npm"
+echo "${CLAW_SKILLS_RAW}" > "${_TMP}_skills"
 
 PAYLOAD=$(python3 << PYEOF
-import json, os, sys
+import json, os, sys, re
 def read(p):
     try:
         with open(p) as f: return f.read().strip()
@@ -131,36 +131,49 @@ try:
         claw_config = json.loads(raw)
 except: pass
 
-# 从 npm 全局包列表提取已安装的 skills
+# 解析 openclaw skills list 输出
 installed_skills = []
 try:
-    npm_raw = read("${_TMP}_npm")
-    if npm_raw.startswith('{'):
-        npm_data = json.loads(npm_raw)
-        deps = npm_data.get('dependencies', {})
-        for pkg_name, pkg_info in deps.items():
-            ver = pkg_info.get('version', 'unknown')
-            installed_skills.append({
-                'id': pkg_name,
-                'name': pkg_name,
-                'version': ver,
-                'source': 'npm'
-            })
-except: pass
-
-# 从 OpenClaw 配置中提取 prompt 类 skills（如果有自定义 skills 配置）
-try:
-    claw_skills = claw_config.get('skills', [])
-    if isinstance(claw_skills, list):
-        for s in claw_skills:
-            if isinstance(s, dict) and s.get('id'):
-                sid = s['id']
-                if not any(x['id'] == sid for x in installed_skills):
+    skills_raw = read("${_TMP}_skills")
+    if skills_raw:
+        # 尝试 JSON 格式（openclaw 可能支持 --json 输出）
+        if skills_raw.startswith('[') or skills_raw.startswith('{'):
+            data = json.loads(skills_raw)
+            if isinstance(data, list):
+                for s in data:
                     installed_skills.append({
-                        'id': sid,
-                        'name': s.get('name', sid),
-                        'version': s.get('version', 'v1.0'),
+                        'id': s.get('id') or s.get('name', ''),
+                        'name': s.get('name') or s.get('id', ''),
+                        'version': s.get('version', 'unknown'),
                         'source': s.get('source', 'openclaw')
+                    })
+            elif isinstance(data, dict) and 'skills' in data:
+                for s in data['skills']:
+                    installed_skills.append({
+                        'id': s.get('id') or s.get('name', ''),
+                        'name': s.get('name') or s.get('id', ''),
+                        'version': s.get('version', 'unknown'),
+                        'source': s.get('source', 'openclaw')
+                    })
+        else:
+            # 文本格式解析：每行一个 skill，格式可能为 "name  version  source" 或类似
+            for line in skills_raw.splitlines():
+                line = line.strip()
+                if not line or line.startswith('#') or line.startswith('-'):
+                    continue
+                # 跳过表头行
+                if 'NAME' in line.upper() and ('VERSION' in line.upper() or 'SOURCE' in line.upper()):
+                    continue
+                parts = line.split()
+                if len(parts) >= 1:
+                    name = parts[0]
+                    version = parts[1] if len(parts) > 1 else 'unknown'
+                    source = parts[2] if len(parts) > 2 else 'openclaw'
+                    installed_skills.append({
+                        'id': name,
+                        'name': name,
+                        'version': version,
+                        'source': source
                     })
 except: pass
 
@@ -183,7 +196,7 @@ payload = {
 print(json.dumps(payload))
 PYEOF
 )
-rm -f "${_TMP}_gnb" "${_TMP}_addr" "${_TMP}_sys" "${_TMP}_claw" "${_TMP}_npm"
+rm -f "${_TMP}_gnb" "${_TMP}_addr" "${_TMP}_sys" "${_TMP}_claw" "${_TMP}_skills"
 
 if [ -z "$PAYLOAD" ]; then
   echo "[agent] JSON 组装失败" >&2
