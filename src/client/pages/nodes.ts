@@ -67,7 +67,7 @@ export const Nodes = {
 
       <!-- 主内容: 侧边栏 + 节点列表 -->
       <div class="flex gap-6">
-        <div id="group-sidebar" class="w-52 shrink-0 hidden md:block"></div>
+        <div id="group-sidebar" class="w-[265px] shrink-0 hidden md:block"></div>
         <div class="flex-1 min-w-0 space-y-4">
           <div id="nodes-toolbar"></div>
           <div id="batch-toolbar" class="hidden"></div>
