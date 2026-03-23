@@ -12,6 +12,7 @@ const { prepareMetricsStatements, metricsMethods } = require('../stores/metrics-
 const { prepareAuditStatements, auditMethods } = require('../stores/audit-store');
 const { prepareUserStatements, userMethods } = require('../stores/user-store');
 const { prepareJobStatements } = require('../stores/job-store');
+const { prepareTaskStatements, taskMethods } = require('../stores/task-store');
 
 /**
  * SQLite 节点存储层
@@ -140,6 +141,25 @@ class NodeStore {
       CREATE INDEX IF NOT EXISTS idx_jobs_node ON jobs(nodeId);
       CREATE INDEX IF NOT EXISTS idx_jobs_status ON jobs(status);
       CREATE INDEX IF NOT EXISTS idx_jobs_created ON jobs(createdAt);
+
+      CREATE TABLE IF NOT EXISTS agent_tasks (
+        taskId TEXT PRIMARY KEY,
+        nodeId TEXT NOT NULL,
+        type TEXT NOT NULL,
+        command TEXT NOT NULL,
+        skillId TEXT DEFAULT '',
+        skillName TEXT DEFAULT '',
+        status TEXT DEFAULT 'queued',
+        timeoutMs INTEGER DEFAULT 60000,
+        resultCode INTEGER,
+        resultStdout TEXT,
+        resultStderr TEXT,
+        queuedAt TEXT NOT NULL,
+        dispatchedAt TEXT,
+        completedAt TEXT
+      );
+      CREATE INDEX IF NOT EXISTS idx_tasks_node_status ON agent_tasks(nodeId, status);
+      CREATE INDEX IF NOT EXISTS idx_tasks_queued ON agent_tasks(queuedAt);
     `);
 
     // 向后兼容迁移
@@ -180,6 +200,7 @@ class NodeStore {
       ...prepareAuditStatements(this.db),
       ...prepareUserStatements(this.db),
       ...prepareJobStatements(this.db),
+      ...prepareTaskStatements(this.db),
     };
   }
 
@@ -373,7 +394,7 @@ class NodeStore {
 // Mixin 混入 — 将子模块方法挂载到 NodeStore.prototype
 // ═══════════════════════════════════════
 
-Object.assign(NodeStore.prototype, groupMethods, metricsMethods, auditMethods, userMethods);
+Object.assign(NodeStore.prototype, groupMethods, metricsMethods, auditMethods, userMethods, taskMethods);
 
 module.exports = NodeStore;
 export {}; // CJS 模块标记
