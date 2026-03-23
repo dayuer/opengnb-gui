@@ -131,50 +131,48 @@ try:
         claw_config = json.loads(raw)
 except: pass
 
-# 解析 openclaw skills list 输出
+# 解析 openclaw skills list 输出（│ 分隔表格格式）
+# 格式: │ Status │ Skill │ Description │ Source │
+# 只取状态非 "✗ missing" 的行（即实际可用的 skills）
 installed_skills = []
 try:
     skills_raw = read("${_TMP}_skills")
     if skills_raw:
-        # 尝试 JSON 格式（openclaw 可能支持 --json 输出）
-        if skills_raw.startswith('[') or skills_raw.startswith('{'):
-            data = json.loads(skills_raw)
-            if isinstance(data, list):
-                for s in data:
-                    installed_skills.append({
-                        'id': s.get('id') or s.get('name', ''),
-                        'name': s.get('name') or s.get('id', ''),
-                        'version': s.get('version', 'unknown'),
-                        'source': s.get('source', 'openclaw')
-                    })
-            elif isinstance(data, dict) and 'skills' in data:
-                for s in data['skills']:
-                    installed_skills.append({
-                        'id': s.get('id') or s.get('name', ''),
-                        'name': s.get('name') or s.get('id', ''),
-                        'version': s.get('version', 'unknown'),
-                        'source': s.get('source', 'openclaw')
-                    })
-        else:
-            # 文本格式解析：每行一个 skill，格式可能为 "name  version  source" 或类似
-            for line in skills_raw.splitlines():
-                line = line.strip()
-                if not line or line.startswith('#') or line.startswith('-'):
-                    continue
-                # 跳过表头行
-                if 'NAME' in line.upper() and ('VERSION' in line.upper() or 'SOURCE' in line.upper()):
-                    continue
-                parts = line.split()
-                if len(parts) >= 1:
-                    name = parts[0]
-                    version = parts[1] if len(parts) > 1 else 'unknown'
-                    source = parts[2] if len(parts) > 2 else 'openclaw'
-                    installed_skills.append({
-                        'id': name,
-                        'name': name,
-                        'version': version,
-                        'source': source
-                    })
+        for line in skills_raw.splitlines():
+            line = line.strip()
+            # 只处理含 │ 的数据行
+            if '│' not in line:
+                continue
+            cols = [c.strip() for c in line.split('│')]
+            # 过滤掉拆分后的空元素（首尾 │ 导致）
+            cols = [c for c in cols if c]
+            if len(cols) < 3:
+                continue
+            status = cols[0].strip()
+            skill_name_raw = cols[1].strip()
+            source = cols[3].strip() if len(cols) > 3 else 'openclaw'
+            # 跳过表头行
+            if status.lower() in ('status',) or skill_name_raw.lower() in ('skill',):
+                continue
+            # 跳过 "✗ missing" 状态的 skills
+            if 'missing' in status.lower():
+                continue
+            # 跳过描述续行（status 和 skill_name 都为空的行）
+            if not skill_name_raw:
+                continue
+            # 从 skill 名中去除 emoji 前缀（如 "🔐 1password" → "1password"）
+            import unicodedata
+            name_parts = skill_name_raw.split()
+            clean_name = ' '.join(p for p in name_parts
+                if not all(unicodedata.category(ch).startswith(('So','Cn','Cf')) or ch == '\ufe0f' for ch in p))
+            if not clean_name:
+                clean_name = skill_name_raw
+            installed_skills.append({
+                'id': clean_name,
+                'name': clean_name,
+                'version': 'installed',
+                'source': source
+            })
 except: pass
 
 claw_obj = {
