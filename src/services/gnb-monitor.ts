@@ -1,5 +1,5 @@
 'use strict';
-import type { NodeRecord, SysInfo, PeerNode } from '../types/interfaces';
+import type { NodeConfig, AgentReport, GnbMonitorOptions, SysInfo, PeerNode } from '../types/interfaces';
 
 const EventEmitter = require('events');
 const { createLogger } = require('./logger');
@@ -14,7 +14,7 @@ const log = createLogger('GnbMonitor');
  * 不再主动 SSH 轮询节点。
  */
 class GnbMonitor extends EventEmitter {
-  nodesConfig: Array<{ id: string; name: string; tunAddr: string; sshPort?: number; sshUser?: string; gnbMapPath?: string; gnbCtlPath?: string }>;
+  nodesConfig: NodeConfig[];
   staleTimeoutMs: number;
   metricsStore: unknown;
   latestState: Map<string, any>;
@@ -22,15 +22,15 @@ class GnbMonitor extends EventEmitter {
   _store: unknown;
   _audit: unknown;
 
-  constructor(nodesConfig: Array<{ id: string; name: string; tunAddr: string }>, options: Record<string, unknown> = {}) {
+  constructor(nodesConfig: NodeConfig[], options: GnbMonitorOptions = {}) {
     super();
     this.nodesConfig = nodesConfig;
-    this.staleTimeoutMs = options.staleTimeoutMs || 60000;
-    this.metricsStore = options.metricsStore || null;
+    this.staleTimeoutMs = options.staleTimeoutMs ?? 60000;
+    this.metricsStore = options.metricsStore ?? null;
     this.latestState = new Map();
     this._staleTimer = null;
-    this._store = options.store || null;
-    this._audit = options.audit || null;
+    this._store = options.store ?? null;
+    this._audit = options.audit ?? null;
   }
 
   /**
@@ -57,34 +57,35 @@ class GnbMonitor extends EventEmitter {
    * @param {string} nodeId - 节点 ID
    * @param {object} report - 上报的 JSON 数据
    */
-  ingest(nodeId: string, report: Record<string, unknown>) {
+  ingest(nodeId: string, report: AgentReport) {
     const now = new Date().toISOString();
 
     // 解析 GNB 状态
     const { parseGnbCtlStatus, parseGnbCtlAddressList } = require('./gnb-parser');
-    const statusData = parseGnbCtlStatus(report.gnbStatus || '');
-    const addrData = parseGnbCtlAddressList(report.gnbAddresses || '');
-    const sysInfo = this._parseSysInfo(report.sysInfo || '');
+    const statusData = parseGnbCtlStatus(report.gnbStatus ?? '');
+    const addrData = parseGnbCtlAddressList(report.gnbAddresses ?? '');
+    const sysInfo = this._parseSysInfo(report.sysInfo ?? '');
 
     // 从 agent 上报提取实际安装的 skills（来源：npm 全局包 + openclaw 配置）
-    const agentSkills = (report.openclaw?.installedSkills || []).map((s: Record<string, unknown>) => ({
-      id: s.id || s.name,
-      name: s.name || s.id,
-      version: s.version || 'unknown',
-      source: s.source || 'npm',
+    const installedSkills = report.openclaw?.installedSkills ?? [];
+    const agentSkills = installedSkills.map((s) => ({
+      id: s.id ?? s.name,
+      name: s.name ?? s.id,
+      version: s.version ?? 'unknown',
+      source: s.source ?? 'npm',
     }));
 
     const state = {
       online: true,
       lastUpdate: now,
-      sshLatencyMs: report.collectMs || 0,
+      sshLatencyMs: report.collectMs ?? 0,
       core: statusData.core,
       nodes: statusData.nodes,
       addresses: addrData,
       sysInfo,
-      openclaw: report.openclaw || null,
+      openclaw: report.openclaw ?? null,
       skills: agentSkills,
-      error: null as any,
+      error: null as string | null,
     };
 
     this.latestState.set(nodeId, state);
@@ -105,14 +106,16 @@ class GnbMonitor extends EventEmitter {
 
     // 记录指标到时序存储
     if (this.metricsStore) {
-      const memPct = sysInfo.memTotalMB > 0 ? Math.round(sysInfo.memUsedMB / sysInfo.memTotalMB * 100) : 0;
-      const diskPct = sysInfo.diskUsePct ? parseInt(sysInfo.diskUsePct) : 0;
+      const memTotal = sysInfo.memTotalMB ?? 0;
+      const memUsed = sysInfo.memUsedMB ?? 0;
+      const memPct = memTotal > 0 ? Math.round(memUsed / memTotal * 100) : 0;
+      const diskPct = sysInfo.diskUsePct ? parseInt(sysInfo.diskUsePct, 10) : 0;
       const peers = statusData.nodes || [];
-      this.metricsStore.record(nodeId, {
+      (this.metricsStore as { record: (id: string, data: Record<string, unknown>) => void }).record(nodeId, {
         cpu: sysInfo.cpuUsage ?? 0,
         memPct,
         diskPct,
-        sshLatency: report.collectMs || 0,
+        sshLatency: report.collectMs ?? 0,
         loadAvg: sysInfo.loadAvg || '0',
         p2pDirect: peers.filter((p: PeerNode) => p.status === 'Direct').length,
         p2pTotal: peers.length,
@@ -178,10 +181,10 @@ class GnbMonitor extends EventEmitter {
    * 解析系统信息输出
    * @private
    */
-  _parseSysInfo(stdout: string) {
+  _parseSysInfo(stdout: string | Record<string, unknown>): Partial<SysInfo> {
     // 防御：如果已经是对象直接返回（兼容非 agent 来源）
-    if (stdout && typeof stdout === 'object') return stdout;
-    const info: Record<string, any> = {};
+    if (stdout && typeof stdout === 'object') return stdout as Partial<SysInfo>;
+    const info: Partial<SysInfo> = {};
     const lines = String(stdout || '').split('\n');
     for (const line of lines) {
       const match = line.match(/^::(\w+)::(.*)$/);

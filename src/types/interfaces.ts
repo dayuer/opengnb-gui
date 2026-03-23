@@ -36,7 +36,7 @@ export interface NodeRecord {
   skills?: unknown[];
 }
 
-/** 节点配置 — SSH 连接所需的最小字段 */
+/** 节点配置 — SSH 连接 + 监控所需字段 */
 export interface NodeConfig {
   id: string;
   name: string;
@@ -45,6 +45,34 @@ export interface NodeConfig {
   sshPort: number;
   clawToken?: string;
   clawPort?: number;
+  gnbMapPath?: string;
+  gnbCtlPath?: string;
+}
+
+/** Agent 心跳上报数据 */
+export interface AgentReport {
+  gnbStatus?: string;
+  gnbAddresses?: string;
+  sysInfo?: string | Record<string, unknown>;
+  collectMs?: number;
+  openclaw?: {
+    installedSkills?: Array<{ id?: string; name?: string; version?: string; source?: string }>;
+    config?: {
+      gateway?: {
+        auth?: { token?: string };
+        port?: number;
+      };
+    };
+  };
+  [key: string]: unknown;
+}
+
+/** GnbMonitor 构造参数 */
+export interface GnbMonitorOptions {
+  staleTimeoutMs?: number;
+  metricsStore?: unknown;
+  store?: unknown;
+  audit?: unknown;
 }
 
 // ═══════════════════════════════════════
@@ -130,15 +158,24 @@ export interface MetricsSummary {
 //  GNB Monitor — 运行时状态
 // ═══════════════════════════════════════
 
-/** 系统信息 — Agent 上报 */
+/** 系统信息 — Agent 上报（_parseSysInfo 增量解析，所有字段可选） */
 export interface SysInfo {
-  cpuUsage: number;
-  memTotalMB: number;
-  memUsedMB: number;
-  diskTotalGB: number;
-  diskUsedGB: number;
-  loadAvg: string;
-  uptime: number;
+  hostname?: string;
+  os?: string;
+  kernel?: string;
+  arch?: string;
+  cpuModel?: string;
+  cpuCores?: number;
+  cpuUsage?: number;
+  memTotalMB?: number;
+  memUsedMB?: number;
+  memAvailMB?: number;
+  diskTotal?: string;
+  diskUsed?: string;
+  diskAvail?: string;
+  diskUsePct?: string;
+  loadAvg?: string;
+  uptime?: string;
 }
 
 /** GNB 节点对等体状态 */
