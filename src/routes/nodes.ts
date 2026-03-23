@@ -251,8 +251,8 @@ function createNodesRouter(monitor: any, sshManager: any, nodesConfig: any, keyM
     if (!isLocalOnly) {
       let innerCmd = '';
       if (source === 'openclaw' || source === 'openclaw-bundled') {
-        // OpenClaw 原生 CLI 安装
-        innerCmd = `openclaw skills install ${skillId}`;
+        // OpenClaw 原生 CLI 安装（skills 只有 list/info/check，安装走 plugins install）
+        innerCmd = `openclaw plugins install ${skillId}`;
       } else if (source === 'skills.sh') {
         // skills.sh 生态安装（slug 格式: user/repo@skill-name）
         const slug = req.body.slug || skillId;
