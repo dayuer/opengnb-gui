@@ -19,6 +19,7 @@ class GnbMonitor extends EventEmitter {
   latestState: Map<string, any>;
   _staleTimer: any;
   _store: any;
+  _audit: any;
 
   constructor(nodesConfig: any[], options: any = {}) {
     super();
@@ -28,6 +29,7 @@ class GnbMonitor extends EventEmitter {
     this.latestState = new Map();
     this._staleTimer = null;
     this._store = options.store || null;
+    this._audit = options.audit || null;
   }
 
   /**
@@ -244,6 +246,7 @@ class GnbMonitor extends EventEmitter {
     };
     this._store.taskInsert(row);
     log.info(`任务入队 node=${nodeId} taskId=${task.taskId} type=${task.type} cmd=${task.command}`);
+    this._audit?.log('task_enqueue', { nodeId, taskId: task.taskId, type: task.type, skillName: task.skillName, command: task.command });
     this.emit('taskQueued', { nodeId, task: row });
     return row;
   }
@@ -257,6 +260,7 @@ class GnbMonitor extends EventEmitter {
     const now = new Date().toISOString();
     for (const t of pending) {
       this._store.taskMarkDispatched(t.taskId, now);
+      this._audit?.log('task_dispatch', { nodeId, taskId: t.taskId, type: t.type });
     }
     return pending.map((t: any) => ({
       taskId: t.taskId,
@@ -282,6 +286,12 @@ class GnbMonitor extends EventEmitter {
         completedAt: result.completedAt || new Date().toISOString(),
       });
       log.info(`任务${status} node=${nodeId} taskId=${result.taskId} code=${result.code}`);
+      this._audit?.log('task_result', {
+        nodeId, taskId: result.taskId, status,
+        code: result.code,
+        stdout: (result.stdout || '').slice(0, 500),
+        stderr: (result.stderr || '').slice(0, 500),
+      });
       this.emit('taskCompleted', { nodeId, taskId: result.taskId, status });
     }
   }

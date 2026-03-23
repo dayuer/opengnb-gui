@@ -6,6 +6,15 @@
 # 部署：由 initnode.sh 安装到 /opt/gnb/bin/，systemd timer 每 10s 触发
 # ═══════════════════════════════════════════════════════════════
 
+# --- 任务日志（集中记录任务执行全过程） ---
+TASK_LOG="/opt/gnb/log/agent-tasks.log"
+mkdir -p "$(dirname "$TASK_LOG")" 2>/dev/null
+task_log() { echo "[$(date '+%Y-%m-%d %H:%M:%S')] $*" >> "$TASK_LOG"; }
+# 日志轮转：超过 500 行时保留最新 300 行
+if [ -f "$TASK_LOG" ] && [ "$(wc -l < "$TASK_LOG" 2>/dev/null)" -gt 500 ]; then
+  tail -300 "$TASK_LOG" > "${TASK_LOG}.tmp" && mv "${TASK_LOG}.tmp" "$TASK_LOG"
+fi
+
 # --- 配置（systemd EnvironmentFile 或手动 source） ---
 AGENT_ENV="/opt/gnb/bin/agent.env"
 if [ -z "${CONSOLE_URL:-}" ] && [ -f "$AGENT_ENV" ]; then
@@ -252,7 +261,9 @@ except:
 " 2>/dev/null)
 
   if [ -n "$TASKS" ] && [ "$TASKS" != "[]" ]; then
-    echo "[agent] 收到 $(echo "$TASKS" | python3 -c "import sys,json; print(len(json.load(sys.stdin)))" 2>/dev/null || echo "?") 个待执行任务"
+    TASK_COUNT=$(echo "$TASKS" | python3 -c "import sys,json; print(len(json.load(sys.stdin)))" 2>/dev/null || echo "?")
+    echo "[agent] 收到 ${TASK_COUNT} 个待执行任务"
+    task_log "收到 ${TASK_COUNT} 个任务"
 
     # 逐个执行任务并收集结果
     python3 -c "
@@ -285,6 +296,8 @@ for task in tasks:
         })
         status = '成功' if proc.returncode == 0 else f'失败(code:{proc.returncode})'
         print(f'[agent] 任务 {tid} {status}', file=sys.stderr)
+        with open('/opt/gnb/log/agent-tasks.log', 'a') as lf:
+            lf.write(f'[{datetime.now().strftime("%Y-%m-%d %H:%M:%S")}] 任务 {tid} {status}: {cmd[:80]}\n')
     except subprocess.TimeoutExpired:
         results.append({
             'taskId': tid,

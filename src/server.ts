@@ -115,6 +115,7 @@ async function boot() {
     staleTimeoutMs: parseInt(process.env.STALE_TIMEOUT_MS || '60000', 10),
     metricsStore,
     store: keyManager.store,
+    audit,
   });
 
   const provisioner = new Provisioner({
