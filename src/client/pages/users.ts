@@ -368,7 +368,7 @@ export const Users = {
       if (!res.ok) { if (errEl) { errEl.textContent = data.error || '邀请失败'; errEl.classList.remove('hidden'); } return; }
       // 创建成功 — 显示凭证
       const loginUrl = location.origin;
-      const credential = `SynonClaw Console 登录信息\n${'─'.repeat(28)}\n登录地址: ${loginUrl}\n用户名:   ${username}\n初始密码: ${password}\n角色:     ${role === 'admin' ? '管理员' : '普通成员'}\n${'─'.repeat(28)}\n⚠️ 请登录后立即修改密码`;
+      const credential = `SynonClaw Console 登录信息\n${'─'.repeat(28)}\n登录地址: ${loginUrl}\n用户名:   ${username}\n初始密码: ${password}\n${'─'.repeat(28)}\n⚠️ 请登录后立即修改密码`;
       const credEl = $('#invite-credential') as HTMLTextAreaElement;
       if (credEl) credEl.value = credential;
       // 切换到结果视图
