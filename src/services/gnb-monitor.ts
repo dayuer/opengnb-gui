@@ -125,6 +125,7 @@ class GnbMonitor extends EventEmitter {
         id,
         name: config?.name || id,
         tunAddr: config?.tunAddr || '',
+        skills: config?.skills || [],
         ...state,
       });
     }
