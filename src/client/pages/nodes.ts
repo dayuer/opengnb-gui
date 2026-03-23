@@ -96,11 +96,11 @@ export const Nodes = {
       </button>`;
     for (const g of App.nodeGroups) {
       const count = App.allNodesRaw.filter((n: any) => n.groupId === g.id).length;
-      html += `<button type="button" class="w-full flex items-center gap-2 px-3 py-2 rounded-lg text-sm cursor-pointer transition-colors group/g relative ${f.groupId === g.id ? 'bg-primary/10 text-primary font-bold' : 'text-text-secondary hover:bg-elevated'}" onclick="Nodes.filterByGroup('${safeAttr(g.id)}')">
+      html += `<button type="button" class="group-row w-full flex items-center gap-2 px-3 py-2 rounded-lg text-sm cursor-pointer transition-colors relative ${f.groupId === g.id ? 'bg-primary/10 text-primary font-bold' : 'text-text-secondary hover:bg-elevated'}" onclick="Nodes.filterByGroup('${safeAttr(g.id)}')">
         <span class="w-2.5 h-2.5 rounded-full shrink-0" style="background:${escHtml(g.color)}"></span>
         <span class="truncate flex-1 text-left">${escHtml(g.name)}</span>
         <span class="text-xs font-bold shrink-0">${count}</span>
-        <span class="hidden group-hover/g:flex items-center gap-0.5 absolute right-2 bg-elevated rounded-md shadow-sm" onclick="event.stopPropagation()">
+        <span class="group-actions items-center gap-0.5 absolute right-2 bg-elevated rounded-md shadow-sm" onclick="event.stopPropagation()">
           <button class="p-1 rounded text-text-muted hover:text-primary hover:bg-primary/10 transition-colors cursor-pointer [&_svg]:w-3 [&_svg]:h-3" onclick="Groups.showEditModal('${safeAttr(g.id)}')" title="编辑">${L('pencil')}</button>
           <button class="p-1 rounded text-text-muted hover:text-danger hover:bg-danger/10 transition-colors cursor-pointer [&_svg]:w-3 [&_svg]:h-3" onclick="Groups.deleteGroup('${safeAttr(g.id)}')" title="删除">${L('trash-2')}</button>
         </span>

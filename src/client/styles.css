@@ -155,3 +155,7 @@
 .dark .signature-gradient {
   background: linear-gradient(135deg, #645efb 0%, #8b83ff 100%);
 }
+
+/* ── 分组行：hover 时显示操作按钮 ── */
+.group-row .group-actions { display: none; }
+.group-row:hover .group-actions { display: flex; }
