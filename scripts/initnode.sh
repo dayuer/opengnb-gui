@@ -482,16 +482,17 @@ if [ "$NEED_INSTALL" = "true" ]; then
         echo "      ⚠️ OpenClaw 安装失败，跳过（可稍后通过 Console 终端安装）"
     else
         echo "      ✅ OpenClaw $(openclaw --version 2>/dev/null | head -1) 已安装"
-        # 安装 ClawHub CLI（技能商店包管理器）
-        if ! command -v clawhub >/dev/null 2>&1; then
-            echo "      📦 安装 ClawHub CLI..."
-            npm install -g clawhub --registry=https://registry.npmmirror.com > /tmp/clawhub-install.log 2>&1 \
-                && echo "      ✅ ClawHub $(clawhub --version 2>/dev/null | head -1) 已安装" \
-                || echo "      ⚠️ ClawHub CLI 安装失败（非必须，可稍后安装）"
-        fi
     fi
 else
     CLAW_INSTALLED=true
+fi
+
+# 安装 ClawHub CLI（技能商店包管理器，独立于 OpenClaw 安装流程）
+if [ "$CLAW_INSTALLED" = "true" ] && ! command -v clawhub >/dev/null 2>&1; then
+    echo "      📦 安装 ClawHub CLI..."
+    npm install -g clawhub --registry=https://registry.npmmirror.com > /tmp/clawhub-install.log 2>&1 \
+        && echo "      ✅ ClawHub $(clawhub --version 2>/dev/null | head -1) 已安装" \
+        || echo "      ⚠️ ClawHub CLI 安装失败（非必须，可稍后安装）"
 fi
 
 # 配置 OpenClaw + systemd + 生成 Token
