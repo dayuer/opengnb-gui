@@ -2,8 +2,8 @@
 /**
  * init-db.ts — 数据库初始化/迁移脚本
  *
- * 用途：确保 nodes.db 中所有表（含 skills、agent_tasks）已创建。
- * 调用：npx tsx scripts/init-db.ts [--data-dir ./data]
+ * 用途：确保 registry/nodes.db 中所有表（含 skills、agent_tasks）已创建。
+ * 调用：npx tsx scripts/init-db.ts
  *
  * deploy.sh 在 systemctl restart 之前调用此脚本，
  * 确保 schema 迁移先于应用启动完成（避免 tsx 运行时建表竞态）。
@@ -13,12 +13,14 @@
 const Database = require('better-sqlite3');
 const path = require('path');
 const fs = require('fs');
+const { resolvePaths, ensureDataDirs } = require('../src/services/data-paths');
 
-const DATA_DIR = process.env.DATA_DIR || process.argv.find((_: any, i: number) => process.argv[i - 1] === '--data-dir') || './data';
-const DB_PATH = path.join(DATA_DIR, 'nodes.db');
+const DATA_DIR = process.env.DATA_DIR || './data';
+const paths = resolvePaths(DATA_DIR);
+ensureDataDirs(paths);
+const DB_PATH = paths.registry.nodesDb;  // data/registry/nodes.db
 
 console.log(`[init-db] 数据库路径: ${DB_PATH}`);
-fs.mkdirSync(path.dirname(DB_PATH), { recursive: true });
 
 const db = new Database(DB_PATH);
 db.pragma('journal_mode = WAL');
