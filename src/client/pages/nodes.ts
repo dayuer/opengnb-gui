@@ -1,21 +1,22 @@
 // @alpha: nodes 页面模块 (TS 迁移 — Alpha pass)
+// V3: 详情面板逻辑已提取到 node-detail-panel.ts
 import { $, $$, L, refreshIcons, escHtml, showToast, formatBytes, formatUptime, pctColor, pctBg, safeAttr, cidrMatch, isValidCidr } from '../utils';
 import { Modal } from '../modal';
 import { App } from '../core';
+import { NodeDetailPanel } from '../components/node-detail-panel';
 
 
 // @alpha: 节点管理 — Stitch "Cluster Management" 风格
 
-let nodeTabStates = {};
-let _chatSessions = {}; // @alpha: nodeId → { ws, messages }
+let nodeTabStates: Record<string, any> = {};
 
 export const Nodes = {
-  render(container) {
+  render(container: any) {
     const allNodes = App.allNodesRaw || [];
     const monData = App.nodesData || [];
-    const online = monData.filter(n => n.online).length;
-    const offline = allNodes.filter(n => n.status === 'approved').length - online;
-    const pending = allNodes.filter(n => n.status === 'pending').length;
+    const online = monData.filter((n: any) => n.online).length;
+    const offline = allNodes.filter((n: any) => n.status === 'approved').length - online;
+    const pending = allNodes.filter((n: any) => n.status === 'pending').length;
 
     container.innerHTML = `<div class="space-y-8">
       <!-- 页面标题 -->
@@ -42,7 +43,7 @@ export const Nodes = {
           <div class="relative z-10">
             <p class="text-xs font-bold text-text-muted uppercase tracking-widest mb-4">在线率</p>
             <div class="flex items-baseline gap-3">
-              <span id="summary-online-pct" class="text-4xl font-extrabold font-headline">${allNodes.length > 0 ? Math.round(online / Math.max(1, allNodes.filter(n => n.status === 'approved').length) * 100) : 0}%</span>
+              <span id="summary-online-pct" class="text-4xl font-extrabold font-headline">${allNodes.length > 0 ? Math.round(online / Math.max(1, allNodes.filter((n: any) => n.status === 'approved').length) * 100) : 0}%</span>
               <span id="summary-online-count" class="text-text-muted text-sm">${online} 在线</span>
             </div>
           </div>
@@ -85,7 +86,7 @@ export const Nodes = {
   renderSidebar() {
     const sb = $('#group-sidebar');
     if (!sb) return;
-    const ungrouped = App.allNodesRaw.filter(n => !n.groupId).length;
+    const ungrouped = App.allNodesRaw.filter((n: any) => !n.groupId).length;
     const totalNodes = App.allNodesRaw.length;
     const f = App.nodeFilter;
     let html = `<div class="bg-surface rounded-xl shadow-ambient border border-border-default p-4 space-y-1 sticky top-20">
@@ -94,7 +95,7 @@ export const Nodes = {
         <span class="[&_svg]:w-4 [&_svg]:h-4">${L('layers')}</span> <span>全部节点</span> <span class="ml-auto text-xs font-bold">${totalNodes}</span>
       </button>`;
     for (const g of App.nodeGroups) {
-      const count = App.allNodesRaw.filter(n => n.groupId === g.id).length;
+      const count = App.allNodesRaw.filter((n: any) => n.groupId === g.id).length;
       html += `<button type="button" class="w-full flex items-center gap-2 px-3 py-2 rounded-lg text-sm cursor-pointer transition-colors group/g ${f.groupId === g.id ? 'bg-primary/10 text-primary font-bold' : 'text-text-secondary hover:bg-elevated'}" onclick="Nodes.filterByGroup('${safeAttr(g.id)}')">
         <span class="w-2.5 h-2.5 rounded-full shrink-0" style="background:${escHtml(g.color)}"></span>
         <span class="truncate flex-1 text-left">${escHtml(g.name)}</span>
@@ -118,7 +119,7 @@ export const Nodes = {
         <div class="text-xs font-bold text-text-muted uppercase tracking-widest mb-2 px-2">节点分布</div>
         <div class="space-y-2 px-1">`;
       for (const g of App.nodeGroups) {
-        const count = App.allNodesRaw.filter(n => n.groupId === g.id).length;
+        const count = App.allNodesRaw.filter((n: any) => n.groupId === g.id).length;
         const pct = totalNodes > 0 ? Math.round(count / totalNodes * 100) : 0;
         html += `<div>
           <div class="flex items-center justify-between mb-1">
@@ -160,8 +161,8 @@ export const Nodes = {
       </div>
       <div class="flex items-center gap-2 overflow-x-auto pb-1 md:pb-0">
         <span class="text-xs font-bold text-text-muted uppercase tracking-widest mr-2">状态:</span>
-        ${['', 'online', 'offline', 'pending'].map(val => {
-          const labels = { '': '全部', online: '在线', offline: '离线', pending: '待审批' };
+        ${(['', 'online', 'offline', 'pending'] as const).map(val => {
+          const labels: Record<string, string> = { '': '全部', online: '在线', offline: '离线', pending: '待审批' };
           return `<button class="px-3 py-1 ${App.nodeFilter.status === val ? 'bg-primary/15 text-primary' : 'text-text-muted hover:bg-elevated'} rounded-full text-xs font-semibold whitespace-nowrap transition-colors cursor-pointer" onclick="Nodes.onStatusFilter('${val}')">${labels[val]}</button>`;
         }).join('')}
       </div>
@@ -173,16 +174,16 @@ export const Nodes = {
   getFilteredList() {
     let list = [...App.allNodesRaw];
     const f = App.nodeFilter;
-    if (f.groupId === '__none') list = list.filter(n => !n.groupId);
-    else if (f.groupId) list = list.filter(n => n.groupId === f.groupId);
+    if (f.groupId === '__none') list = list.filter((n: any) => !n.groupId);
+    else if (f.groupId) list = list.filter((n: any) => n.groupId === f.groupId);
     if (f.keyword) {
       const kw = f.keyword.toLowerCase();
-      list = list.filter(n => (n.name||'').toLowerCase().includes(kw) || (n.tunAddr||'').includes(kw) || (n.id||'').toLowerCase().includes(kw));
+      list = list.filter((n: any) => (n.name||'').toLowerCase().includes(kw) || (n.tunAddr||'').includes(kw) || (n.id||'').toLowerCase().includes(kw));
     }
-    if (f.status === 'online') list = list.filter(n => n.status === 'approved' && App.nodesData.find(m => m.id === n.id)?.online);
-    else if (f.status === 'offline') list = list.filter(n => n.status === 'approved' && !App.nodesData.find(m => m.id === n.id)?.online);
-    else if (f.status) list = list.filter(n => n.status === f.status);
-    if (f.subnet && isValidCidr(f.subnet)) list = list.filter(n => n.tunAddr && cidrMatch(n.tunAddr, f.subnet));
+    if (f.status === 'online') list = list.filter((n: any) => n.status === 'approved' && App.nodesData.find((m: any) => m.id === n.id)?.online);
+    else if (f.status === 'offline') list = list.filter((n: any) => n.status === 'approved' && !App.nodesData.find((m: any) => m.id === n.id)?.online);
+    else if (f.status) list = list.filter((n: any) => n.status === f.status);
+    if (f.subnet && isValidCidr(f.subnet)) list = list.filter((n: any) => n.tunAddr && cidrMatch(n.tunAddr, f.subnet));
     return list;
   },
 
@@ -202,12 +203,12 @@ export const Nodes = {
 
     for (const node of pageNodes) {
       const checked = App.selectedIds.has(node.id) ? 'checked' : '';
-      const monitorNode = App.nodesData.find(n => n.id === node.id);
+      const monitorNode = App.nodesData.find((n: any) => n.id === node.id);
       const isOnline = monitorNode?.online;
       const isPending = node.status === 'pending';
       const isRejected = node.status === 'rejected';
       const isExpanded = App.selectedNodeId === node.id;
-      const group = App.nodeGroups.find(g => g.id === node.groupId);
+      const group = App.nodeGroups.find((g: any) => g.id === node.groupId);
       const si = monitorNode?.sysInfo || {};
       const cpuPct = si.cpuUsage ?? 0;
       const memPct = si.memTotalMB > 0 ? Math.round(si.memUsedMB / si.memTotalMB * 100) : 0;
@@ -308,12 +309,12 @@ export const Nodes = {
     html += `</div>`;
 
     // 保存已展开面板的 DOM，避免 innerHTML 销毁终端日志等有状态内容
-    let savedPanel = null;
+    let savedPanel: any = null;
     if (App.selectedNodeId) {
       const existingPanel = wrap.querySelector('.inline-panel');
       if (existingPanel && existingPanel.children.length > 0) {
         savedPanel = existingPanel;
-        existingPanel.remove(); // 从 DOM 分离但保留引用
+        existingPanel.remove();
       }
     }
 
@@ -321,26 +322,23 @@ export const Nodes = {
     refreshIcons();
     this.updateBatchToolbar();
 
-    // 渲染展开面板
+    // 渲染展开面板（委托 NodeDetailPanel）
     if (App.selectedNodeId) {
       const panel = wrap.querySelector('.inline-panel');
       if (panel) {
         if (savedPanel) {
-          // 复用已有面板 — 保留终端日志、OpenClaw 状态等
           panel.replaceWith(savedPanel);
-          // 概览 Tab 需要实时更新 CPU/内存数据
           const ts = this._getTabState(App.selectedNodeId);
           if (ts.tab === 'overview') {
-            const monitorNode = App.nodesData.find(n => n.id === App.selectedNodeId);
+            const monitorNode = App.nodesData.find((n: any) => n.id === App.selectedNodeId);
             if (monitorNode) {
               const contentEl = savedPanel.querySelector(`#inline-tab-content-${App.selectedNodeId}`);
-              if (contentEl) { contentEl.innerHTML = this._renderOverview(monitorNode); refreshIcons(); }
+              if (contentEl) { contentEl.innerHTML = NodeDetailPanel.renderOverview(monitorNode); refreshIcons(); }
             }
           }
         } else {
-          // 首次展开 — 完整渲染
-          const monitorNode = App.nodesData.find(n => n.id === App.selectedNodeId);
-          if (monitorNode) this.renderInlineDetail(panel, monitorNode);
+          const monitorNode = App.nodesData.find((n: any) => n.id === App.selectedNodeId);
+          if (monitorNode) NodeDetailPanel.renderInlineDetail(panel, monitorNode, this._getTabState(App.selectedNodeId));
           else panel.innerHTML = `<div class="text-sm text-text-muted flex items-center gap-2">${L('zap')} 无监控数据</div>`;
           refreshIcons();
         }
@@ -352,10 +350,10 @@ export const Nodes = {
   updateMetrics() {
     const allNodes = App.allNodesRaw || [];
     const monData = App.nodesData || [];
-    const online = monData.filter(n => n.online).length;
-    const approved = allNodes.filter(n => n.status === 'approved').length;
+    const online = monData.filter((n: any) => n.online).length;
+    const approved = allNodes.filter((n: any) => n.status === 'approved').length;
     const offline = approved - online;
-    const pending = allNodes.filter(n => n.status === 'pending').length;
+    const pending = allNodes.filter((n: any) => n.status === 'pending').length;
 
     // --- 顶部汇总卡片 ---
     const elTotal = $('#summary-total');
@@ -379,7 +377,7 @@ export const Nodes = {
     if (!wrap) return;
     for (const card of wrap.querySelectorAll('[data-node-id]')) {
       const nid = (card as HTMLElement).dataset.nodeId;
-      const mon = monData.find(n => n.id === nid);
+      const mon = monData.find((n: any) => n.id === nid);
       if (!mon) continue;
       const si = mon.sysInfo || {};
       const cpu = si.cpuUsage ?? 0;
@@ -411,540 +409,59 @@ export const Nodes = {
     if (App.selectedNodeId) {
       const ts = this._getTabState(App.selectedNodeId);
       if (ts.tab === 'overview') {
-        const mon = monData.find(n => n.id === App.selectedNodeId);
+        const mon = monData.find((n: any) => n.id === App.selectedNodeId);
         if (mon) {
           const contentEl = wrap.querySelector(`#inline-tab-content-${App.selectedNodeId}`);
-          if (contentEl) { contentEl.innerHTML = this._renderOverview(mon); refreshIcons(); }
+          if (contentEl) { contentEl.innerHTML = NodeDetailPanel.renderOverview(mon); refreshIcons(); }
         }
       }
     }
   },
 
-  renderInlineDetail(panel, node) {
-    if (!node.online) {
-      panel.innerHTML = `<div class="flex items-center gap-2 text-sm text-danger">${L('zap')} 节点不可达 — ${escHtml(node.error || '无上报数据')}
-        <button class="ml-3 px-3 py-1 text-xs rounded-lg bg-primary hover:bg-primary-light text-white transition cursor-pointer" onclick="Nodes.provision('${safeAttr(node.id)}')">重新配置</button>
-      </div>`;
-      refreshIcons();
-      return;
-    }
-
-    const ts = this._getTabState(node.id);
-    const tabs = [
-      { key: 'overview', icon: 'bar-chart-3', label: '概览' },
-      { key: 'claw', icon: 'bot', label: 'OpenClaw' },
-      { key: 'terminal', icon: 'terminal', label: '终端' },
-      { key: 'skills', icon: 'blocks', label: '技能' },
-    ];
-
-    let html = `<div>
-      <div class="flex gap-1 mb-4 border-b border-border-subtle pb-2">
-        ${tabs.map(t => `<button class="px-3 py-1.5 text-xs rounded-md transition cursor-pointer flex items-center gap-1.5 [&_svg]:w-3.5 [&_svg]:h-3.5 ${ts.tab === t.key ? 'bg-primary/10 text-primary font-medium' : 'text-text-secondary hover:text-text-primary hover:bg-elevated'}" onclick="Nodes.switchTab('${safeAttr(node.id)}','${t.key}')">${L(t.icon)} ${t.label}</button>`).join('')}
-      </div>
-      <div id="inline-tab-content-${safeAttr(node.id)}">`;
-
-    if (ts.tab === 'overview') html += this._renderOverview(node);
-    else if (ts.tab === 'terminal') html += this._renderTerminal(node);
-    else if (ts.tab === 'skills') html += this._renderSkills(node);
-    else html += `<div class="text-text-muted text-sm">${L('loader')} 加载中…</div>`;
-
-    html += `</div></div>`;
-    panel.innerHTML = html;
-    refreshIcons();
-
-    if (ts.tab === 'claw') this._loadClawTab(node.id, ts.clawSubTab);
-    if (ts.tab === 'terminal') this._initChat(node.id);
-  },
-
-  _renderOverview(node) {
-    const si = node.sysInfo || {};
-    const memPct = si.memTotalMB > 0 ? Math.round(si.memUsedMB / si.memTotalMB * 100) : 0;
-    const diskPct = si.diskUsePct ? parseInt(si.diskUsePct) : 0;
-    const cpuPct = si.cpuUsage ?? 0;
-    const peers = node.nodes || [];
-    const directP = peers.filter(p => p.status === 'Direct').length;
-    const totalIn = peers.reduce((s, n) => s + (n.inBytes || 0), 0);
-    const totalOut = peers.reduce((s, n) => s + (n.outBytes || 0), 0);
-    const oc = node.openclaw || {};
-    const clawRunning = oc.running === true;
-
-    let html = `<div class="space-y-4">`;
-    html += `<div><div class="text-xs font-bold text-primary uppercase tracking-widest mb-2">运行状态</div>
-      <div class="grid grid-cols-2 md:grid-cols-4 gap-2">
-        ${this._statCard(L('activity'), '采集延迟', `${node.sshLatencyMs||0}ms`, node.sshLatencyMs > 500 ? 'text-danger' : 'text-success')}
-        ${this._statCard(L('clock'), '运行时长', escHtml(si.uptime || '—'), '')}
-        ${this._statCard(L('bot'), 'OpenClaw', clawRunning ? '运行中' : '未运行', clawRunning ? 'text-success' : 'text-warning')}
-        ${this._statCard(L('monitor'), '系统', escHtml(si.hostname || '—'), 'text-primary', escHtml(si.os || '—'))}
-      </div></div>`;
-
-    html += `<div><div class="text-xs font-bold text-success uppercase tracking-widest mb-2">资源使用</div>
-      <div class="grid grid-cols-2 md:grid-cols-4 gap-2">
-        ${this._gaugeCard(L('cpu'), 'CPU', `${cpuPct}%`, cpuPct, si.cpuCores ? `${si.cpuCores} 核` : '')}
-        ${this._gaugeCard(L('memory-stick'), '内存', `${memPct}%`, memPct, si.memTotalMB > 0 ? `${si.memUsedMB}/${si.memTotalMB} MB` : '')}
-        ${this._gaugeCard(L('hard-drive'), '磁盘', `${diskPct}%`, diskPct, si.diskTotal ? `${escHtml(si.diskUsed)}/${escHtml(si.diskTotal)}` : '')}
-        ${this._statCard(L('wrench'), '内核', escHtml(si.kernel || '—'), '', escHtml(si.arch || '—'))}
-      </div></div>`;
-
-    html += `<div><div class="text-xs font-bold text-info uppercase tracking-widest mb-2">P2P 网络</div>
-      <div class="grid grid-cols-2 md:grid-cols-4 gap-2">
-        ${this._statCard(L('link'), '节点数', `${peers.length}`, 'text-primary', `直连 ${directP}`)}
-        ${this._statCard(L('zap'), '直连率', peers.length > 0 ? `${Math.round(directP/peers.length*100)}%` : '—', directP >= peers.length * 0.8 ? 'text-success' : 'text-warning')}
-        ${this._statCard(L('download'), '总流入', formatBytes(totalIn), 'text-primary')}
-        ${this._statCard(L('upload'), '总流出', formatBytes(totalOut), 'text-warning')}
-      </div></div>`;
-
-    if (peers.length) {
-      html += `<div><div class="text-xs font-bold text-text-secondary uppercase tracking-widest mb-2">GNB 节点 (${peers.length})</div>
-        <div class="overflow-x-auto"><table class="w-full text-xs"><thead><tr class="text-text-muted border-b border-border-subtle">
-          <th class="text-left py-1.5 px-2">UUID</th><th class="text-left py-1.5 px-2">TUN</th><th class="text-left py-1.5 px-2">状态</th><th class="text-left py-1.5 px-2">延迟</th><th class="text-left py-1.5 px-2">流入</th><th class="text-left py-1.5 px-2">流出</th>
-        </tr></thead><tbody>`;
-      for (const sn of peers) {
-        const sc = sn.status === 'Direct' ? 'text-success' : sn.status === 'Detecting' ? 'text-warning' : 'text-danger';
-        html += `<tr class="border-b border-border-subtle/50"><td class="py-1.5 px-2 font-mono">${escHtml(sn.uuid64||'—')}</td><td class="py-1.5 px-2">${escHtml(sn.tunAddr4||'—')}</td><td class="py-1.5 px-2 ${sc}">${escHtml(sn.status||'—')}</td><td class="py-1.5 px-2">${sn.latency4Usec ? `${(sn.latency4Usec/1000).toFixed(1)}ms` : '—'}</td><td class="py-1.5 px-2">${formatBytes(sn.inBytes||0)}</td><td class="py-1.5 px-2">${formatBytes(sn.outBytes||0)}</td></tr>`;
-      }
-      html += `</tbody></table></div></div>`;
-    }
-
-    html += `</div>`;
-    return html;
-  },
-
-  // @alpha: AI Ops Terminal — Installed Skills (Stitch UI)
-  _renderSkills(node) {
-    // 技能数据来自 allNodesRaw（SQLite 持久化层），而非 monitorNode（运行时指标）
-    const rawNode = App.allNodesRaw.find(n => n.id === node.id);
-    const installedSkills = rawNode?.skills || node.skills || [];
-    const nid = safeAttr(node.id);
-    
-    let html = `
-    <div class="px-6 pb-8 pt-4 bg-surface/30 rounded-xl border border-border-default/20">
-      <div class="flex items-center justify-between mb-8 border-b border-border-default/20 pb-4">
-        <h4 class="text-xl font-headline font-bold tracking-tight text-text-primary">Installed Skills</h4>
-        <div class="flex gap-2">
-          <button class="px-4 py-1.5 rounded-full bg-primary/10 text-primary hover:bg-primary hover:text-white text-xs font-bold uppercase tracking-wider flex items-center gap-2 transition-all cursor-pointer" onclick="App.switchPage('skills')">
-            <span class="[&_svg]:w-3.5 [&_svg]:h-3.5">${L('plus')}</span> 部署新技能
-          </button>
-        </div>
-      </div>
-    `;
-
-    if (installedSkills.length === 0) {
-      html += `
-        <div class="flex flex-col items-center justify-center py-12 text-text-muted">
-          <div class="w-16 h-16 rounded-full bg-surface mb-4 flex items-center justify-center border border-border-default/20">
-            <span class="[&_svg]:w-8 [&_svg]:h-8 opacity-50">${L('box')}</span>
-          </div>
-          <p class="text-sm">此节点暂未安装任何技能</p>
-          <button class="mt-4 px-4 py-1.5 rounded-full bg-primary/10 text-primary hover:bg-primary hover:text-white text-xs font-bold uppercase transition-all cursor-pointer" onclick="App.switchPage('skills')">
-            前往技能商店
-          </button>
-        </div>
-      `;
-    } else {
-      // 真实数据渲染
-      html += `<div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">`;
-      for (const skill of installedSkills) {
-        html += `
-          <div class="bg-elevated/40 border border-border-default/30 p-4 rounded-xl flex items-center justify-between group/chip transition-all hover:bg-elevated hover:border-primary/30">
-            <div class="flex items-center gap-3">
-              <div class="w-10 h-10 rounded-lg bg-surface flex items-center justify-center text-primary shadow-sm">
-                <span class="[&_svg]:w-5 [&_svg]:h-5">${L(skill.icon || 'box')}</span>
-              </div>
-              <div>
-                <p class="text-sm font-medium text-text-primary whitespace-nowrap overflow-hidden text-ellipsis w-24">${escHtml(skill.name || skill.id)}</p>
-                <p class="text-[10px] text-text-muted font-mono">${escHtml(skill.version || 'v1.0.0')}</p>
-              </div>
-            </div>
-            <button class="w-8 h-8 rounded-lg flex items-center justify-center text-danger opacity-0 group-hover/chip:opacity-100 hover:bg-danger/10 transition-all cursor-pointer" title="卸载" onclick="event.stopPropagation();Nodes.uninstallSkill('${nid}', '${safeAttr(skill.id)}')">
-              <span class="[&_svg]:w-4 [&_svg]:h-4">${L('trash-2')}</span>
-            </button>
-          </div>
-        `;
-      }
-      html += `</div>`;
-    }
-    html += `</div>`;
-    return html;
-  },
-
-  async uninstallSkill(nodeId, skillId) {
-    if (!confirm(`确认要卸载技能 ${skillId} 吗？`)) return;
-    try {
-      // 调用 Phase 4 后端卸载接口
-      await App.authFetch(`/api/nodes/${nodeId}/skills/${skillId}`, {
-        method: 'DELETE'
-      });
-      showToast('技能卸载命令已下发', 'success');
-      // 乐观更新：如果有真实的 skills 数组，将其剔除
-      const node = App.allNodesRaw.find(n => n.id === nodeId);
-      if (node && node.skills) {
-        node.skills = node.skills.filter(s => s.id !== skillId);
-      }
-      // 刷新 Tab
-      const ts = this._getTabState(nodeId);
-      if (ts.tab === 'skills') {
-        const wrap = document.getElementById(`inline-tab-content-${nodeId}`);
-        if (wrap) {
-          wrap.innerHTML = this._renderSkills(node || { id: nodeId, skills: [] });
-          refreshIcons();
-        }
-      }
-    } catch (e: any) {
-      console.error(e);
-      showToast(e.message || '技能卸载失败', 'error');
-    }
-  },
-
-  _statCard(icon, label, value, color, sub) {
-    return `<div class="bg-elevated rounded-lg border border-border-subtle p-3">
-      <div class="flex items-center gap-1.5 mb-1"><span class="[&_svg]:w-3.5 [&_svg]:h-3.5 text-text-muted">${icon}</span><span class="text-xs text-text-muted">${label}</span></div>
-      <div class="text-sm font-semibold ${color}">${value}</div>
-      ${sub ? `<div class="text-xs text-text-muted mt-0.5">${sub}</div>` : ''}
-    </div>`;
-  },
-
-  _gaugeCard(icon, label, value, pct, sub) {
-    const c = pctBg(pct);
-    return `<div class="bg-elevated rounded-lg border border-border-subtle p-3">
-      <div class="flex items-center gap-1.5 mb-1"><span class="[&_svg]:w-3.5 [&_svg]:h-3.5 text-text-muted">${icon}</span><span class="text-xs text-text-muted">${label}</span></div>
-      <div class="text-sm font-semibold ${pctColor(pct)}">${value}</div>
-      ${pct > 0 ? `<div class="gauge-bar mt-1.5"><div class="gauge-fill ${c}" style="width:${Math.min(pct,100)}%"></div></div>` : ''}
-      ${sub ? `<div class="text-xs text-text-muted mt-0.5">${sub}</div>` : ''}
-    </div>`;
-  },
-
-  // @alpha: AI Ops Terminal — Stitch 设计对齐
-  _renderTerminal(node) {
-    const shortcuts = [
-      { prompt: '请检查 GNB 和 OpenClaw 服务状态', icon: 'activity', label: '状态检查' },
-      { prompt: '请重启 GNB 服务', icon: 'refresh-cw', label: '重启 GNB' },
-      { prompt: '请查看 GNB 和 OpenClaw 最近 30 条日志', icon: 'file-text', label: '查看日志' },
-      { prompt: '请检查磁盘空间使用情况', icon: 'hard-drive', label: '磁盘用量' },
-      { prompt: '请查看系统性能概况（CPU/负载/进程）', icon: 'gauge', label: '性能' },
-      { prompt: '请查看内存使用情况', icon: 'memory-stick', label: '内存' },
-    ];
-    const maximized = this._termMaximized;
-    const hClass = maximized ? 'h-[calc(100vh-280px)]' : 'h-80';
-    const nid = safeAttr(node.id);
-    return `<div class="rounded-xl border border-border-default overflow-hidden flex flex-col bg-surface shadow-md" id="terminal-wrap-${nid}">
-      <!-- 深色头部栏 -->
-      <div class="flex items-center gap-3 px-4 py-2.5 bg-[#1a1b2e]">
-        <span class="text-white text-xs font-bold tracking-tight flex items-center gap-1.5 [&_svg]:w-3.5 [&_svg]:h-3.5">${L('terminal')} AI Ops Terminal</span>
-        <span id="term-status-${nid}" class="flex items-center gap-1.5 text-[10px] font-semibold text-emerald-400 uppercase tracking-widest"><span class="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse"></span>连接中</span>
-        <span class="px-2 py-0.5 rounded-md bg-white/10 text-white/80 text-[10px] font-mono">${escHtml(node.name || node.id)}</span>
-        <div class="ml-auto flex items-center gap-1">
-          <button class="p-1 rounded text-white/50 hover:text-white hover:bg-white/10 transition cursor-pointer [&_svg]:w-3.5 [&_svg]:h-3.5" onclick="Nodes.toggleTerminalSize('${nid}')" title="${maximized ? '还原' : '最大化'}">${L(maximized ? 'minimize-2' : 'maximize-2')}</button>
-        </div>
-      </div>
-      <!-- 快捷按钮栏 -->
-      <div class="flex items-center gap-1.5 px-4 py-2 border-b border-border-subtle bg-base overflow-x-auto">
-        ${shortcuts.map(s => `<button class="px-2.5 py-1 text-xs rounded-full border border-border-default hover:border-primary/40 hover:bg-primary/8 text-text-secondary hover:text-primary transition cursor-pointer flex items-center gap-1 whitespace-nowrap [&_svg]:w-3 [&_svg]:h-3" onclick="Nodes.quickCmd('${nid}','${safeAttr(s.prompt)}')">${L(s.icon)} ${s.label}</button>`).join('')}
-      </div>
-      <!-- 消息区域 -->
-      <div id="chat-messages-${nid}" class="overflow-y-auto px-4 py-4 space-y-4 scroll-smooth bg-surface ${hClass}">
-        <div class="flex gap-2.5 items-start"><div class="w-7 h-7 rounded-full signature-gradient flex items-center justify-center text-xs text-white flex-shrink-0 shadow-sm">AI</div><div class="bg-base border border-border-subtle rounded-xl rounded-tl-sm px-3.5 py-2.5 text-sm text-text-secondary leading-relaxed max-w-[85%]">你好！我是节点 <strong class="text-text-primary">${escHtml(node.name || node.id)}</strong> 的 AI 运维助手。用自然语言告诉我你需要做什么。</div></div>
-      </div>
-      <!-- 输入区域 -->
-      <div class="px-4 py-3 border-t border-border-default bg-base flex gap-2.5 items-center">
-        <input id="chat-input-${nid}" type="text" placeholder="用自然语言描述运维任务…" class="flex-1 px-4 py-2 text-sm rounded-xl bg-surface border border-border-default focus:border-primary focus:ring-2 focus:ring-primary/20 outline-none transition-[box-shadow,border-color] placeholder:text-text-muted" onkeydown="if(event.key==='Enter'){Nodes.sendChat('${nid}');event.preventDefault()}" />
-        <span class="hidden sm:flex items-center gap-1 px-2 py-1 rounded-md bg-elevated text-[10px] text-text-muted font-medium [&_svg]:w-3 [&_svg]:h-3">${L('bot')} Claude Code</span>
-        <button onclick="Nodes.sendChat('${nid}')" class="px-4 py-2 text-xs font-semibold rounded-xl signature-gradient text-white cursor-pointer flex items-center gap-1.5 [&_svg]:w-3.5 [&_svg]:h-3.5 hover:scale-[1.02] active:scale-95 transition-all shadow-sm shadow-primary/20">${L('send')} 发送</button>
-      </div>
-      <!-- 页脚 -->
-      <div class="px-4 py-1.5 text-center border-t border-border-subtle bg-base"><span class="text-[10px] text-text-muted font-medium">Powered by Claude Code · 命令通过 SSH 执行</span></div>
-    </div>`;
-  },
-
-  _termMaximized: false,
-
-  toggleTerminalSize(nodeId) {
-    this._termMaximized = !this._termMaximized;
-    const msgEl = document.getElementById(`chat-messages-${nodeId}`);
-    if (msgEl) {
-      msgEl.classList.toggle('h-80', !this._termMaximized);
-      msgEl.classList.toggle('h-[calc(100vh-280px)]', this._termMaximized);
-    }
-    const wrap = document.getElementById(`terminal-wrap-${nodeId}`);
-    if (wrap) {
-      const btn = wrap.querySelector('[title="最大化"], [title="还原"]');
-      if (btn) {
-        (btn as HTMLElement).title = this._termMaximized ? '还原' : '最大化';
-        btn.innerHTML = L(this._termMaximized ? 'minimize-2' : 'maximize-2');
-        refreshIcons();
-      }
-    }
-  },
-
-  // @alpha: 发送聊天消息
-  sendChat(nodeId) {
-    const input = document.getElementById(`chat-input-${nodeId}`);
-    if (!input) return;
-    const text = (input as HTMLInputElement).value.trim();
-    if (!text) return;
-    (input as HTMLInputElement).value = '';
-    const s = _chatSessions[nodeId];
-    if (!s || !s.ws || s.ws.readyState !== 1) {
-      this._appendMsg(nodeId, 'system', '⚠️ 未连接，请稍候重试');
-      return;
-    }
-    this._appendMsg(nodeId, 'user', text);
-    s.ws.send(JSON.stringify({ type: 'chat', text }));
-  },
-
-  // @alpha: 追加消息到聊天区域 — 三种角色样式
-  _appendMsg(nodeId, role, content) {
-    const box = document.getElementById(`chat-messages-${nodeId}`);
-    if (!box) return;
-    const div = document.createElement('div');
-    if (role === 'user') {
-      div.className = 'flex justify-end';
-      div.innerHTML = `<div class="px-3.5 py-2 rounded-xl rounded-tr-sm text-sm text-white max-w-[80%] signature-gradient shadow-sm">${this._escHtml(content)}</div>`;
-    } else if (role === 'ai') {
-      div.className = 'flex gap-2.5 items-start ai-msg';
-      div.innerHTML = `<div class="w-7 h-7 rounded-full signature-gradient flex items-center justify-center text-xs text-white flex-shrink-0 shadow-sm">AI</div><div class="bg-base border border-border-subtle rounded-xl rounded-tl-sm px-3.5 py-2.5 text-sm text-text-secondary leading-relaxed max-w-[85%] ai-text"></div>`;
-    } else {
-      div.className = 'flex justify-center';
-      div.innerHTML = `<span class="text-[10px] px-3 py-1 rounded-full bg-elevated text-text-muted font-medium">${this._escHtml(content)}</span>`;
-    }
-    box.appendChild(div);
-    box.scrollTop = box.scrollHeight;
-    return div;
-  },
-
-  // @alpha: 获取或创建当前 AI 响应气泡
-  _getOrCreateAiBubble(nodeId) {
-    const box = document.getElementById(`chat-messages-${nodeId}`);
-    if (!box) return null;
-    const last = box.querySelector('.ai-msg:last-child');
-    if (last) return last.querySelector('.ai-text');
-    const div = this._appendMsg(nodeId, 'ai', '');
-    return div?.querySelector('.ai-text') || null;
-  },
-
-  _escHtml(s) {
-    const d = document.createElement('div');
-    d.textContent = s;
-    return d.innerHTML;
-  },
-
-  // @alpha: 更新头部连接状态指示
-  _updateTermStatus(nodeId, connected) {
-    const el = document.getElementById(`term-status-${nodeId}`);
-    if (!el) return;
-    if (connected) {
-      el.className = 'flex items-center gap-1.5 text-[10px] font-semibold text-emerald-400 uppercase tracking-widest';
-      el.innerHTML = '<span class="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse"></span>已连接';
-    } else {
-      el.className = 'flex items-center gap-1.5 text-[10px] font-semibold text-red-400 uppercase tracking-widest';
-      el.innerHTML = '<span class="w-1.5 h-1.5 rounded-full bg-red-400"></span>已断开';
-    }
-  },
-
-  // @alpha: 初始化 AI Chat WebSocket
-  _initChat(nodeId) {
-    if (_chatSessions[nodeId]) return;
-    const msgBox = document.getElementById(`chat-messages-${nodeId}`);
-    if (!msgBox) return;
-
-    const proto = location.protocol === 'https:' ? 'wss' : 'ws';
-    const token = App.getToken();
-    // @security: 首条消息认证，不再通过 URL 传递 token（安全审计 H1 适配）
-    const ws = new WebSocket(`${proto}://${location.host}/ws/ai`);
-
-    let aiBuf = ''; // 累积当前 AI 响应文本
-
-    ws.onopen = () => {
-      // 发送认证消息
-      ws.send(JSON.stringify({ type: 'auth', token, nodeId }));
-      this._updateTermStatus(nodeId, true);
-      this._appendMsg(nodeId, 'system', '✓ AI 助手已连接');
-    };
-
-    ws.onmessage = (e) => {
-      let chunk;
-      try { chunk = JSON.parse(e.data); } catch (_) { return; }
-
-      // @alpha: stream-json 事件处理
-      if (chunk.type === 'ack') {
-        aiBuf = '';
-        return;
-      }
-      if (chunk.type === 'busy') {
-        this._appendMsg(nodeId, 'system', chunk.text);
-        return;
-      }
-      if (chunk.type === 'error') {
-        this._appendMsg(nodeId, 'system', `❌ ${chunk.text || '执行失败'}`);
-        return;
-      }
-      if (chunk.type === 'done') {
-        aiBuf = '';
-        return;
-      }
-
-      // Claude stream-json 事件：assistant（文本）、tool_use（命令执行）、tool_result
-      const bubble = this._getOrCreateAiBubble(nodeId);
-      if (!bubble) return;
-
-      if (chunk.type === 'assistant' && chunk.message?.content) {
-        for (const block of chunk.message.content) {
-          if (block.type === 'text') {
-            aiBuf += block.text;
-            bubble.innerHTML = this._renderMd(aiBuf);
-          }
-        }
-      } else if (chunk.type === 'content_block_delta') {
-        if (chunk.delta?.type === 'text_delta') {
-          aiBuf += chunk.delta.text;
-          bubble.innerHTML = this._renderMd(aiBuf);
-        }
-      } else if (chunk.type === 'result') {
-        // 最终结果 — 完整替换
-        const text = chunk.result || '';
-        if (text) {
-          aiBuf = text;
-          bubble.innerHTML = this._renderMd(aiBuf);
-        }
-        aiBuf = '';
-        // 后续新消息需要新气泡
-      }
-
-      msgBox.scrollTop = msgBox.scrollHeight;
-    };
-
-    ws.onerror = () => {
-      this._updateTermStatus(nodeId, false);
-      this._appendMsg(nodeId, 'system', '❌ 连接错误');
-    };
-
-    ws.onclose = (e) => {
-      this._updateTermStatus(nodeId, false);
-      this._appendMsg(nodeId, 'system', `连接已断开 (${e.code})`);
-      delete _chatSessions[nodeId];
-    };
-
-    _chatSessions[nodeId] = { ws };
-  },
-
-  // @alpha: Markdown → HTML — 深色代码块 + Tailwind 类名
-  _renderMd(text) {
-    let html = this._escHtml(text);
-    // 代码块 — 深色背景
-    html = html.replace(/```([\s\S]*?)```/g, '<pre class="bg-[#1e1e2e] text-emerald-300 px-3.5 py-3 rounded-lg text-xs overflow-x-auto my-2 font-mono leading-relaxed">$1</pre>');
-    // 行内代码
-    html = html.replace(/`([^`]+)`/g, '<code class="bg-elevated text-primary px-1.5 py-0.5 rounded text-xs font-mono">$1</code>');
-    // 加粗
-    html = html.replace(/\*\*([^*]+)\*\*/g, '<strong class="text-text-primary font-semibold">$1</strong>');
-    // 换行
-    html = html.replace(/\n/g, '<br>');
-    return html;
-  },
-
-  _destroyChat(nodeId) {
-    const s = _chatSessions[nodeId];
-    if (!s) return;
-    if (s.ws && s.ws.readyState <= 1) s.ws.close();
-    delete _chatSessions[nodeId];
-  },
-
-  async _loadClawTab(nodeId, subTab) {
-    const container = document.getElementById(`inline-tab-content-${nodeId}`);
-    if (!container) return;
-    const subTabs = [
-      { key: 'status', icon: 'activity', label: '状态' },
-      { key: 'models', icon: 'cpu', label: '模型' },
-      { key: 'config', icon: 'settings', label: '配置' },
-      { key: 'sessions', icon: 'message-square', label: '会话' },
-      { key: 'channels', icon: 'radio', label: '渠道' },
-    ];
-    let html = `<div class="flex gap-1 mb-3">${subTabs.map(st => `<button class="px-2.5 py-1 text-xs rounded transition cursor-pointer ${subTab === st.key ? 'bg-primary/10 text-primary' : 'text-text-muted hover:text-text-primary hover:bg-elevated'}" onclick="Nodes.switchClawSubTab('${safeAttr(nodeId)}','${st.key}')">${L(st.icon)} ${st.label}</button>`).join('')}</div>
-    <div id="claw-content-${safeAttr(nodeId)}" class="text-sm text-text-muted">${L('loader')} 加载中…</div>`;
-    container.innerHTML = html;
-    refreshIcons();
-
-    const nodeConfig = App.allNodesRaw.find(n => n.id === nodeId);
-    const detail = document.getElementById(`claw-content-${nodeId}`);
-    if (!nodeConfig?.clawToken) {
-      const monNode = App.nodesData.find(n => n.id === nodeId);
-      const oc = monNode?.openclaw;
-      if (oc && oc.running && oc.config) {
-        const gw = oc.config.gateway || {};
-        const tokenPreview = gw.auth?.token ? gw.auth.token.substring(0, 12) + '…' : '无';
-        detail.innerHTML = `
-          <div class="space-y-3">
-            <div class="grid grid-cols-2 md:grid-cols-3 gap-3">
-              ${this._statCard(L('activity'), '状态', oc.running ? '运行中' : '未运行', oc.running ? 'text-success' : 'text-warning')}
-              ${this._statCard(L('hash'), 'PID', oc.pid || '-', '')}
-              ${this._statCard(L('radio'), '端口', gw.port || '-', '')}
-              ${this._statCard(L('key-round'), 'Token', tokenPreview, 'font-mono text-xs')}
-              ${this._statCard(L('folder'), '配置路径', oc.configPath || '-', 'text-xs')}
-              ${this._statCard(L('wifi'), 'RPC 健康', oc.rpcOk ? '正常' : '不可用', oc.rpcOk ? 'text-success' : 'text-warning')}
-            </div>
-            <details class="text-xs">
-              <summary class="cursor-pointer text-text-muted hover:text-text-primary transition">查看完整配置 JSON</summary>
-              <pre class="bg-base rounded-lg p-3 mt-2 overflow-x-auto">${escHtml(JSON.stringify(oc.config, null, 2))}</pre>
-            </details>
-            <div class="text-xs text-text-muted">${L('info')} Token 将在下次 Agent 上报时自动同步到配置表</div>
-          </div>`;
-      } else if (oc && !oc.running) {
-        detail.innerHTML = `<div class="text-warning text-sm">${L('alert-triangle')} OpenClaw 未运行 (进程未检测到)</div>`;
-      } else {
-        detail.innerHTML = `<div class="text-text-muted text-sm">${L('info')} 未检测到 OpenClaw 信息，等待 Agent 上报…</div>`;
-      }
-      refreshIcons();
-      return;
-    }
-
-    try {
-      const res = await App.authFetch(`/api/claw/${encodeURIComponent(nodeId)}/${subTab}`);
-      const data = await res.json();
-      if (data.error) { detail.innerHTML = `<div class="text-danger text-sm">${escHtml(data.error)}</div>`; return; }
-      detail.innerHTML = `<pre class="text-xs bg-base rounded-lg p-3 overflow-x-auto max-h-60">${escHtml(JSON.stringify(data, null, 2))}</pre>`;
-    } catch (err) {
-      detail.innerHTML = `<div class="text-danger text-sm">请求失败: ${escHtml(err.message)}</div>`;
-    }
-    refreshIcons();
-  },
-
-  // --- 交互 ---
-  _getTabState(nodeId) {
+  // --- 交互（委托 NodeDetailPanel） ---
+  _getTabState(nodeId: any) {
     if (!nodeTabStates[nodeId]) nodeTabStates[nodeId] = { tab: 'overview', clawSubTab: 'status' };
     return nodeTabStates[nodeId];
   },
 
-  switchTab(nodeId, tab) {
+  switchTab(nodeId: any, tab: any) {
     this._getTabState(nodeId).tab = tab;
-    const monitorNode = App.nodesData.find(n => n.id === nodeId);
+    const monitorNode = App.nodesData.find((n: any) => n.id === nodeId);
     const panel = document.querySelector('.inline-panel');
-    if (panel && monitorNode) this.renderInlineDetail(panel, monitorNode);
+    if (panel && monitorNode) NodeDetailPanel.renderInlineDetail(panel, monitorNode, this._getTabState(nodeId));
   },
 
-  switchClawSubTab(nodeId, subTab) {
+  switchClawSubTab(nodeId: any, subTab: any) {
     this._getTabState(nodeId).clawSubTab = subTab;
-    this._loadClawTab(nodeId, subTab);
+    NodeDetailPanel.loadClawTab(nodeId, subTab);
   },
 
-  filterByGroup(gid) { App.nodeFilter.groupId = gid; App.nodePagination.page = 1; App.selectedIds.clear(); this.renderSidebar(); this.renderTable(); this.renderPagination(); },
-  onSearch(v) { App.nodeFilter.keyword = v; App.nodePagination.page = 1; this.renderTable(); this.renderPagination(); },
-  onStatusFilter(v) { App.nodeFilter.status = v; App.nodePagination.page = 1; this.renderToolbar(); this.renderTable(); this.renderPagination(); },
-  expandRow(id) {
+  // 委托 AI Chat / Terminal 到 NodeDetailPanel
+  sendChat(nodeId: any) { NodeDetailPanel.sendChat(nodeId); },
+  quickCmd(nodeId: any, prompt: any) { NodeDetailPanel.quickCmd(nodeId, prompt); },
+  toggleTerminalSize(nodeId: any) { NodeDetailPanel.toggleTerminalSize(nodeId); },
+  uninstallSkill(nodeId: any, skillId: any) { NodeDetailPanel.uninstallSkill(nodeId, skillId); },
+
+  filterByGroup(gid: any) { App.nodeFilter.groupId = gid; App.nodePagination.page = 1; App.selectedIds.clear(); this.renderSidebar(); this.renderTable(); this.renderPagination(); },
+  onSearch(v: any) { App.nodeFilter.keyword = v; App.nodePagination.page = 1; this.renderTable(); this.renderPagination(); },
+  onStatusFilter(v: any) { App.nodeFilter.status = v; App.nodePagination.page = 1; this.renderToolbar(); this.renderTable(); this.renderPagination(); },
+  expandRow(id: any) {
     const prev = App.selectedNodeId;
     App.selectedNodeId = prev === id ? null : id;
-    // 收起旧节点的 xterm 会话
-    if (prev && prev !== id) this._destroyChat(prev);
-    if (prev === id) this._destroyChat(id);
+    if (prev && prev !== id) NodeDetailPanel.destroyChat(prev);
+    if (prev === id) NodeDetailPanel.destroyChat(id);
     this.renderTable();
   },
 
-  goPage(p) { App.nodePagination.page = p; App.selectedIds.clear(); this.renderTable(); this.renderPagination(); },
-  toggleSelectAll(checked) {
+  goPage(p: any) { App.nodePagination.page = p; App.selectedIds.clear(); this.renderTable(); this.renderPagination(); },
+  toggleSelectAll(checked: any) {
     const all = this.getFilteredList();
     const { page, pageSize } = App.nodePagination;
     const pageNodes = all.slice((page-1)*pageSize, (page-1)*pageSize+pageSize);
     for (const n of pageNodes) { if (checked) App.selectedIds.add(n.id); else App.selectedIds.delete(n.id); }
     this.renderTable();
   },
-  toggleSelect(id, checked) { if (checked) App.selectedIds.add(id); else App.selectedIds.delete(id); this.updateBatchToolbar(); },
+  toggleSelect(id: any, checked: any) { if (checked) App.selectedIds.add(id); else App.selectedIds.delete(id); this.updateBatchToolbar(); },
 
   updateBatchToolbar() {
     const bar = $('#batch-toolbar');
@@ -983,59 +500,59 @@ export const Nodes = {
   },
 
   // --- API 操作 ---
-  async approve(id) {
+  async approve(id: any) {
     (event?.target as HTMLElement)?.closest('button')?.setAttribute('disabled', '');
     try {
       const res = await App.authFetch(`/api/enroll/${encodeURIComponent(id)}/approve`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' });
       const data = await res.json();
       if (data.success) {
-        const node = App.allNodesRaw.find(n => n.id === id);
+        const node = App.allNodesRaw.find((n: any) => n.id === id);
         if (node) { node.status = 'approved'; node.tunAddr = data.tunAddr || node.tunAddr; }
-        App.pendingNodes = App.pendingNodes.filter(n => n.id !== id);
+        App.pendingNodes = App.pendingNodes.filter((n: any) => n.id !== id);
         this.render($('#main-content'));
         showToast(`✅ 节点 ${id} 已审批通过`);
       } else showToast(`❌ 审批失败: ${data.message || '未知错误'}`, 'error');
-    } catch (e) { showToast(`❌ 审批失败: ${e.message}`, 'error'); }
+    } catch (e: any) { showToast(`❌ 审批失败: ${e.message}`, 'error'); }
   },
 
-  async reject(id) {
+  async reject(id: any) {
     (event?.target as HTMLElement)?.closest('button')?.setAttribute('disabled', '');
     try {
       const res = await App.authFetch(`/api/enroll/${encodeURIComponent(id)}/reject`, { method: 'POST' });
       const data = await res.json();
       if (data.success) {
-        App.allNodesRaw = App.allNodesRaw.filter(n => n.id !== id);
-        App.pendingNodes = App.pendingNodes.filter(n => n.id !== id);
+        App.allNodesRaw = App.allNodesRaw.filter((n: any) => n.id !== id);
+        App.pendingNodes = App.pendingNodes.filter((n: any) => n.id !== id);
         this.render($('#main-content'));
         showToast(`节点 ${id} 已拒绝并删除`);
       } else showToast(`❌ 拒绝失败: ${data.message}`, 'error');
-    } catch (e) { showToast(`❌ 拒绝失败: ${e.message}`, 'error'); }
+    } catch (e: any) { showToast(`❌ 拒绝失败: ${e.message}`, 'error'); }
   },
 
-  async batchAction(action) {
+  async batchAction(action: any) {
     const ids = [...App.selectedIds];
-    const labels = { approve: '审批', reject: '拒绝', remove: '删除' };
+    const labels: Record<string, string> = { approve: '审批', reject: '拒绝', remove: '删除' };
     if (!confirm(`确认${labels[action]} ${ids.length} 个节点？`)) return;
     try {
       const res = await App.authFetch('/api/enroll/batch', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ action, ids }) });
       const data = await res.json();
       const succeeded = new Set(data.succeeded || []);
       if (action === 'remove') {
-        App.allNodesRaw = App.allNodesRaw.filter(n => !succeeded.has(n.id));
-        App.pendingNodes = App.pendingNodes.filter(n => !succeeded.has(n.id));
+        App.allNodesRaw = App.allNodesRaw.filter((n: any) => !succeeded.has(n.id));
+        App.pendingNodes = App.pendingNodes.filter((n: any) => !succeeded.has(n.id));
       } else {
-        App.allNodesRaw.forEach(n => { if (succeeded.has(n.id)) n.status = action === 'approve' ? 'approved' : 'rejected'; });
+        App.allNodesRaw.forEach((n: any) => { if (succeeded.has(n.id)) n.status = action === 'approve' ? 'approved' : 'rejected'; });
       }
       App.selectedIds.clear();
       this.render($('#main-content'));
       showToast(`${labels[action]}完成: ${data.succeeded?.length||0} 成功, ${data.failed?.length||0} 失败`);
-    } catch (e) { showToast(`操作失败: ${e.message}`, 'error'); }
+    } catch (e: any) { showToast(`操作失败: ${e.message}`, 'error'); }
   },
 
-  async provision(id) { /* placeholder */ },
+  async provision(id: any) { /* placeholder */ },
 
-  showEditModal(id) {
-    const node = App.allNodesRaw.find(n => n.id === id);
+  showEditModal(id: any) {
+    const node = App.allNodesRaw.find((n: any) => n.id === id);
     if (!node) return;
     Modal.show(`
       <h3 class="text-lg font-bold font-headline mb-6">编辑节点</h3>
@@ -1067,7 +584,7 @@ export const Nodes = {
     `);
   },
 
-  async saveEdit(e, id) {
+  async saveEdit(e: any, id: any) {
     e.preventDefault();
     const form = $('#edit-node-form');
     if (!(form as HTMLFormElement).checkValidity()) { (form as HTMLFormElement).reportValidity(); return; }
@@ -1081,36 +598,25 @@ export const Nodes = {
       const res = await fetch(`/api/nodes/${encodeURIComponent(id)}`, { method: 'PUT', headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + App.getToken() }, body: JSON.stringify(body) });
       const data = await res.json();
       if (!res.ok) { errEl.textContent = data.hint || data.error || '保存失败'; errEl.classList.remove('hidden'); (btn as HTMLButtonElement).disabled = false; (btn as HTMLButtonElement).textContent = '保存'; return; }
-      const node = App.allNodesRaw.find(n => n.id === id);
+      const node = App.allNodesRaw.find((n: any) => n.id === id);
       if (node) Object.assign(node, body);
       App.closeModal();
       this.renderTable(); this.renderPagination();
     } catch (err: any) { errEl.textContent = '网络错误: ' + err.message; errEl.classList.remove('hidden'); (btn as HTMLButtonElement).disabled = false; (btn as HTMLButtonElement).textContent = '保存'; }
   },
 
-  showMoveModal(id) {
+  showMoveModal(id: any) {
     let html = `<h3 class="text-lg font-bold font-headline mb-6">移动到分组</h3>
       <div class="space-y-1 mb-4">
         <div class="px-4 py-3 rounded-lg text-sm cursor-pointer hover:bg-elevated transition text-text-secondary" onclick="Nodes.moveTo('${safeAttr(id)}',null)">取消分组</div>
-        ${App.nodeGroups.map(g => `<div class="px-4 py-3 rounded-lg text-sm cursor-pointer hover:bg-elevated transition text-text-secondary flex items-center gap-2" onclick="Nodes.moveTo('${safeAttr(id)}','${safeAttr(g.id)}')">
+        ${App.nodeGroups.map((g: any) => `<div class="px-4 py-3 rounded-lg text-sm cursor-pointer hover:bg-elevated transition text-text-secondary flex items-center gap-2" onclick="Nodes.moveTo('${safeAttr(id)}','${safeAttr(g.id)}')">
           <span class="w-2.5 h-2.5 rounded-full" style="background:${escHtml(g.color)}"></span>${escHtml(g.name)}</div>`).join('')}
       </div>
       <div class="flex justify-end"><button class="px-5 py-2.5 text-sm font-semibold text-text-muted hover:bg-elevated rounded-lg transition cursor-pointer" onclick="App.closeModal()">取消</button></div>`;
     Modal.show(html);
   },
 
-  async moveTo(id, gid) {
-    try { await App.authFetch(`/api/enroll/${encodeURIComponent(id)}/group`, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ groupId: gid }) }); App.closeModal(); } catch (e) { showToast(`移动失败: ${e.message}`, 'error'); }
-  },
-
-  // @alpha: 快捷按钮 — 发送自然语言描述给 Claude
-  quickCmd(nodeId, prompt) {
-    const s = _chatSessions[nodeId];
-    if (!s || !s.ws || s.ws.readyState !== 1) {
-      this._appendMsg(nodeId, 'system', '⚠️ AI 助手未连接');
-      return;
-    }
-    this._appendMsg(nodeId, 'user', prompt);
-    s.ws.send(JSON.stringify({ type: 'chat', text: prompt }));
+  async moveTo(id: any, gid: any) {
+    try { await App.authFetch(`/api/enroll/${encodeURIComponent(id)}/group`, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ groupId: gid }) }); App.closeModal(); } catch (e: any) { showToast(`移动失败: ${e.message}`, 'error'); }
   },
 };
