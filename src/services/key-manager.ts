@@ -6,6 +6,7 @@ const path = require('path');
 const { execSync } = require('child_process');
 const { resolvePaths, ensureDataDirs } = require('./data-paths');
 const NodeStore = require('./node-store');
+const GnbConfig = require('./gnb-config');
 const { createLogger } = require('./logger');
 const log = createLogger('KeyManager');
 
@@ -37,6 +38,7 @@ class KeyManager {
   gnbTunAddr: string;
   gnbIndexAddr: string;
   store: any;
+  _gnb: any;
   passcodes: Map<string, any>;
   enrollTokens: Map<string, any>;
   onApproval: Function | null;
@@ -65,6 +67,15 @@ class KeyManager {
 
     // @alpha V2: SQLite 存储层
     this.store = new NodeStore(paths.registry.nodesDb);
+
+    // GNB 配置管理（委托）
+    this._gnb = new GnbConfig({
+      gnbNodeId: this.gnbNodeId,
+      gnbConfDir: this.gnbConfDir,
+      gnbTunAddr: this.gnbTunAddr,
+      gnbIndexAddr: this.gnbIndexAddr,
+      store: this.store,
+    });
 
     /** @type {Map<string, {passcode: string, createdAt: string, used: boolean}>} */
     this.passcodes = new Map();
@@ -276,7 +287,7 @@ class KeyManager {
     if (node.status === 'approved') return { success: true, message: '已审批', tunAddr: node.tunAddr };
 
     // 分配 TUN 地址：优先手动指定，否则自动分配
-    const tunAddr = options.tunAddr || node.tunAddr || this._nextAvailableIp();
+    const tunAddr = options.tunAddr || node.tunAddr || this._gnb.nextAvailableIp();
     const gnbNodeId = options.gnbNodeId || node.gnbNodeId;
 
     this.store.update(nodeId, {
@@ -290,7 +301,7 @@ class KeyManager {
     const updated = this.store.findById(nodeId);
 
     // 自动更新 Console 的 GNB 配置
-    this._updateGnbConfig(updated);
+    this._gnb.updateGnbConfig(updated);
 
     if (this.onApproval) this.onApproval(this.getApprovedNodesConfig());
     if (this.onChange) this.onChange('approve', nodeId);
@@ -298,152 +309,12 @@ class KeyManager {
     return { success: true, message: `节点 ${nodeId} 已通过审批`, tunAddr: updated.tunAddr, gnbNodeId: updated.gnbNodeId };
   }
 
-  /**
-   * 生成全量 address.conf（index + 所有已审批节点）
-   * @returns {string} address.conf 完整内容
-   */
-  generateFullAddressConf() {
-    // 读取 index 行 (i|0|公网IP|端口)
-    const addressConfPath = path.join(this.gnbConfDir, 'address.conf');
-    let indexLine = `i|0|${this.gnbIndexAddr || '0.0.0.0'}|9001`;
-    try {
-      if (fs.existsSync(addressConfPath)) {
-        const existing = fs.readFileSync(addressConfPath, 'utf8');
-        const match = existing.match(/^i\|.*$/m);
-        if (match) indexLine = match[0];
-      }
-    } catch (_e) { log.debug('配置解析失败，使用默认值', (_e as Error)?.message); }
-
-    const lines = [indexLine];
-    // Console 自身
-    lines.push(`${this.gnbNodeId}|${this.gnbTunAddr}|255.0.0.0`);
-    // 所有已审批节点（从 SQLite 查询）
-    for (const node of this.store.approvedWithGnb()) {
-      if (node.tunAddr) {
-        lines.push(`${node.gnbNodeId}|${node.tunAddr}|${node.netmask || '255.0.0.0'}`);
-      }
-    }
-    return lines.join('\n') + '\n';
-  }
-
-  /**
-   * 审批后更新 Console 的 GNB 配置（全量重写）
-   * @param {object} node - 已审批的节点
-   */
-  _updateGnbConfig(node: any) {
-    if (!node.tunAddr) return;
-
-    if (!node.gnbNodeId) {
-      const gnbNodeId = this._nextGnbNodeId();
-      this.store.update(node.id, { gnbNodeId });
-      node.gnbNodeId = gnbNodeId;
-    }
-
-    this._writeFullGnbConf();
-  }
-
-  /**
-   * 全量重写 index 侧 route.conf + address.conf + 重启 GNB
-   * @private
-   */
-  _writeFullGnbConf() {
-    try {
-      if (!fs.existsSync(this.gnbConfDir)) {
-        log.warn(`配置目录不存在: ${this.gnbConfDir}，跳过`);
-        return;
-      }
-      const fullConf = this.generateFullAddressConf();
-      // address.conf = 全量（含 i| 行）
-      fs.writeFileSync(path.join(this.gnbConfDir, 'address.conf'), fullConf);
-      // route.conf = 全量（去掉 i| 行）
-      const routeContent = fullConf.split('\n').filter(l => !l.startsWith('i|')).join('\n');
-      fs.writeFileSync(path.join(this.gnbConfDir, 'route.conf'), routeContent);
-      log.info('GNB 配置已全量重写');
-
-      try {
-        execSync('systemctl restart gnb', { timeout: 10000 });
-        log.info('GNB 服务已重启');
-      } catch (e: any) {
-        log.warn(`GNB 重启跳过: ${e.message}`);
-      }
-    } catch (err: any) {
-      log.error(`GNB 全量重写失败: ${err.message}`);
-    }
-  }
-
-  /**
-   * 自动分配下一个 GNB 节点 ID（从 1002 开始，Console 自身是 1001）
-   */
-  _nextGnbNodeId() {
-    const allNodes = this.store.all();
-    const usedIds = allNodes
-      .filter((n: any) => n.gnbNodeId)
-      .map((n: any) => parseInt(n.gnbNodeId, 10));
-    const consoleId = parseInt(this.gnbNodeId, 10);
-    usedIds.push(consoleId);
-    return String(Math.max(...usedIds) + 1);
-  }
-
-  /**
-   * 自动分配下一个可用 TUN IP 地址
-   * 策略：10.1.0.x → 10.1.1.x → ... → 10.255.255.x 顺序填充
-   * 跳过 10.0.x.x 避免与常见云厂商内网 10.0.0.0/22 冲突
-   * @returns {string} 如 '10.1.0.2'
-   */
-  _nextAvailableIp() {
-    const usedIps = this.store.allTunAddrs();
-    if (this.gnbTunAddr) usedIps.add(this.gnbTunAddr);
-
-    // 从 10.1.0.x 开始，跳过 10.0.x.x
-    for (let b = 1; b <= 255; b++) {
-      for (let c = 0; c <= 255; c++) {
-        const start = (b === 1 && c === 0) ? 2 : 1; // 10.1.0.0/1 跳过
-        for (let d = start; d <= 254; d++) {
-          const candidate = `10.${b}.${c}.${d}`;
-          if (!usedIps.has(candidate)) return candidate;
-        }
-      }
-    }
-    throw new Error('IP 地址池已耗尽');
-  }
-
-  /**
-   * 获取 Console GNB 节点的 Ed25519 公钥
-   */
-  getGnbPublicKey() {
-    const pubKeyPath = path.join(this.gnbConfDir, 'security', `${this.gnbNodeId}.public`);
-    try {
-      return fs.readFileSync(pubKeyPath, 'utf8').trim();
-    } catch {
-      return null;
-    }
-  }
-
-  /**
-   * 保存终端节点的 GNB 公钥到 Console 的 ed25519 目录
-   * @param {string} nodeId
-   * @param {string} pubKey - hex 编码的 Ed25519 公钥
-   */
-  saveNodeGnbPubkey(nodeId: any, pubKey: any) {
-    const node = this.store.findById(nodeId);
-    if (!node || !node.gnbNodeId) {
-      return { success: false, message: '节点不存在或未分配 GNB ID' };
-    }
-    const ed25519Dir = path.join(this.gnbConfDir, 'ed25519');
-    if (!fs.existsSync(ed25519Dir)) fs.mkdirSync(ed25519Dir, { recursive: true });
-    const keyPath = path.join(ed25519Dir, `${node.gnbNodeId}.public`);
-    fs.writeFileSync(keyPath, pubKey.trim());
-    log.info(`已保存节点 ${nodeId} (gnb ${node.gnbNodeId}) 的公钥`);
-
-    // 保存公钥后重启 GNB 以加载
-    try {
-      execSync('systemctl restart gnb', { timeout: 10000 });
-    } catch (e: any) {
-      log.warn(`GNB 重启服务跳过: ${e.message}`);
-    }
-
-    return { success: true, message: '公钥已保存' };
-  }
+  // ═══════════════════════════════════════
+  // GNB 配置管理（委托给 GnbConfig）
+  // ═══════════════════════════════════════
+  generateFullAddressConf() { return this._gnb.generateFullAddressConf(); }
+  getGnbPublicKey() { return this._gnb.getGnbPublicKey(); }
+  saveNodeGnbPubkey(nodeId: any, pubKey: any) { return this._gnb.saveNodeGnbPubkey(nodeId, pubKey); }
 
   /**
    * 管理员拒绝
@@ -453,7 +324,7 @@ class KeyManager {
     const node = this.store.findById(nodeId);
     if (!node) return { success: false, message: '节点不存在' };
     this.store.remove(nodeId);
-    this._writeFullGnbConf(); // 同步 address.conf
+    this._gnb.writeFullGnbConf(); // 同步 address.conf
     if (this.onChange) this.onChange('reject', nodeId);
     return { success: true, message: `节点 ${nodeId} 已拒绝并删除` };
   }
@@ -464,7 +335,7 @@ class KeyManager {
    */
   removeNode(nodeId: any) {
     this.store.remove(nodeId);
-    this._writeFullGnbConf(); // 同步 address.conf
+    this._gnb.writeFullGnbConf(); // 同步 address.conf
     if (this.onChange) this.onChange('remove', nodeId);
     return { success: true, message: `节点 ${nodeId} 已删除` };
   }
@@ -550,7 +421,7 @@ class KeyManager {
     // tunAddr 变更时同步 GNB 配置
     if (changedFields.includes('tunAddr')) {
       const updatedNode = this.store.findById(nodeId);
-      if (updatedNode && updatedNode.gnbNodeId) this._updateGnbAddressConf(updatedNode);
+      if (updatedNode && updatedNode.gnbNodeId) this._gnb.updateGnbAddressConf(updatedNode);
     }
 
     // 触发更新回调
@@ -572,14 +443,7 @@ class KeyManager {
     return { success: true, message: '技能列表已持久化' };
   }
 
-  /**
-   * 编辑 tunAddr 时重写 GNB 配置（全量模式）
-   * @private
-   */
-  _updateGnbAddressConf(node: any) {
-    if (!node.tunAddr || !node.gnbNodeId) return;
-    this._writeFullGnbConf();
-  }
+
 
   /**
    * 获取全部节点（含状态）
