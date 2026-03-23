@@ -9,12 +9,11 @@ import { App } from '../core';
 let metricsRange = '1h';
 let metricsSummary = null;
 
-function switchMetricsRange(range) {
-  metricsRange = range;
-  Dashboard.render($('#main-content'));
-}
-
 export const Dashboard = {
+  switchMetricsRange(range: string) {
+    metricsRange = range;
+    Dashboard.render($('#main-content'));
+  },
   async render(container) {
     const { nodesData, pendingNodes, nodeGroups } = App;
     const online = nodesData.filter(n => n.online).length;
@@ -107,7 +106,7 @@ export const Dashboard = {
           <p class="text-sm text-text-muted mt-1">跨节点聚合 CPU、内存、延迟数据</p>
         </div>
         <div class="flex gap-2">
-          ${['1h','6h','24h'].map(r => `<button class="px-4 py-2 rounded-lg text-xs font-medium transition cursor-pointer ${metricsRange === r ? 'signature-gradient text-white' : 'bg-elevated text-text-secondary hover:bg-surface-container'}" onclick="switchMetricsRange('${r}')">${r}</button>`).join('')}
+          ${['1h','6h','24h'].map(r => `<button class="px-4 py-2 rounded-lg text-xs font-medium transition cursor-pointer ${metricsRange === r ? 'signature-gradient text-white' : 'bg-elevated text-text-secondary hover:bg-surface-container'}" onclick="Dashboard.switchMetricsRange('${r}')">${r}</button>`).join('')}
         </div>
       </div>
       <div class="h-48 w-full relative">
