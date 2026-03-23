@@ -246,12 +246,12 @@ function createNodesRouter(monitor: any, sshManager: any, nodesConfig: any, keyM
     // 构造安装命令
     let command = '';
     if (source === 'openclaw' || source === 'openclaw-bundled') {
-      // 先将插件加入 plugins.allow 白名单，再安装
+      // 先安装插件，再将其加入 plugins.allow 白名单（config set 会验证插件是否存在）
       command = [
+        `openclaw plugins install ${skillId}`,
         `ALLOW=$(openclaw config get plugins.allow 2>/dev/null || echo '[]')`,
         `UPDATED=$(echo "$ALLOW" | jq --arg p "${skillId}" 'if type == "array" then . + [$p] | unique else [$p] end')`,
         `openclaw config set plugins.allow "$UPDATED" --strict-json`,
-        `openclaw plugins install ${skillId}`,
       ].join(' && ');
     } else if (source === 'skills.sh') {
       const slug = req.body.slug || skillId;
