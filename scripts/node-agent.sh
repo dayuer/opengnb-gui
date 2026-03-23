@@ -4,6 +4,7 @@
 #
 # 功能：本地采集 GNB + OpenClaw + 系统信息 → POST 到 Console
 # 部署：由 initnode.sh 安装到 /opt/gnb/bin/，systemd timer 每 10s 触发
+# 依赖：jq, curl, bash, coreutils（无 Python）
 # ═══════════════════════════════════════════════════════════════
 
 # --- 任务日志（集中记录任务执行全过程） ---
@@ -36,6 +37,16 @@ if [ -z "$CONSOLE_URL" ] || [ -z "$TOKEN" ]; then
   exit 1
 fi
 
+# --- jq 检查（必需依赖）---
+if ! command -v jq &>/dev/null; then
+  echo "[agent] jq 未安装，尝试安装..." >&2
+  apt-get install -y -qq jq 2>/dev/null || yum install -y -q jq 2>/dev/null || apk add -q jq 2>/dev/null || true
+  if ! command -v jq &>/dev/null; then
+    echo "[agent] jq 安装失败，退出" >&2
+    exit 1
+  fi
+fi
+
 # --- 自更新机制：每 360 次运行（~1小时）自动拉取最新 agent ---
 SELF_PATH="/opt/gnb/bin/node-agent.sh"
 UPDATE_COUNTER="/tmp/.agent_update_counter"
@@ -60,9 +71,9 @@ if command -v "$GNB_CTL" &>/dev/null && [ -e "$GNB_MAP_PATH" ]; then
   GNB_ADDRS=$("$GNB_CTL" -b "$GNB_MAP_PATH" -a 2>/dev/null || true)
 fi
 
-# --- 2. 系统信息（直接拼接，保持与 Console _parseSysInfo 兼容的 ::KEY::VALUE 格式） ---
+# --- 2. 系统信息（::KEY::VALUE 格式，与 Console _parseSysInfo 兼容）---
 SYS_INFO="::HOSTNAME::$(hostname 2>/dev/null)
-::OS::$(cat /etc/os-release 2>/dev/null | grep PRETTY_NAME | cut -d= -f2 | tr -d '"')
+::OS::$(grep PRETTY_NAME /etc/os-release 2>/dev/null | cut -d= -f2 | tr -d '"')
 ::KERNEL::$(uname -r 2>/dev/null)
 ::ARCH::$(uname -m 2>/dev/null)
 ::UPTIME::$(uptime -p 2>/dev/null || uptime 2>/dev/null)
@@ -73,14 +84,13 @@ SYS_INFO="::HOSTNAME::$(hostname 2>/dev/null)
 ::DISK::$(df -h / 2>/dev/null | awk 'NR==2{printf "%s %s %s %s", $2, $3, $4, $5}')
 ::CPU_USAGE::$(grep 'cpu ' /proc/stat 2>/dev/null | awk '{u=$2+$4; t=$2+$4+$5; if(t>0) printf "%d", u*100/t; else print "0"}' || echo '0')"
 
-# --- 3. OpenClaw 状态（进程检测 + 配置 + RPC 健康） ---
+# --- 3. OpenClaw 状态 ---
 CLAW_RUNNING="false"
 CLAW_PID=""
 CLAW_CONFIG=""
 CLAW_CONFIG_PATH=""
 CLAW_RPC_OK="false"
 
-# 检测 openclaw 进程（gateway 进程名为 openclaw，不是 openclaw-gateway）
 CLAW_PID=$(pgrep -f 'openclaw gateway' 2>/dev/null | head -1 || true)
 if [ -z "$CLAW_PID" ]; then
   CLAW_PID=$(pgrep -x 'openclaw' 2>/dev/null | head -1 || true)
@@ -92,7 +102,6 @@ if [ -n "$CLAW_PID" ] && [ "$CLAW_PID" != "0" ]; then
   CLAW_RUNNING="true"
 fi
 
-# 读取 OpenClaw 配置文件（扩展路径 + sudo 读取 root 文件）
 for cfg_path in "$HOME/.openclaw/openclaw.json" "/root/.openclaw/openclaw.json" "/home/synon/.openclaw/openclaw.json" "/opt/openclaw/config.json"; do
   if [ -f "$cfg_path" ]; then
     CLAW_CONFIG=$(sudo cat "$cfg_path" 2>/dev/null || cat "$cfg_path" 2>/dev/null || true)
@@ -103,130 +112,82 @@ for cfg_path in "$HOME/.openclaw/openclaw.json" "/root/.openclaw/openclaw.json" 
   fi
 done
 
-# RPC 健康检测（curl 本地 OpenClaw HTTP 端口）
 if [ "$CLAW_RUNNING" = "true" ]; then
   CLAW_RPC_OK=$(curl -sf -m 2 "http://127.0.0.1:${CLAW_PORT}/api/status" >/dev/null 2>&1 && echo "true" || echo "false")
+fi
+
+# --- 采集 OpenClaw 已安装 skills（shell 解析 │ 分隔表格）---
+INSTALLED_SKILLS="[]"
+if command -v openclaw &>/dev/null; then
+  SKILLS_RAW=$(openclaw skills list 2>/dev/null || true)
+  if [ -n "$SKILLS_RAW" ]; then
+    # 解析 │ 分隔表格：跳过表头和 missing 行，提取 skill 名称和 source
+    INSTALLED_SKILLS=$(echo "$SKILLS_RAW" | awk -F'│' '
+      NR <= 2 { next }
+      NF < 4 { next }
+      {
+        gsub(/^[ \t]+|[ \t]+$/, "", $2)  # status
+        gsub(/^[ \t]+|[ \t]+$/, "", $3)  # skill name
+        gsub(/^[ \t]+|[ \t]+$/, "", $5)  # source
+        if ($3 == "" || $3 == "Skill") next
+        if (tolower($2) ~ /missing/) next
+        # 去除 emoji 前缀（保留字母数字和连字符开头的部分）
+        name = $3
+        sub(/^[^a-zA-Z0-9]*/, "", name)
+        if (name == "") name = $3
+        src = ($5 != "") ? $5 : "openclaw"
+        printf "{\"id\":\"%s\",\"name\":\"%s\",\"version\":\"installed\",\"source\":\"%s\"}\n", name, name, src
+      }
+    ' | jq -s '.' 2>/dev/null || echo "[]")
+  fi
 fi
 
 END_MS=$(($(date +%s%N 2>/dev/null || echo "0") / 1000000))
 COLLECT_MS=$(( END_MS - START_MS ))
 
-# --- 4. 组装 JSON 并推送 ---
-# 写入临时文件避免 shell 变量中特殊字符破坏引号
-_TMP="/tmp/.agent_$$"
-echo "${GNB_STATUS}" > "${_TMP}_gnb"
-echo "${GNB_ADDRS}" > "${_TMP}_addr"
-echo "${SYS_INFO}" > "${_TMP}_sys"
-echo "${CLAW_CONFIG}" > "${_TMP}_claw"
+# --- 4. 用 jq 组装 JSON payload ---
+CLAW_CONFIG_JSON="${CLAW_CONFIG:-{}}"
+# 确保 claw config 是合法 JSON
+echo "$CLAW_CONFIG_JSON" | jq . >/dev/null 2>&1 || CLAW_CONFIG_JSON="{}"
 
-# 采集 OpenClaw 已安装的 skills（使用原生 CLI）
-CLAW_SKILLS_RAW=""
-if command -v openclaw &>/dev/null; then
-  CLAW_SKILLS_RAW=$(openclaw skills list 2>/dev/null || true)
-fi
-echo "${CLAW_SKILLS_RAW}" > "${_TMP}_skills"
-
-PAYLOAD=$(python3 << PYEOF
-import json, os, sys, re
-def read(p):
-    try:
-        with open(p) as f: return f.read().strip()
-    except: return ''
-
-claw_config = {}
-try:
-    raw = read("${_TMP}_claw")
-    if raw.startswith('{'):
-        claw_config = json.loads(raw)
-except: pass
-
-# 解析 openclaw skills list 输出（│ 分隔表格格式）
-# 格式: │ Status │ Skill │ Description │ Source │
-# 只取状态非 "✗ missing" 的行（即实际可用的 skills）
-installed_skills = []
-try:
-    skills_raw = read("${_TMP}_skills")
-    if skills_raw:
-        for line in skills_raw.splitlines():
-            line = line.strip()
-            # 只处理含 │ 的数据行
-            if '│' not in line:
-                continue
-            cols = [c.strip() for c in line.split('│')]
-            # 过滤掉拆分后的空元素（首尾 │ 导致）
-            cols = [c for c in cols if c]
-            if len(cols) < 3:
-                continue
-            status = cols[0].strip()
-            skill_name_raw = cols[1].strip()
-            source = cols[3].strip() if len(cols) > 3 else 'openclaw'
-            # 跳过表头行
-            if status.lower() in ('status',) or skill_name_raw.lower() in ('skill',):
-                continue
-            # 跳过 "✗ missing" 状态的 skills
-            if 'missing' in status.lower():
-                continue
-            # 跳过描述续行（status 和 skill_name 都为空的行）
-            if not skill_name_raw:
-                continue
-            # 从 skill 名中去除 emoji 前缀（如 "🔐 1password" → "1password"）
-            import unicodedata
-            name_parts = skill_name_raw.split()
-            clean_name = ' '.join(p for p in name_parts
-                if not all(unicodedata.category(ch).startswith(('So','Cn','Cf')) or ch == '\ufe0f' for ch in p))
-            if not clean_name:
-                clean_name = skill_name_raw
-            installed_skills.append({
-                'id': clean_name,
-                'name': clean_name,
-                'version': 'installed',
-                'source': source
-            })
-except: pass
-
-claw_obj = {
-    'running': "$CLAW_RUNNING" == "true",
-    'pid': "${CLAW_PID}" if "${CLAW_PID}" else None,
-    'configPath': "${CLAW_CONFIG_PATH:-}" if "${CLAW_CONFIG_PATH:-}" else None,
-    'config': claw_config,
-    'rpcOk': "$CLAW_RPC_OK" == "true",
-    'installedSkills': installed_skills
-}
-
-payload = {
-    'gnbStatus': read("${_TMP}_gnb"),
-    'gnbAddresses': read("${_TMP}_addr"),
-    'sysInfo': read("${_TMP}_sys"),
-    'openclaw': claw_obj,
-    'collectMs': ${COLLECT_MS:-0}
-}
-print(json.dumps(payload))
-PYEOF
-)
-rm -f "${_TMP}_gnb" "${_TMP}_addr" "${_TMP}_sys" "${_TMP}_claw" "${_TMP}_skills"
+PAYLOAD=$(jq -n \
+  --arg gnbStatus "$GNB_STATUS" \
+  --arg gnbAddresses "$GNB_ADDRS" \
+  --arg sysInfo "$SYS_INFO" \
+  --argjson clawRunning "$CLAW_RUNNING" \
+  --arg clawPid "${CLAW_PID:-}" \
+  --arg clawConfigPath "${CLAW_CONFIG_PATH:-}" \
+  --argjson clawConfig "$CLAW_CONFIG_JSON" \
+  --argjson clawRpcOk "$CLAW_RPC_OK" \
+  --argjson installedSkills "$INSTALLED_SKILLS" \
+  --argjson collectMs "$COLLECT_MS" \
+  '{
+    gnbStatus: $gnbStatus,
+    gnbAddresses: $gnbAddresses,
+    sysInfo: $sysInfo,
+    openclaw: {
+      running: $clawRunning,
+      pid: (if $clawPid == "" then null else $clawPid end),
+      configPath: (if $clawConfigPath == "" then null else $clawConfigPath end),
+      config: $clawConfig,
+      rpcOk: $clawRpcOk,
+      installedSkills: $installedSkills
+    },
+    collectMs: $collectMs
+  }')
 
 if [ -z "$PAYLOAD" ]; then
   echo "[agent] JSON 组装失败" >&2
   exit 1
 fi
 
-# --- 注入上次执行的任务结果（如有） ---
+# --- 注入上次执行的任务结果（如有）---
 TASK_RESULTS_FILE="/tmp/.agent_task_results.json"
 if [ -f "$TASK_RESULTS_FILE" ]; then
   TASK_RESULTS=$(cat "$TASK_RESULTS_FILE" 2>/dev/null || echo "[]")
   rm -f "$TASK_RESULTS_FILE"
   # 将 taskResults 注入 payload
-  PAYLOAD=$(echo "$PAYLOAD" | python3 -c "
-import sys, json
-payload = json.load(sys.stdin)
-try:
-    results = json.loads('''${TASK_RESULTS}''')
-    if results:
-        payload['taskResults'] = results
-except:
-    pass
-print(json.dumps(payload))
-" 2>/dev/null || echo "$PAYLOAD")
+  PAYLOAD=$(echo "$PAYLOAD" | jq --argjson results "$TASK_RESULTS" '. + {taskResults: $results}' 2>/dev/null || echo "$PAYLOAD")
 fi
 
 # --- 上报并读取响应（含待执行任务） ---
@@ -241,85 +202,72 @@ HTTP_CODE=$(curl -s -w '%{http_code}' -o "$RESPONSE_FILE" \
 
 if [ "$HTTP_CODE" != "200" ]; then
   echo "[agent] 上报失败 HTTP ${HTTP_CODE}" >&2
+  task_log "上报失败 HTTP ${HTTP_CODE}"
   rm -f "$RESPONSE_FILE"
   exit 0
 fi
 
-# --- 解析并执行下发的任务 ---
+# --- 解析并执行下发的任务（纯 shell + jq） ---
 if [ -f "$RESPONSE_FILE" ]; then
-  TASKS=$(python3 -c "
-import json, sys
-try:
-    resp = json.load(open('$RESPONSE_FILE'))
-    tasks = resp.get('tasks', [])
-    if tasks:
-        print(json.dumps(tasks))
-    else:
-        print('')
-except:
-    print('')
-" 2>/dev/null)
+  TASK_COUNT=$(jq -r '.tasks | length' "$RESPONSE_FILE" 2>/dev/null || echo "0")
 
-  if [ -n "$TASKS" ] && [ "$TASKS" != "[]" ]; then
-    TASK_COUNT=$(echo "$TASKS" | python3 -c "import sys,json; print(len(json.load(sys.stdin)))" 2>/dev/null || echo "?")
-    echo "[agent] 收到 ${TASK_COUNT} 个待执行任务"
+  if [ "$TASK_COUNT" -gt 0 ] 2>/dev/null; then
+    echo "[agent] 收到 ${TASK_COUNT} 个待执行任务" >&2
     task_log "收到 ${TASK_COUNT} 个任务"
 
-    # 逐个执行任务并收集结果
-    python3 -c "
-import json, subprocess, sys
-from datetime import datetime
+    RESULTS="[]"
+    IDX=0
+    while [ "$IDX" -lt "$TASK_COUNT" ]; do
+      TASK_ID=$(jq -r ".tasks[$IDX].taskId" "$RESPONSE_FILE")
+      TASK_CMD=$(jq -r ".tasks[$IDX].command" "$RESPONSE_FILE")
+      TASK_TIMEOUT_MS=$(jq -r ".tasks[$IDX].timeoutMs // 60000" "$RESPONSE_FILE")
+      TASK_TIMEOUT_S=$(( TASK_TIMEOUT_MS / 1000 ))
+      [ "$TASK_TIMEOUT_S" -lt 5 ] && TASK_TIMEOUT_S=5
 
-tasks = json.loads('''${TASKS}''')
-results = []
+      echo "[agent] 执行任务 ${TASK_ID}: ${TASK_CMD}" >&2
+      task_log "执行 ${TASK_ID}: ${TASK_CMD}"
 
-for task in tasks:
-    tid = task.get('taskId', '')
-    cmd = task.get('command', '')
-    timeout = task.get('timeoutMs', 60000) / 1000
+      # 使用 timeout 命令执行（bash -lc 加载完整环境）
+      STDOUT_FILE="/tmp/.agent_task_stdout_$$"
+      STDERR_FILE="/tmp/.agent_task_stderr_$$"
+      COMPLETED_AT=$(date -u '+%Y-%m-%dT%H:%M:%SZ' 2>/dev/null || date '+%Y-%m-%dT%H:%M:%SZ')
 
-    print(f'[agent] 执行任务 {tid}: {cmd}', file=sys.stderr)
+      if timeout "${TASK_TIMEOUT_S}s" bash -lc "$TASK_CMD" >"$STDOUT_FILE" 2>"$STDERR_FILE"; then
+        EXIT_CODE=0
+        STATUS_TEXT="成功"
+      else
+        EXIT_CODE=$?
+        if [ "$EXIT_CODE" -eq 124 ]; then
+          STATUS_TEXT="超时(${TASK_TIMEOUT_S}s)"
+        else
+          STATUS_TEXT="失败(code:${EXIT_CODE})"
+        fi
+      fi
+      COMPLETED_AT=$(date -u '+%Y-%m-%dT%H:%M:%SZ' 2>/dev/null || date '+%Y-%m-%dT%H:%M:%SZ')
 
-    try:
-        # bash -lc 加载环境（NVM/fnm/openclaw 等）
-        proc = subprocess.run(
-            ['bash', '-lc', cmd],
-            capture_output=True, text=True,
-            timeout=timeout
-        )
-        results.append({
-            'taskId': tid,
-            'code': proc.returncode,
-            'stdout': proc.stdout[:2000],
-            'stderr': proc.stderr[:2000],
-            'completedAt': datetime.utcnow().isoformat() + 'Z'
-        })
-        status = '成功' if proc.returncode == 0 else f'失败(code:{proc.returncode})'
-        print(f'[agent] 任务 {tid} {status}', file=sys.stderr)
-        with open('/opt/gnb/log/agent-tasks.log', 'a') as lf:
-            lf.write(f'[{datetime.now().strftime("%Y-%m-%d %H:%M:%S")}] 任务 {tid} {status}: {cmd[:80]}\n')
-    except subprocess.TimeoutExpired:
-        results.append({
-            'taskId': tid,
-            'code': -1,
-            'stdout': '',
-            'stderr': f'超时 ({timeout}s)',
-            'completedAt': datetime.utcnow().isoformat() + 'Z'
-        })
-        print(f'[agent] 任务 {tid} 超时', file=sys.stderr)
-    except Exception as e:
-        results.append({
-            'taskId': tid,
-            'code': -2,
-            'stdout': '',
-            'stderr': str(e),
-            'completedAt': datetime.utcnow().isoformat() + 'Z'
-        })
+      # 截取输出（最多 2000 字节）
+      STDOUT_CONTENT=$(head -c 2000 "$STDOUT_FILE" 2>/dev/null || true)
+      STDERR_CONTENT=$(head -c 2000 "$STDERR_FILE" 2>/dev/null || true)
+      rm -f "$STDOUT_FILE" "$STDERR_FILE"
 
-# 保存结果供下次上报
-with open('$TASK_RESULTS_FILE', 'w') as f:
-    json.dump(results, f)
-" 2>&1
+      echo "[agent] 任务 ${TASK_ID} ${STATUS_TEXT}" >&2
+      task_log "任务 ${TASK_ID} ${STATUS_TEXT}"
+
+      # 追加结果到 RESULTS 数组
+      RESULTS=$(echo "$RESULTS" | jq \
+        --arg taskId "$TASK_ID" \
+        --argjson code "$EXIT_CODE" \
+        --arg stdout "$STDOUT_CONTENT" \
+        --arg stderr "$STDERR_CONTENT" \
+        --arg completedAt "$COMPLETED_AT" \
+        '. + [{taskId: $taskId, code: $code, stdout: $stdout, stderr: $stderr, completedAt: $completedAt}]')
+
+      IDX=$((IDX + 1))
+    done
+
+    # 保存结果供下次上报
+    echo "$RESULTS" > "$TASK_RESULTS_FILE"
+    task_log "已保存 ${TASK_COUNT} 个任务结果到 ${TASK_RESULTS_FILE}"
   fi
 
   rm -f "$RESPONSE_FILE"
