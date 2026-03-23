@@ -13,7 +13,9 @@ opengnb-gui/
 │   │   ├── key-manager.ts               # 密钥管理 + 节点审批 + GNB address.conf 同步
 │   │   ├── gnb-config.ts                # GNB 配置生成器（从 key-manager 提取）
 │   │   ├── node-store.ts                # SQLite 数据层（mixin 模式聚合子模块）
-│   │   ├── gnb-monitor.ts               # 推模式监控 + Agent 任务队列（SQLite 持久化）
+│   │   ├── gnb-monitor.ts               # 推模式监控（仅监控，任务队列已提炼到 task-queue）
+│   │   ├── task-queue.ts                 # Agent 任务队列管理（从 gnb-monitor 独立）
+│   │   ├── skill-command.ts              # 技能安装/卸载命令策略注册表
 │   │   ├── gnb-parser.ts                # GNB gnb_ctl 输出解析器
 │   │   ├── skills-store.ts              # 技能注册表（共享 DB / 独立 DB 双模式）
 │   │   ├── metrics-store.ts             # 指标时序存储 + 趋势聚合
@@ -87,6 +89,7 @@ opengnb-gui/
 graph TD
     SERVER[server.ts] --> KM[key-manager.ts]
     SERVER --> MON[gnb-monitor.ts]
+    SERVER --> TQ[task-queue.ts]
     SERVER --> WS[ws-handler.ts]
     SERVER --> SS[skills-store.ts]
     SERVER --> PROV[provisioner.ts]
@@ -105,6 +108,7 @@ graph TD
     NS --> TS[stores/task-store]
 
     MON -->|_store| NS
+    TQ -->|_store| NS
     SS -->|共享 db| NS
 
     WS --> SSH[ssh-manager.ts]

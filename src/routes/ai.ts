@@ -1,4 +1,5 @@
 'use strict';
+import type { Request, Response, NextFunction } from 'express';
 
 const express = require('express');
 
@@ -11,7 +12,7 @@ function createAiRouter(aiOps: any, saveOpsLog: any) {
   const router = express.Router();
 
   // POST /api/ai/chat — 运维指令
-  router.post('/chat', async (req: any, res: any) => {
+  router.post('/chat', async (req: Request, res: Response) => {
     try {
       const { message, nodeId } = req.body;
       if (!message) {
@@ -31,13 +32,13 @@ function createAiRouter(aiOps: any, saveOpsLog: any) {
       }
 
       res.json(result);
-    } catch (err: any) {
+    } catch (err: unknown) {
       res.status(500).json({ response: `❌ 服务端异常: ${err.message}`, commands: [] });
     }
   });
 
   // POST /api/ai/confirm — 确认执行
-  router.post('/confirm', async (req: any, res: any) => {
+  router.post('/confirm', async (req: Request, res: Response) => {
     const { confirmId } = req.body;
     if (!confirmId) {
       return res.status(400).json({ error: '缺少 confirmId 参数' });

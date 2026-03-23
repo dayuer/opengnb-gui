@@ -1,4 +1,5 @@
 'use strict';
+import type { Request, Response, NextFunction } from 'express';
 
 const { Router } = require('express');
 const crypto = require('crypto');
@@ -18,7 +19,7 @@ function createAuthRouter(store: any) {
   // --- 公开端点 ---
 
   /** POST /api/auth/login — 登录获取 JWT */
-  router.post('/login', (req: any, res: any) => {
+  router.post('/login', (req: Request, res: Response) => {
     const { username, password } = req.body || {};
     if (!username || !password) {
       return res.status(400).json({ error: '请提供用户名和密码' });
@@ -48,7 +49,7 @@ function createAuthRouter(store: any) {
   // --- 需要认证的端点 ---
 
   /** GET /api/auth/token — 获取当前有效 token（供 initnode.sh 使用） */
-  router.get('/token', requireAuth, (req: any, res: any) => {
+  router.get('/token', requireAuth, (req: Request, res: Response) => {
     // 为当前用户签发新 JWT
     const token = signJwt({
       userId: req.user.userId,
@@ -62,12 +63,12 @@ function createAuthRouter(store: any) {
   });
 
   /** POST /api/auth/register — 创建新用户（仅管理员） */
-  router.post('/register', requireAuth, requireAdmin, (req: any, res: any) => {
+  router.post('/register', requireAuth, requireAdmin, (req: Request, res: Response) => {
     const { username, password, role } = req.body || {};
     if (!username || !password) {
       return res.status(400).json({ error: '请提供用户名和密码' });
     }
-    if (password.length < 8) {
+    if (String(password).length < 8) {
       return res.status(400).json({ error: '密码长度至少 8 位' });
     }
     // 检查重名
@@ -84,12 +85,12 @@ function createAuthRouter(store: any) {
   });
 
   /** GET /api/auth/users — 用户列表（脱敏） */
-  router.get('/users', requireAuth, (req: any, res: any) => {
+  router.get('/users', requireAuth, (req: Request, res: Response) => {
     res.json(store.allUsers());
   });
 
   /** DELETE /api/auth/users/:id — 删除用户（仅管理员） */
-  router.delete('/users/:id', requireAuth, requireAdmin, (req: any, res: any) => {
+  router.delete('/users/:id', requireAuth, requireAdmin, (req: Request, res: Response) => {
     const { id } = req.params;
     // 禁止删除自身
     if (req.user.userId === id) {
@@ -100,10 +101,10 @@ function createAuthRouter(store: any) {
   });
 
   /** PATCH /api/auth/users/:id/role — 修改用户角色（仅管理员） */
-  router.patch('/users/:id/role', requireAuth, requireAdmin, (req: any, res: any) => {
+  router.patch('/users/:id/role', requireAuth, requireAdmin, (req: Request, res: Response) => {
     const { id } = req.params;
     const { role } = req.body || {};
-    if (!role || !['admin', 'member'].includes(role)) {
+    if (!role || !['admin', 'member'].includes(String(role))) {
       return res.status(400).json({ error: '角色必须是 admin 或 member' });
     }
     const user = store.findUserById(id);
@@ -116,19 +117,19 @@ function createAuthRouter(store: any) {
   });
 
   /** POST /api/auth/api-token/refresh — 重新生成 apiToken */
-  router.post('/api-token/refresh', requireAuth, (req: any, res: any) => {
+  router.post('/api-token/refresh', requireAuth, (req: Request, res: Response) => {
     const apiToken = crypto.randomBytes(16).toString('hex');
     store._stmts.updateApiToken.run(apiToken, req.user.userId);
     res.json({ apiToken, note: '旧 token 已失效' });
   });
 
   // @alpha: 修改密码
-  router.post('/change-password', requireAuth, (req: any, res: any) => {
+  router.post('/change-password', requireAuth, (req: Request, res: Response) => {
     const { oldPassword, newPassword } = req.body || {};
     if (!oldPassword || !newPassword) {
       return res.status(400).json({ error: '请提供旧密码和新密码' });
     }
-    if (newPassword.length < 8) {
+    if (String(newPassword).length < 8) {
       return res.status(400).json({ error: '新密码长度至少 8 位' });
     }
     const user = store.findUserByName(req.user.username);

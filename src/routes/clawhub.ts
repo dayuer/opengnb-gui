@@ -1,4 +1,5 @@
 'use strict';
+import type { Request, Response, NextFunction } from 'express';
 
 const express = require('express');
 const { createLogger } = require('../services/logger');
@@ -78,7 +79,7 @@ async function searchClawHub(query: string, page: number = 1): Promise<any> {
     // 方案 B：回退到 CLI（如果 REST API 不可用）
     log.warn(`ClawHub API 返回 ${resp.status}，回退到 CLI`);
     return await searchViaCLI(query);
-  } catch (err: any) {
+  } catch (err: unknown) {
     log.warn(`ClawHub API 请求失败: ${err.message}，回退到 CLI`);
     return await searchViaCLI(query);
   }
@@ -106,7 +107,7 @@ async function searchViaCLI(query: string): Promise<any> {
     };
     cacheSet(cacheKey, result);
     return result;
-  } catch (err: any) {
+  } catch (err: unknown) {
     log.error(`clawhub CLI 搜索失败: ${err.message}`);
     return { skills: [], total: 0, source: 'cli-error', error: err.message };
   }
@@ -175,7 +176,7 @@ async function getSkillDetail(skillId: string): Promise<any> {
     const skill = parseCLIInspectOutput(output, skillId);
     if (skill) cacheSet(cacheKey, skill);
     return skill;
-  } catch (err: any) {
+  } catch (err: unknown) {
     return null;
   }
 }
@@ -249,7 +250,7 @@ async function getFeatured(): Promise<any> {
 
     // 回退：用 clawhub explore 获取最新技能
     return await exploreViaCLI();
-  } catch (err: any) {
+  } catch (err: unknown) {
     return await exploreViaCLI();
   }
 }
@@ -327,7 +328,7 @@ function createClawHubRouter() {
   const router = express.Router();
 
   // GET /api/clawhub/search?q=browser&page=1
-  router.get('/search', async (req: any, res: any) => {
+  router.get('/search', async (req: Request, res: Response) => {
     try {
       const { q, page } = req.query;
       if (!q || String(q).trim().length === 0) {
@@ -335,36 +336,36 @@ function createClawHubRouter() {
       }
       const result = await searchClawHub(String(q).trim(), parseInt(page) || 1);
       res.json(result);
-    } catch (err: any) {
+    } catch (err: unknown) {
       res.status(500).json({ error: err.message });
     }
   });
 
   // GET /api/clawhub/featured
-  router.get('/featured', async (_req: any, res: any) => {
+  router.get('/featured', async (_req: Request, res: Response) => {
     try {
       const result = await getFeatured();
       res.json(result);
-    } catch (err: any) {
+    } catch (err: unknown) {
       res.status(500).json({ error: err.message });
     }
   });
 
   // GET /api/clawhub/skill/:id
-  router.get('/skill/:id', async (req: any, res: any) => {
+  router.get('/skill/:id', async (req: Request, res: Response) => {
     try {
       const skill = await getSkillDetail(req.params.id);
       if (!skill) {
         return res.status(404).json({ error: '技能不存在' });
       }
       res.json({ skill });
-    } catch (err: any) {
+    } catch (err: unknown) {
       res.status(500).json({ error: err.message });
     }
   });
 
   // GET /api/clawhub/cache-stats
-  router.get('/cache-stats', (_req: any, res: any) => {
+  router.get('/cache-stats', (_req: Request, res: Response) => {
     res.json({
       size: _cache.size,
       max: CACHE_MAX,

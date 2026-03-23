@@ -15,13 +15,45 @@ const log = createLogger('SkillsStore');
  *   1. 共享模式：传入已打开的 DB 实例（推荐，与 NodeStore 共用 nodes.db）
  *   2. 独立模式：传入路径（向后兼容，独立 skills.db）
  */
+/** 技能记录 */
+interface SkillRecord {
+  id: string;
+  name: string;
+  version: string;
+  author: string;
+  description: string;
+  category: string;
+  icon: string;
+  iconGradient: string;
+  rating: number;
+  installs: number;
+  source: string;
+  slug: string;
+  installType: string;
+  skillContent: string;
+  isBuiltin: number;
+  createdAt: string;
+  updatedAt: string;
+}
+
+/** 预编译语句 */
+interface SkillStatements {
+  all: { all(): SkillRecord[] };
+  findById: { get(id: string): SkillRecord | undefined };
+  count: { get(): { cnt: number } };
+  insert: { run(row: Record<string, unknown>): unknown };
+  update: { run(row: Record<string, unknown>): unknown };
+  delete: { run(id: string): { changes: number } };
+  search: { all(params: { kw: string }): SkillRecord[] };
+}
+
 class SkillsStore {
   dbPath: string;
-  db: any;
-  _stmts: any;
+  db: { exec(sql: string): void; prepare(sql: string): unknown; transaction<T>(fn: (items: T[]) => void): (items: T[]) => void; pragma(str: string): void; close(): void } | null;
+  _stmts: SkillStatements;
   _shared: boolean;
 
-  constructor(dbOrPath: any) {
+  constructor(dbOrPath: { prepare: (sql: string) => unknown; exec: (sql: string) => void; transaction: <T>(fn: (items: T[]) => void) => (items: T[]) => void; pragma: (str: string) => void; close: () => void } | string) {
     if (typeof dbOrPath === 'object' && dbOrPath !== null && typeof dbOrPath.prepare === 'function') {
       // 共享模式 — 接收已打开的 DB 实例
       this.db = dbOrPath;
@@ -29,11 +61,11 @@ class SkillsStore {
       this._shared = true;
     } else {
       // 独立模式 — 路径（向后兼容）
-      this.dbPath = dbOrPath;
+      this.dbPath = dbOrPath as string;
       this.db = null;
       this._shared = false;
     }
-    this._stmts = {};
+    this._stmts = {} as SkillStatements;
   }
 
   /**
@@ -116,27 +148,27 @@ class SkillsStore {
   }
 
   /** 全量列表 */
-  all(): any[] {
+  all(): SkillRecord[] {
     return this._stmts.all.all();
   }
 
   /** 按 ID 查找 */
-  findById(id: string): any | null {
+  findById(id: string): SkillRecord | null {
     return this._stmts.findById.get(id) || null;
   }
 
   /** 搜索 */
-  search(keyword: string): any[] {
+  search(keyword: string): SkillRecord[] {
     return this._stmts.search.all({ kw: `%${keyword}%` });
   }
 
   /** 按分类过滤 */
-  findByCategory(category: string): any[] {
+  findByCategory(category: string): SkillRecord[] {
     return this.all().filter(s => s.category === category);
   }
 
   /** 创建新技能（用户上传） */
-  create(skill: any): any {
+  create(skill: Partial<SkillRecord> & { isBuiltin?: boolean | number }): SkillRecord {
     const now = new Date().toISOString();
     // @fix: better-sqlite3 只接受 number|string|bigint|Buffer|null
     // 必须显式强转所有字段，杜绝 boolean/undefined 泄漏
@@ -172,7 +204,7 @@ class SkillsStore {
   /** @private 预装内置技能 */
   _seed() {
     const builtins = SkillsStore.BUILTIN_SKILLS;
-    const insertMany = this.db.transaction((skills: any[]) => {
+    const insertMany = this.db!.transaction((skills: Partial<SkillRecord>[]) => {
       for (const s of skills) {
         this.create({ ...s, isBuiltin: true });
       }

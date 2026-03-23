@@ -17,6 +17,88 @@ const PASSCODE_TTL_MS = 30 * 60 * 1000; // 30 分钟
 function generateNodeId() {
   return 'node-' + crypto.randomBytes(9).toString('base64url');
 }
+import type { FieldValidationResult, NodeRecord, GroupRecord } from '../types/interfaces';
+
+/** 构造函数选项 */
+interface KmOptions {
+  dataDir?: string;
+  paths?: ReturnType<typeof resolvePaths>;
+}
+
+/** Passcode 条目 */
+interface PasscodeEntry {
+  label: string;
+  userId: string;
+  createdAt: string;
+  used: boolean;
+  usedBy?: string;
+}
+
+/** EnrollToken 条目 */
+interface EnrollTokenEntry {
+  nodeId: string;
+  createdAt: string;
+}
+
+/** 节点注册信息 */
+interface EnrollmentInfo {
+  passcode: string;
+  id?: string;
+  name?: string;
+  tunAddr?: string;
+  gnbMapPath?: string;
+  gnbCtlPath?: string;
+  [key: string]: unknown;
+}
+
+/** SSH 连接信息 */
+interface SshInfo {
+  sshUser?: string;
+  sshPort?: number;
+}
+
+/** 过滤查询选项 */
+interface FilterOpts {
+  groupId?: string;
+  status?: string;
+  keyword?: string;
+  subnet?: string;
+  page?: string | number;
+  pageSize?: string | number;
+}
+
+// --- updateNode 字段校验器 ---
+// 每个校验器签名: (raw, nodeId, store) => FieldValidationResult
+const FIELD_VALIDATORS: Record<string, (raw: unknown, nodeId: string, store: { isTunAddrTaken: (ip: string, excludeId: string) => { name?: string; id: string } | undefined }) => FieldValidationResult> = {
+  name(raw) {
+    const name = String(raw).trim();
+    if (!name) return { value: raw, error: 'name 不能为空' };
+    if (name.length > 64) return { value: raw, error: 'name 最长 64 字符' };
+    return { value: name };
+  },
+  tunAddr(raw, nodeId, store) {
+    const ip = String(raw).trim();
+    if (!ip) return { value: raw, error: 'tunAddr 不能为空' };
+    const ipv4Re = /^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})$/;
+    const m = ip.match(ipv4Re);
+    if (!m || [m[1], m[2], m[3], m[4]].some(o => +o > 255)) {
+      return { value: raw, error: `IP 格式错误: ${ip}` };
+    }
+    const dup = store.isTunAddrTaken(ip, nodeId);
+    if (dup) return { value: ip, error: `IP ${ip} 已被节点 ${dup.name || dup.id} 使用`, code: 'CONFLICT' };
+    return { value: ip };
+  },
+  sshPort(raw) {
+    const port = parseInt(String(raw), 10);
+    if (isNaN(port) || port < 1 || port > 65535) return { value: raw, error: '端口范围 1-65535' };
+    return { value: port };
+  },
+  sshUser(raw) {
+    const user = String(raw).trim();
+    if (!user) return { value: raw, error: 'sshUser 不能为空' };
+    return { value: user };
+  },
+};
 
 /**
  * SSH 密钥管理器 + 节点注册（审批制）
@@ -37,10 +119,10 @@ class KeyManager {
   gnbConfDir: string;
   gnbTunAddr: string;
   gnbIndexAddr: string;
-  store: any;
-  _gnb: any;
-  passcodes: Map<string, any>;
-  enrollTokens: Map<string, any>;
+  store: InstanceType<typeof NodeStore>;
+  _gnb: InstanceType<typeof GnbConfig>;
+  passcodes: Map<string, PasscodeEntry>;
+  enrollTokens: Map<string, EnrollTokenEntry>;
   onApproval: Function | null;
   onNodeReady: Function | null;
   onChange: Function | null;
@@ -50,7 +132,7 @@ class KeyManager {
    * @param {object} options
    * @param {string} options.dataDir - 数据目录
    */
-  constructor(options: any = {}) {
+  constructor(options: KmOptions = {}) {
     this.dataDir = options.dataDir || path.resolve(__dirname, '../../data');
 
     // @alpha: 使用集中路径管理
@@ -154,7 +236,7 @@ class KeyManager {
    * @param {object} nodeInfo - {passcode, id, name, tunAddr, gnbMapPath, gnbCtlPath}
    * @returns {{success: boolean, status: string, message: string}}
    */
-  submitEnrollment(nodeInfo: any) {
+  submitEnrollment(nodeInfo: EnrollmentInfo) {
     // @alpha: 用户提交的 id 实际是 hostname，平台自动生成唯一 NodeID
     const submittedName = nodeInfo.id || nodeInfo.name || '';
     if (!submittedName) {
@@ -226,7 +308,7 @@ class KeyManager {
 
   // @alpha: 签发 enrollToken — 128-bit 随机，绑定 nodeId
   /** @private */
-  _issueEnrollToken(nodeId: any) {
+  _issueEnrollToken(nodeId: string) {
     const token = crypto.randomBytes(16).toString('hex');
     this.enrollTokens.set(token, { nodeId, createdAt: new Date().toISOString() });
     return token;
@@ -237,7 +319,7 @@ class KeyManager {
    * @param {string} token
    * @returns {{valid: boolean, nodeId?: string}}
    */
-  verifyEnrollToken(token: any) {
+  verifyEnrollToken(token: string) {
     if (!token) return { valid: false };
     const entry = this.enrollTokens.get(token);
     if (!entry) return { valid: false };
@@ -255,7 +337,7 @@ class KeyManager {
    * @param {string} nodeId
    * @param {object} sshInfo - {sshUser, sshPort}
    */
-  markNodeReady(nodeId: any, sshInfo: any = {}) {
+  markNodeReady(nodeId: string, sshInfo: SshInfo = {}) {
     const node = this.store.findById(nodeId);
     if (!node) return { success: false, message: '节点不存在' };
     if (node.status !== 'approved') return { success: false, message: '节点未通过审批' };
@@ -269,7 +351,7 @@ class KeyManager {
 
     // 触发就绪回调（Provisioner 安装 OpenClaw）
     if (this.onNodeReady) {
-      const config = this.getApprovedNodesConfig().find((n: any) => n.id === nodeId);
+      const config = this.getApprovedNodesConfig().find((n) => n.id === nodeId);
       if (config) this.onNodeReady(config);
     }
 
@@ -281,7 +363,7 @@ class KeyManager {
    * @param {string} nodeId
    * @returns {{success: boolean, message: string}}
    */
-  approveNode(nodeId: any, options: any = {}) {
+  approveNode(nodeId: string, options: { tunAddr?: string; gnbNodeId?: string } = {}) {
     const node = this.store.findById(nodeId);
     if (!node) return { success: false, message: '节点不存在' };
     if (node.status === 'approved') return { success: true, message: '已审批', tunAddr: node.tunAddr };
@@ -314,13 +396,13 @@ class KeyManager {
   // ═══════════════════════════════════════
   generateFullAddressConf() { return this._gnb.generateFullAddressConf(); }
   getGnbPublicKey() { return this._gnb.getGnbPublicKey(); }
-  saveNodeGnbPubkey(nodeId: any, pubKey: any) { return this._gnb.saveNodeGnbPubkey(nodeId, pubKey); }
+  saveNodeGnbPubkey(nodeId: string, pubKey: string) { return this._gnb.saveNodeGnbPubkey(nodeId, pubKey); }
 
   /**
    * 管理员拒绝
    * @param {string} nodeId
    */
-  rejectNode(nodeId: any) {
+  rejectNode(nodeId: string) {
     const node = this.store.findById(nodeId);
     if (!node) return { success: false, message: '节点不存在' };
     this.store.remove(nodeId);
@@ -333,7 +415,7 @@ class KeyManager {
    * 删除节点
    * @param {string} nodeId
    */
-  removeNode(nodeId: any) {
+  removeNode(nodeId: string) {
     this.store.remove(nodeId);
     this._gnb.writeFullGnbConf(); // 同步 address.conf
     if (this.onChange) this.onChange('remove', nodeId);
@@ -345,10 +427,10 @@ class KeyManager {
   // ═══════════════════════════════════════
 
   /** @private IPv4 格式校验 */
-  static _isValidIPv4(ip: any) {
+  static _isValidIPv4(ip: string) {
     const parts = ip.split('.');
     if (parts.length !== 4) return false;
-    return parts.every((p: any) => {
+    return parts.every((p: string) => {
       const n = parseInt(p, 10);
       return String(n) === p && n >= 0 && n <= 255;
     });
@@ -360,58 +442,31 @@ class KeyManager {
    * @param {object} fields - { name?, tunAddr?, sshPort?, sshUser? }
    * @returns {{success: boolean, message: string, changedFields?: string[]}}
    */
-  updateNode(nodeId: any, fields: any = {}) {
+  updateNode(nodeId: string, fields: Partial<NodeRecord> = {}) {
     const node = this.store.findById(nodeId);
     if (!node) return { success: false, message: '节点不存在' };
     if (node.status !== 'approved') return { success: false, message: '仅已审批节点可编辑' };
 
     const allowed = ['name', 'tunAddr', 'sshPort', 'sshUser'];
-    const changedFields = [];
 
-    // 校验 tunAddr
-    if (fields.tunAddr !== undefined) {
-      const ip = String(fields.tunAddr).trim();
-      if (!ip) return { success: false, message: 'tunAddr 不能为空' };
-      if (!KeyManager._isValidIPv4(ip)) return { success: false, message: `IP 格式错误: ${ip}` };
-      // 唯一性检查（SQLite 查询）
-      const dup = this.store.isTunAddrTaken(ip, nodeId);
-      if (dup) return { success: false, message: `IP ${ip} 已被节点 ${dup.name || dup.id} 使用`, code: 'CONFLICT' };
-      fields.tunAddr = ip;
-    }
-
-    // 校验 sshPort
-    if (fields.sshPort !== undefined) {
-      const port = parseInt(fields.sshPort, 10);
-      if (isNaN(port) || port < 1 || port > 65535) return { success: false, message: '端口范围 1-65535' };
-      fields.sshPort = port;
-    }
-
-    // 校验 name
-    if (fields.name !== undefined) {
-      const name = String(fields.name).trim();
-      if (!name) return { success: false, message: 'name 不能为空' };
-      if (name.length > 64) return { success: false, message: 'name 最长 64 字符' };
-      fields.name = name;
-    }
-
-    // 校验 sshUser
-    if (fields.sshUser !== undefined) {
-      const user = String(fields.sshUser).trim();
-      if (!user) return { success: false, message: 'sshUser 不能为空' };
-      fields.sshUser = user;
+    // 数据驱动校验 — 每个字段对应一个 (value, nodeId, store) => { value, error? } 的校验器
+    for (const key of allowed) {
+      if (fields[key] === undefined) continue;
+      const validator = FIELD_VALIDATORS[key];
+      if (!validator) continue;
+      const result = validator(fields[key], nodeId, this.store);
+      if (result.error) return { success: false, message: result.error, code: result.code };
+      fields[key] = result.value;
     }
 
     // 检测变更
-    for (const key of allowed) {
-      if (fields[key] !== undefined && node[key] !== fields[key]) {
-        changedFields.push(key);
-      }
-    }
-
+    const changedFields = allowed.filter(key =>
+      fields[key] !== undefined && node[key] !== fields[key]
+    );
     if (changedFields.length === 0) return { success: true, message: '无变更', changedFields: [] };
 
     // 应用变更到 SQLite
-    const updateFields: any = {};
+    const updateFields: Partial<NodeRecord & { updatedAt: string }> = {};
     for (const key of allowed) {
       if (fields[key] !== undefined) updateFields[key] = fields[key];
     }
@@ -435,7 +490,7 @@ class KeyManager {
    * @param {string} nodeId
    * @param {Array} skillsArray
    */
-  updateNodeSkills(nodeId: any, skillsArray: any) {
+  updateNodeSkills(nodeId: string, skillsArray: unknown[]) {
     const node = this.store.findById(nodeId);
     if (!node) return { success: false, message: '节点不存在' };
     this.store.update(nodeId, { skills: skillsArray });
@@ -454,10 +509,10 @@ class KeyManager {
    * @alpha: 按 ownerId 获取节点（用户隔离）
    * @param {string} ownerId
    */
-  getNodesByOwner(ownerId: any) {
+  getNodesByOwner(ownerId: string) {
     if (!ownerId) return this.store.all();
     // 空 ownerId 节点（旧数据）对所有用户可见
-    return this.store.all().filter((n: any) => !n.ownerId || n.ownerId === ownerId);
+    return this.store.all().filter((n: NodeRecord) => !n.ownerId || n.ownerId === ownerId);
   }
 
   /**
@@ -474,7 +529,7 @@ class KeyManager {
    * @param {{name: string, color?: string}} opts
    * @returns {{id: string, name: string, color: string, createdAt: string}}
    */
-  createGroup({ name, color = '#388bfd' }: any) {
+  createGroup({ name, color = '#388bfd' }: { name: string; color?: string }) {
     const trimmed = (name || '').trim();
     if (!trimmed) throw new Error('名称不能为空');
     if (this.store.findGroupByName(trimmed)) throw new Error('同名分组已存在');
@@ -494,7 +549,7 @@ class KeyManager {
    * @returns {Array<object>}
    */
   getGroups() {
-    return this.store.allGroups().map((g: any) => ({
+    return this.store.allGroups().map((g: GroupRecord) => ({
       ...g,
       nodeCount: this.store.countNodesByGroup(g.id),
     }));
@@ -505,7 +560,7 @@ class KeyManager {
    * @param {string} groupId
    * @param {{name?: string, color?: string}} updates
    */
-  updateGroup(groupId: any, updates: any) {
+  updateGroup(groupId: string, updates: Partial<GroupRecord>) {
     const ok = this.store.updateGroupFields(groupId, updates);
     if (!ok) return { success: false, message: '分组不存在' };
     return { success: true };
@@ -515,7 +570,7 @@ class KeyManager {
    * 删除分组（事务：原子清空关联节点 groupId + 删除分组）
    * @param {string} groupId
    */
-  deleteGroup(groupId: any) {
+  deleteGroup(groupId: string) {
     this.store.removeGroup(groupId);
     return { success: true };
   }
@@ -525,7 +580,7 @@ class KeyManager {
    * @param {string} nodeId
    * @param {string|null} groupId
    */
-  updateNodeGroup(nodeId: any, groupId: any) {
+  updateNodeGroup(nodeId: string, groupId: string | null) {
     const node = this.store.findById(nodeId);
     if (!node) return { success: false, message: '节点不存在' };
     if (groupId && !this.store.findGroupById(groupId)) {
@@ -544,24 +599,24 @@ class KeyManager {
    * @param {{groupId?, subnet?, keyword?, status?, page?, pageSize?}} opts
    * @returns {{nodes: Array, total: number, page: number, pageSize: number, totalPages: number}}
    */
-  getFilteredNodes(opts: any = {}) {
+  getFilteredNodes(opts: FilterOpts = {}) {
     let result = this.store.all();
 
-    if (opts.groupId) result = result.filter((n: any) => n.groupId === opts.groupId);
-    if (opts.status) result = result.filter((n: any) => n.status === opts.status);
+    if (opts.groupId) result = result.filter((n: NodeRecord) => n.groupId === opts.groupId);
+    if (opts.status) result = result.filter((n: NodeRecord) => n.status === opts.status);
     if (opts.keyword) {
       const kw = opts.keyword.toLowerCase();
-      result = result.filter((n: any) =>
+      result = result.filter((n: NodeRecord) =>
         (n.name || '').toLowerCase().includes(kw) ||
         (n.id || '').toLowerCase().includes(kw) ||
         (n.tunAddr || '').toLowerCase().includes(kw)
       );
     }
-    if (opts.subnet) result = result.filter((n: any) => n.tunAddr && KeyManager._cidrMatch(n.tunAddr, opts.subnet));
+    if (opts.subnet) result = result.filter((n: NodeRecord) => n.tunAddr && KeyManager._cidrMatch(n.tunAddr, opts.subnet));
 
     const total = result.length;
-    const page = Math.max(1, parseInt(opts.page, 10) || 1);
-    const pageSize = Math.max(1, parseInt(opts.pageSize, 10) || 50);
+    const page = Math.max(1, parseInt(String(opts.page), 10) || 1);
+    const pageSize = Math.max(1, parseInt(String(opts.pageSize), 10) || 50);
     const totalPages = Math.max(1, Math.ceil(total / pageSize));
     const start = (page - 1) * pageSize;
 
@@ -583,22 +638,22 @@ class KeyManager {
    * @param {string[]} ids
    * @returns {{succeeded: string[], failed: Array<{id: string, reason: string}>}}
    */
-  batchApprove(ids: any) { return this._batchAction(ids, (id: any) => this.approveNode(id)); }
+  batchApprove(ids: string[]) { return this._batchAction(ids, (id: string) => this.approveNode(id)); }
 
   /**
    * 批量拒绝
    * @param {string[]} ids
    */
-  batchReject(ids: any) { return this._batchAction(ids, (id: any) => this.rejectNode(id)); }
+  batchReject(ids: string[]) { return this._batchAction(ids, (id: string) => this.rejectNode(id)); }
 
   /**
    * 批量删除
    * @param {string[]} ids
    */
-  batchRemove(ids: any) { return this._batchAction(ids, (id: any) => this.removeNode(id)); }
+  batchRemove(ids: string[]) { return this._batchAction(ids, (id: string) => this.removeNode(id)); }
 
   /** @private 批量操作通用 */
-  _batchAction(ids: any, action: any) {
+  _batchAction(ids: string[], action: (id: string) => { success: boolean; message?: string }) {
     const succeeded = [];
     const failed = [];
     for (const id of ids) {
@@ -619,7 +674,7 @@ class KeyManager {
    * @param {string} cidr - 如 '10.1.0.0/24'
    * @returns {boolean}
    */
-  static _cidrMatch(ip: any, cidr: any) {
+  static _cidrMatch(ip: string, cidr: string) {
     const [range, bits] = cidr.split('/');
     if (!range || !bits) return false;
     const mask = ~(2 ** (32 - parseInt(bits, 10)) - 1) >>> 0;
@@ -627,8 +682,8 @@ class KeyManager {
   }
 
   /** @private IP 字符串转 32 位整数 */
-  static _ipToInt(ip: any) {
-    return ip.split('.').reduce((acc: any, oct: any) => (acc << 8) + parseInt(oct, 10), 0) >>> 0;
+  static _ipToInt(ip: string) {
+    return ip.split('.').reduce((acc: number, oct: string) => (acc << 8) + parseInt(oct, 10), 0) >>> 0;
   }
 
 
@@ -638,8 +693,8 @@ class KeyManager {
    */
   getApprovedNodesConfig() {
     return this.store.findByStatus('approved')
-      .filter((n: any) => n.tunAddr)
-      .map((n: any) => ({
+      .filter((n: NodeRecord) => n.tunAddr)
+      .map((n: NodeRecord) => ({
         id: n.id,
         name: n.name || n.id,
         tunAddr: n.tunAddr,
@@ -662,7 +717,7 @@ class KeyManager {
    * @param {string} nodeId
    * @param {object} clawConfig - { token, port }
    */
-  updateNodeClawConfig(nodeId: any, { token, port }: any) {
+  updateNodeClawConfig(nodeId: string, { token, port }: { token?: string; port?: number }) {
     const node = this.store.findById(nodeId);
     if (!node) return false;
     this.store.update(nodeId, {

@@ -17,7 +17,7 @@ const fs = require('fs');
  * @param {string} dataDir - 数据根目录（默认 `<project>/data`）
  * @returns {object} paths
  */
-function resolvePaths(dataDir: any) {
+function resolvePaths(dataDir: string) {
   const registryDir = path.join(dataDir, 'registry');
   const securityDir = path.join(dataDir, 'security');
   const logsDir = path.join(dataDir, 'logs');
@@ -56,7 +56,7 @@ function resolvePaths(dataDir: any) {
  * 确保所有数据子目录存在
  * @param {object} paths - resolvePaths 返回值
  */
-function ensureDataDirs(paths: any) {
+function ensureDataDirs(paths: ReturnType<typeof resolvePaths>) {
   const dirs = [
     paths.registry.dir,
     paths.security.sshDir,

@@ -1,4 +1,5 @@
 'use strict';
+import type { NodeRecord, SysInfo, PeerNode } from '../types/interfaces';
 
 const EventEmitter = require('events');
 const { createLogger } = require('./logger');
@@ -13,15 +14,15 @@ const log = createLogger('GnbMonitor');
  * 不再主动 SSH 轮询节点。
  */
 class GnbMonitor extends EventEmitter {
-  nodesConfig: any[];
+  nodesConfig: Array<{ id: string; name: string; tunAddr: string; sshPort?: number; sshUser?: string; gnbMapPath?: string; gnbCtlPath?: string }>;
   staleTimeoutMs: number;
-  metricsStore: any;
+  metricsStore: unknown;
   latestState: Map<string, any>;
-  _staleTimer: any;
-  _store: any;
-  _audit: any;
+  _staleTimer: ReturnType<typeof setInterval> | null;
+  _store: unknown;
+  _audit: unknown;
 
-  constructor(nodesConfig: any[], options: any = {}) {
+  constructor(nodesConfig: Array<{ id: string; name: string; tunAddr: string }>, options: Record<string, unknown> = {}) {
     super();
     this.nodesConfig = nodesConfig;
     this.staleTimeoutMs = options.staleTimeoutMs || 60000;
@@ -56,7 +57,7 @@ class GnbMonitor extends EventEmitter {
    * @param {string} nodeId - 节点 ID
    * @param {object} report - 上报的 JSON 数据
    */
-  ingest(nodeId: any, report: any) {
+  ingest(nodeId: string, report: Record<string, unknown>) {
     const now = new Date().toISOString();
 
     // 解析 GNB 状态
@@ -66,7 +67,7 @@ class GnbMonitor extends EventEmitter {
     const sysInfo = this._parseSysInfo(report.sysInfo || '');
 
     // 从 agent 上报提取实际安装的 skills（来源：npm 全局包 + openclaw 配置）
-    const agentSkills = (report.openclaw?.installedSkills || []).map((s: any) => ({
+    const agentSkills = (report.openclaw?.installedSkills || []).map((s: Record<string, unknown>) => ({
       id: s.id || s.name,
       name: s.name || s.id,
       version: s.version || 'unknown',
@@ -113,7 +114,7 @@ class GnbMonitor extends EventEmitter {
         diskPct,
         sshLatency: report.collectMs || 0,
         loadAvg: sysInfo.loadAvg || '0',
-        p2pDirect: peers.filter((p: any) => p.status === 'Direct').length,
+        p2pDirect: peers.filter((p: PeerNode) => p.status === 'Direct').length,
         p2pTotal: peers.length,
         memTotalMB: sysInfo.memTotalMB || 0,
         memUsedMB: sysInfo.memUsedMB || 0,
@@ -149,7 +150,7 @@ class GnbMonitor extends EventEmitter {
    * @param {string} nodeId
    * @returns {object|null}
    */
-  getNodeStatus(nodeId: any) {
+  getNodeStatus(nodeId: string) {
     const state = this.latestState.get(nodeId);
     if (!state) return null;
     const config = this.nodesConfig.find(n => n.id === nodeId);
@@ -177,7 +178,7 @@ class GnbMonitor extends EventEmitter {
    * 解析系统信息输出
    * @private
    */
-  _parseSysInfo(stdout: any) {
+  _parseSysInfo(stdout: string) {
     // 防御：如果已经是对象直接返回（兼容非 agent 来源）
     if (stdout && typeof stdout === 'object') return stdout;
     const info: Record<string, any> = {};
@@ -219,112 +220,6 @@ class GnbMonitor extends EventEmitter {
       }
     }
     return info;
-  }
-
-  // ═══════════════════════════════════════
-  //  Agent 任务队列 (SQLite 持久化)
-  // ═══════════════════════════════════════
-
-  /**
-   * 入队：写入 SQLite
-   */
-  enqueueTask(nodeId: string, task: any) {
-    if (!this._store) {
-      log.warn('store 未注入，任务无法持久化');
-      return task;
-    }
-    const row = {
-      taskId: task.taskId,
-      nodeId,
-      type: task.type || 'skill_install',
-      command: task.command || '',
-      skillId: task.skillId || '',
-      skillName: task.skillName || '',
-      status: 'queued',
-      timeoutMs: task.timeoutMs || 60000,
-      queuedAt: new Date().toISOString(),
-    };
-    this._store.taskInsert(row);
-    log.info(`任务入队 node=${nodeId} taskId=${task.taskId} type=${task.type} cmd=${task.command}`);
-    this._audit?.log('task_enqueue', { nodeId, taskId: task.taskId, type: task.type, skillName: task.skillName, command: task.command });
-    this.emit('taskQueued', { nodeId, task: row });
-    return row;
-  }
-
-  /**
-   * 出队：返回待执行任务并标记 dispatched
-   */
-  getPendingTasks(nodeId: string): any[] {
-    if (!this._store) return [];
-    const pending = this._store.taskPendingByNode(nodeId);
-    const now = new Date().toISOString();
-    for (const t of pending) {
-      this._store.taskMarkDispatched(t.taskId, now);
-      this._audit?.log('task_dispatch', { nodeId, taskId: t.taskId, type: t.type });
-    }
-    return pending.map((t: any) => ({
-      taskId: t.taskId,
-      type: t.type,
-      command: t.command,
-      timeoutMs: t.timeoutMs || 60000,
-    }));
-  }
-
-  /**
-   * 处理 agent 上报的任务执行结果
-   */
-  processTaskResults(nodeId: string, results: any[]) {
-    if (!this._store) return;
-    for (const result of results) {
-      const status = result.code === 0 ? 'completed' : 'failed';
-      this._store.taskUpdateResult({
-        taskId: result.taskId,
-        status,
-        resultCode: result.code,
-        resultStdout: (result.stdout || '').slice(0, 2000),
-        resultStderr: (result.stderr || '').slice(0, 2000),
-        completedAt: result.completedAt || new Date().toISOString(),
-      });
-      log.info(`任务${status} node=${nodeId} taskId=${result.taskId} code=${result.code}`);
-      this._audit?.log('task_result', {
-        nodeId, taskId: result.taskId, status,
-        code: result.code,
-        stdout: (result.stdout || '').slice(0, 500),
-        stderr: (result.stderr || '').slice(0, 500),
-      });
-      this.emit('taskCompleted', { nodeId, taskId: result.taskId, status });
-    }
-  }
-
-  /**
-   * 获取指定节点的任务列表（最新 50 条）
-   */
-  getNodeTasks(nodeId: string): any[] {
-    if (!this._store) return [];
-    const rows = this._store.taskAllByNode(nodeId, 50);
-    // 格式化前端需要的 result 字段
-    return rows.map((r: any) => ({
-      ...r,
-      result: r.resultCode != null ? {
-        code: r.resultCode,
-        stdout: r.resultStdout,
-        stderr: r.resultStderr,
-      } : undefined,
-    }));
-  }
-
-  /**
-   * 删除指定任务
-   */
-  deleteTask(taskId: string, req?: any): boolean {
-    if (!this._store) return false;
-    const task = this._store.taskFind(taskId);
-    if (!task) return false;
-    this._store.taskDelete(taskId);
-    if (this._audit) {
-      this._audit.log('task_delete', { taskId, nodeId: task.nodeId, type: task.type, skillName: task.skillName }, req);
-    }
-    return true;
   }
 }
 

@@ -15,9 +15,9 @@ const log = createLogger('MirrorUpdater');
 class MirrorUpdater {
   mirrorDir: string;
   intervalMs: number;
-  _timer: any;
+  _timer: ReturnType<typeof setInterval> | null;
 
-  constructor(dataDir: string, options: any = {}) {
+  constructor(dataDir: string, options: { intervalMs?: number } = {}) {
     this.mirrorDir = path.join(dataDir, 'mirror', 'openclaw');
     this.intervalMs = options.intervalMs || 86400000;
     this._timer = null;
@@ -70,8 +70,8 @@ class MirrorUpdater {
 
       log.info(`发现新版本 openclaw@${remoteVer} (本地: ${localVer || '无'})`);
       await this._pack(remoteVer);
-    } catch (err: any) {
-      log.error(`检查失败: ${err.message}`);
+    } catch (err: unknown) {
+      log.error(`检查失败: ${err instanceof Error ? err.message : String(err)}`);
     }
   }
 
@@ -79,9 +79,9 @@ class MirrorUpdater {
    * 查询 npm registry 最新版本
    * @private
    */
-  _npmLatestVersion(pkgName: any) {
+  _npmLatestVersion(pkgName: string): Promise<string | null> {
     return new Promise((resolve) => {
-      execFile('npm', ['view', pkgName, 'version'], { timeout: 15000 }, (err: any, stdout: any) => {
+      execFile('npm', ['view', pkgName, 'version'], { timeout: 15000 }, (err: Error | null, stdout: string) => {
         if (err) return resolve(null);
         resolve((stdout || '').trim());
       });
@@ -92,7 +92,7 @@ class MirrorUpdater {
    * 执行 npm pack 并保存到镜像目录
    * @private
    */
-  _pack(version: any) {
+  _pack(version: string) {
     return new Promise<void>((resolve, reject) => {
       const tmpDir = path.join('/tmp', `openclaw-pack-${Date.now()}`);
       fs.mkdirSync(tmpDir, { recursive: true });
@@ -100,14 +100,14 @@ class MirrorUpdater {
       execFile('npm', ['pack', `openclaw@${version}`, '--quiet'], {
         cwd: tmpDir,
         timeout: 120000,
-      }, (err: any) => {
+      }, (err: Error | null) => {
         if (err) {
           this._cleanup(tmpDir);
           return reject(new Error(`npm pack 失败: ${err.message}`));
         }
 
         // 找到生成的 .tgz
-        const files = fs.readdirSync(tmpDir).filter((f: any) => f.endsWith('.tgz'));
+        const files = fs.readdirSync(tmpDir).filter((f: string) => f.endsWith('.tgz'));
         if (!files.length) {
           this._cleanup(tmpDir);
           return reject(new Error('npm pack 未生成 .tgz'));
@@ -120,7 +120,7 @@ class MirrorUpdater {
 
         // 清理旧版本（保留最近 3 个）
         const allTgz = fs.readdirSync(this.mirrorDir)
-          .filter((f: any) => f.startsWith('openclaw-') && f.endsWith('.tgz'))
+          .filter((f: string) => f.startsWith('openclaw-') && f.endsWith('.tgz'))
           .sort()
           .reverse();
         for (const old of allTgz.slice(3)) {

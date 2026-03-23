@@ -7,17 +7,26 @@
  * 委托 NodeStore 进行 INSERT/SELECT/DELETE。
  * 自身负责告警阈值检测、降采样调度和时间范围转换。
  */
+/** MetricsNodeStore 接口 */
+interface MetricsNodeStore {
+  recordMetric(data: Record<string, unknown>): void;
+  queryMetrics(nodeId: string, sinceTs: number): Record<string, unknown>[];
+  latestMetricPerNode(): { nodeId: string; cpu: number; memPct: number; diskPct: number; sshLatency: number }[];
+  deleteMetricsBefore(ts: number): void;
+  downsampleNodeMetrics(nodeId: string, cutoff: number, windowMs: number): void;
+}
+
 class MetricsStore {
-  _store: any;
+  _store: MetricsNodeStore;
   _maintenanceIntervalMs: number;
   _maxPoints: number;
   _thresholds: { cpu: number; memPct: number; diskPct: number; sshLatency: number };
   _downsampleAfterMs: number;
   _downsampleWindowMs: number;
   _maxRetentionMs: number;
-  _timer: any;
+  _timer: ReturnType<typeof setInterval> | null;
 
-  constructor(options: any = {}) {
+  constructor(options: { store: MetricsNodeStore; maintenanceIntervalMs?: number; maxPoints?: number } = {} as { store: MetricsNodeStore }) {
     this._store = options.store;
     this._maintenanceIntervalMs = options.maintenanceIntervalMs ?? 300000;
     this._maxPoints = options.maxPoints ?? 1000000;
@@ -47,7 +56,7 @@ class MetricsStore {
    * @param {string} nodeId
    * @param {object} snapshot
    */
-  record(nodeId: any, snapshot: any) {
+  record(nodeId: string, snapshot: Record<string, unknown>) {
     this._store.recordMetric({
       nodeId,
       ts: Date.now(),
@@ -69,7 +78,7 @@ class MetricsStore {
    * @param {string} range - '1h' | '6h' | '24h' | '7d'
    * @returns {Array<object>}
    */
-  query(nodeId: any, range = '1h') {
+  query(nodeId: string, range = '1h') {
     const sinceTs = Date.now() - this._rangeToMs(range);
     return this._store.queryMetrics(nodeId, sinceTs);
   }
@@ -84,7 +93,7 @@ class MetricsStore {
       return { nodeCount: 0, avgCpu: 0, avgMemPct: 0, avgDiskPct: 0, avgLatency: 0, alertCount: 0 };
     }
 
-    const avg = (arr: any, key: any) => Math.round(arr.reduce((s: any, n: any) => s + (n[key] || 0), 0) / arr.length);
+    const avg = (arr: { nodeId: string; cpu: number; memPct: number; diskPct: number; sshLatency: number }[], key: 'cpu' | 'memPct' | 'diskPct' | 'sshLatency') => Math.round(arr.reduce((s, n) => s + (n[key] || 0), 0) / arr.length);
     return {
       nodeCount: nodes.length,
       avgCpu: avg(nodes, 'cpu'),
@@ -149,7 +158,7 @@ class MetricsStore {
   }
 
   /** 时间范围字符串转毫秒 */
-  _rangeToMs(range: any) {
+  _rangeToMs(range: string) {
     const map: Record<string, number> = { '1h': 3600000, '6h': 21600000, '24h': 86400000, '7d': 604800000 };
     return map[range] || map['1h'];
   }

@@ -1,4 +1,5 @@
 'use strict';
+import type { Request, Response, NextFunction } from 'express';
 
 const express = require('express');
 
@@ -11,30 +12,30 @@ function createGroupsRouter(keyManager: any) {
   const router = express.Router();
 
   // GET /api/groups — 分组列表（含 nodeCount）
-  router.get('/', (req: any, res: any) => {
+  router.get('/', (req: Request, res: Response) => {
     res.json({ groups: keyManager.getGroups() });
   });
 
   // POST /api/groups — 创建分组
-  router.post('/', (req: any, res: any) => {
+  router.post('/', (req: Request, res: Response) => {
     const { name, color } = req.body;
     try {
       const group = keyManager.createGroup({ name, color });
       res.status(201).json(group);
-    } catch (err: any) {
+    } catch (err: unknown) {
       const status = err.message.includes('已存在') ? 409 : 400;
       res.status(status).json({ error: err.message });
     }
   });
 
   // PUT /api/groups/:id — 更新分组
-  router.put('/:id', (req: any, res: any) => {
+  router.put('/:id', (req: Request, res: Response) => {
     const result = keyManager.updateGroup(req.params.id, req.body);
     res.status(result.success ? 200 : 404).json(result);
   });
 
   // DELETE /api/groups/:id — 删除分组
-  router.delete('/:id', (req: any, res: any) => {
+  router.delete('/:id', (req: Request, res: Response) => {
     const result = keyManager.deleteGroup(req.params.id);
     res.status(result.success ? 200 : 404).json(result);
   });

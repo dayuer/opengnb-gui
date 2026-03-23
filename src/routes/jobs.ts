@@ -1,4 +1,5 @@
 'use strict';
+import type { Request, Response, NextFunction } from 'express';
 
 const express = require('express');
 
@@ -21,7 +22,7 @@ function createJobsRouter({ jobManager, sshManager, keyManager, requireAuth, bro
    *
    * 安全：通过 clawToken 认证 + jobId 绑定 nodeId 校验
    */
-  router.post('/:jobId/callback', express.json({ limit: '256kb' }), (req: any, res: any) => {
+  router.post('/:jobId/callback', express.json({ limit: '256kb' }), (req: Request, res: Response) => {
     const { jobId } = req.params;
 
     // @alpha: 从 Authorization header 提取 clawToken
@@ -81,7 +82,7 @@ function createJobsRouter({ jobManager, sshManager, keyManager, requireAuth, bro
   /**
    * GET /:jobId — 查询单个 job
    */
-  router.get('/:jobId', requireAuth, (req: any, res: any) => {
+  router.get('/:jobId', requireAuth, (req: Request, res: Response) => {
     const job = jobManager.get(req.params.jobId);
     if (!job) return res.status(404).json({ error: 'Job 不存在' });
     res.json(job);
@@ -94,7 +95,7 @@ function createJobsRouter({ jobManager, sshManager, keyManager, requireAuth, bro
    *   nodeId — 按节点过滤
    *   limit  — 数量限制（默认 50）
    */
-  router.get('/', requireAuth, (req: any, res: any) => {
+  router.get('/', requireAuth, (req: Request, res: Response) => {
     const { nodeId, limit = '50' } = req.query;
     const n = Math.min(parseInt(limit) || 50, 200);
 
@@ -110,7 +111,7 @@ function createJobsRouter({ jobManager, sshManager, keyManager, requireAuth, bro
    *
    * Body: { nodeId, command }
    */
-  router.post('/dispatch', requireAuth, express.json(), async (req: any, res: any) => {
+  router.post('/dispatch', requireAuth, express.json(), async (req: Request, res: Response) => {
     const { nodeId, command } = req.body;
     if (!nodeId || !command) {
       return res.status(400).json({ error: '缺少 nodeId 或 command' });
@@ -141,7 +142,7 @@ function createJobsRouter({ jobManager, sshManager, keyManager, requireAuth, bro
 
       console.log(`[Job] 投递: ${jobId} node=${nodeId} cmd=${command.substring(0, 80)}`);
       res.json({ jobId, status: 'running' });
-    } catch (err: any) {
+    } catch (err: unknown) {
       jobManager.fail(jobId, err.message);
       console.error(`[Job] 投递失败: ${jobId} ${err.message}`);
       res.status(502).json({ error: `投递失败: ${err.message}`, jobId });

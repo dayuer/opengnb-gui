@@ -1,6 +1,12 @@
 'use strict';
 
 const { Client } = require('ssh2');
+import type { Readable } from 'stream';
+
+/** SSH 流接口（ssh2 ClientChannel 简化） */
+interface SshStream extends Readable {
+  stderr: Readable;
+}
 const fs = require('fs');
 const path = require('path');
 const { createLogger } = require('./logger');
@@ -10,13 +16,31 @@ const log = createLogger('SSH');
  * SSH 连接池管理器
  * 通过 GNB TUN 内网地址连接到各节点的 sshd
  */
+/** 节点 SSH 配置 */
+interface SshNodeConfig {
+  id: string;
+  tunAddr: string;
+  sshPort?: number;
+  sshUser: string;
+  sshKeyPath: string;
+  clawToken?: string;
+  [key: string]: unknown;
+}
+
+/** 连接池条目 */
+interface PoolEntry {
+  client: InstanceType<typeof Client>;
+  ready: boolean;
+  lastUsed: number;
+}
+
 class SSHManager {
-  pool: Map<string, any>;
+  pool: Map<string, PoolEntry>;
   reconnectInterval: number;
   _knownHostsPath: string;
-  _knownHosts: any;
+  _knownHosts: Record<string, string>;
 
-  constructor(options: any = {}) {
+  constructor(options: { knownHostsPath?: string } = {}) {
     this.pool = new Map();
     this.reconnectInterval = 30000;
     this._knownHostsPath = options.knownHostsPath || '';
@@ -36,8 +60,8 @@ class SSHManager {
     if (!this._knownHostsPath) return;
     try {
       fs.writeFileSync(this._knownHostsPath, JSON.stringify(this._knownHosts, null, 2), { mode: 0o600 });
-    } catch (err: any) {
-      log.error(`保存 known_hosts 失败: ${err.message}`);
+    } catch (err: unknown) {
+      log.error(`保存 known_hosts 失败: ${err instanceof Error ? err.message : String(err)}`);
     }
   }
 
@@ -46,7 +70,7 @@ class SSHManager {
    * @param {object} nodeConfig - 节点配置 {id, tunAddr, sshPort, sshUser, sshKeyPath}
    * @returns {Promise<Client>}
    */
-  async getConnection(nodeConfig: any) {
+  async getConnection(nodeConfig: SshNodeConfig) {
     const key = nodeConfig.id;
     const entry = this.pool.get(key);
 
@@ -68,7 +92,7 @@ class SSHManager {
    * 建立 SSH 连接
    * @private
    */
-  _connect(nodeConfig: any) {
+  _connect(nodeConfig: SshNodeConfig) {
     return new Promise((resolve, reject) => {
       const client = new Client();
       const keyPath = nodeConfig.sshKeyPath.replace('~', process.env.HOME || '/root');
@@ -76,8 +100,8 @@ class SSHManager {
       let privateKey;
       try {
         privateKey = fs.readFileSync(path.resolve(keyPath));
-      } catch (err: any) {
-        reject(new Error(`无法读取 SSH 密钥 ${keyPath}: ${err.message}`));
+      } catch (err: unknown) {
+        reject(new Error(`无法读取 SSH 密钥 ${keyPath}: ${err instanceof Error ? err.message : String(err)}`));
         return;
       }
 
@@ -96,7 +120,7 @@ class SSHManager {
           });
           resolve(client);
         })
-        .on('error', (err: any) => {
+        .on('error', (err: Error) => {
           clearTimeout(timeout);
           this.pool.delete(nodeConfig.id);
           reject(new Error(`SSH 连接失败 ${nodeConfig.tunAddr}: ${err.message}`));
@@ -113,7 +137,7 @@ class SSHManager {
           readyTimeout: 30000,
           keepaliveInterval: 15000,
           // @security: TOFU 主机指纹持久化（安全审计 H3 修复）
-          hostVerifier: (key: any) => {
+          hostVerifier: (key: Buffer) => {
             const fp = require('crypto').createHash('sha256').update(key).digest('hex');
             const host = nodeConfig.tunAddr;
             if (this._knownHosts[host]) {
@@ -146,7 +170,7 @@ class SSHManager {
    * @param {number} [timeoutMs=15000] - 超时毫秒
    * @returns {Promise<{stdout: string, stderr: string, code: number}>}
    */
-  async exec(nodeConfig: any, command: any, timeoutMs = 15000) {
+  async exec(nodeConfig: SshNodeConfig, command: string, timeoutMs = 15000) {
     const client = await this.getConnection(nodeConfig);
 
     return new Promise((resolve, reject) => {
@@ -154,7 +178,7 @@ class SSHManager {
         reject(new Error(`命令执行超时 (${timeoutMs}ms): ${command}`));
       }, timeoutMs);
 
-      client.exec(command, (err: any, stream: any) => {
+      client.exec(command, (err: Error | null, stream: SshStream) => {
         if (err) {
           clearTimeout(timeout);
           reject(err);
@@ -165,12 +189,12 @@ class SSHManager {
         let stderr = '';
 
         stream
-          .on('close', (code: any) => {
+          .on('close', (code: number) => {
             clearTimeout(timeout);
             resolve({ stdout, stderr, code: code || 0 });
           })
-          .on('data', (data: any) => { stdout += data.toString(); })
-          .stderr.on('data', (data: any) => { stderr += data.toString(); });
+          .on('data', (data: Buffer) => { stdout += data.toString(); })
+          .stderr.on('data', (data: Buffer) => { stderr += data.toString(); });
       });
     });
   }
@@ -181,12 +205,12 @@ class SSHManager {
    * @param {object} [ptyOpts] - PTY 选项 {cols, rows, term}
    * @returns {Promise<import('ssh2').ClientChannel>} 可读写的双工 stream
    */
-  async shell(nodeConfig: any, ptyOpts: any = {}) {
+  async shell(nodeConfig: SshNodeConfig, ptyOpts: { cols?: number; rows?: number; term?: string } = {}) {
     const client = await this.getConnection(nodeConfig);
     const { cols = 80, rows = 24, term = 'xterm-256color' } = ptyOpts;
 
     return new Promise((resolve, reject) => {
-      client.shell({ term, cols, rows }, (err: any, stream: any) => {
+      client.shell({ term, cols, rows }, (err: Error | null, stream: SshStream) => {
         if (err) return reject(err);
         resolve(stream);
       });
@@ -204,7 +228,7 @@ class SSHManager {
    * @param {string} callbackUrl - 回调 URL (含完整 host + path)
    * @returns {Promise<{dispatched: boolean, error?: string}>}
    */
-  async execAsync(nodeConfig: any, command: any, jobId: any, callbackUrl: any) {
+  async execAsync(nodeConfig: SshNodeConfig, command: string, jobId: string, callbackUrl: string) {
     const client = await this.getConnection(nodeConfig);
     const clawToken = nodeConfig.clawToken || '';
 
@@ -216,7 +240,7 @@ class SSHManager {
         reject(new Error(`SSH 异步投递超时: ${nodeConfig.tunAddr}`));
       }, 10000);
 
-      client.exec(wrapper, (err: any, stream: any) => {
+      client.exec(wrapper, (err: Error | null, stream: SshStream) => {
         if (err) {
           clearTimeout(timeout);
           reject(err);
@@ -230,7 +254,7 @@ class SSHManager {
             clearTimeout(timeout);
             resolve({ dispatched: true });
           })
-          .on('data', (data: any) => {
+          .on('data', (data: Buffer) => {
             launchOutput += data.toString();
           });
       });
@@ -252,7 +276,7 @@ class SSHManager {
    * @param {string} clawToken - 节点认证 token
    * @returns {string} shell 命令
    */
-  static buildAsyncWrapper(command: any, jobId: any, callbackUrl: any, clawToken: any) {
+  static buildAsyncWrapper(command: string, jobId: string, callbackUrl: string, clawToken: string) {
     // @security: 参数字符白名单校验（安全审计 H4 修复）
     if (!/^[a-zA-Z0-9_-]+$/.test(jobId)) {
       throw new Error(`无效 jobId: 仅允许字母数字下划线和短横线`);
@@ -302,7 +326,7 @@ echo "JOB_DISPATCHED:${jobId}"`;
    * @alpha: 断开指定节点的 SSH 连接（编辑后重连用）
    * @param {string} nodeId
    */
-  disconnect(nodeId: any) {
+  disconnect(nodeId: string) {
     const entry = this.pool.get(nodeId);
     if (entry) {
       try { entry.client.end(); } catch (_e) { log.debug('断开连接忽略', (_e as Error)?.message); }

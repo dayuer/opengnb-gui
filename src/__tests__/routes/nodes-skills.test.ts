@@ -1,221 +1,134 @@
 // @ts-nocheck
 'use strict';
 
+/**
+ * 技能安装/卸载路由测试 — Agent 任务队列版
+ *
+ * 当前路由已重构为 Agent piggyback 模式：
+ *   POST /:id/skills → monitor.enqueueTask() → 200 { taskId, status: 'queued' }
+ *   DELETE /:id/skills/:skillId → monitor.enqueueTask() → 200 { taskId, status: 'queued' }
+ *
+ * 旧版直连 SSH exec 模式的测试已移除。
+ */
+
 const { describe, it } = require('node:test');
 const assert = require('node:assert/strict');
 const express = require('express');
 const { request } = require('../helpers');
 const createNodesRouter = require('../../routes/nodes');
 
-function createTestApp(execMock) {
+function createTestApp() {
   const app = express();
   app.use(express.json());
+
+  const enqueuedTasks = [];
 
   const monitor = {
     getAllStatus: () => [{ id: 'n1', online: true }],
     getNodeStatus: (id) => id === 'n1' ? { id: 'n1', online: true } : null,
   };
 
-  const sshManager = {
-    exec: execMock,
+  const taskQueue = {
+    enqueueTask: (nodeId, task) => {
+      enqueuedTasks.push({ nodeId, ...task });
+      return task;
+    },
+    getNodeTasks: () => [],
+    deleteTask: (taskId) => taskId === 'existing-task',
   };
+
+  const sshManager = { exec: async () => ({ code: 0 }) };
 
   const nodesConfig = [
-    { id: 'n1', name: 'TestNode', tunAddr: '10.0.0.1', status: 'approved' }
+    { id: 'n1', name: 'TestNode', tunAddr: '10.0.0.1', status: 'approved' },
   ];
 
-  const store = {
-    findById: (id) => {
-      if (id === 'n1') return { id: 'n1', skills: [{ id: 'old-skill' }] };
-      return null;
-    },
-    update: () => {}
-  };
-
-  const keyManager = {
-    store,
-    updateNodeSkills: (nodeId, skills) => {
-      keyManager.lastUpdatedSkills = skills;
-      return { success: true };
-    },
-    onChange: (action, nodeId) => {
-      keyManager.lastChangeAction = action;
-      keyManager.lastChangeNodeId = nodeId;
-    },
-    lastUpdatedSkills: null,
-    lastChangeAction: null,
-    lastChangeNodeId: null,
-  };
-
-  app.use('/api/nodes', createNodesRouter(monitor, sshManager, nodesConfig, keyManager));
-  return { app, keyManager };
+  app.use('/api/nodes', createNodesRouter(monitor, sshManager, nodesConfig, undefined, undefined, taskQueue));
+  return { app, enqueuedTasks, monitor, taskQueue };
 }
 
-describe('Node Skills API', () => {
+describe('Node Skills API (Agent 任务队列版)', () => {
 
-  describe('POST /api/nodes/:id/skills', () => {
-    it('should generate curl command for HTTP source and update skills on success', async () => {
-      let executedCmd = '';
-      const execMock = async (node, cmd) => {
-        executedCmd = cmd;
-        return { code: 0, stdout: 'ok', stderr: '' };
-      };
-      
-      const { app, keyManager } = createTestApp(execMock);
+  describe('POST /api/nodes/:id/skills — 安装入队', () => {
 
+    it('should enqueue clawhub install task', async () => {
+      const { app, enqueuedTasks } = createTestApp();
       const res = await request(app, 'POST', '/api/nodes/n1/skills', {
-        body: {
-          skillId: 'test-skill',
-          name: 'Test Skill',
-          source: 'https://example.com/install.sh',
-          version: '1.0.0'
-        }
+        body: { skillId: 'agent-browser', source: 'clawhub' },
       });
-
       assert.equal(res.statusCode, 200);
-      assert.ok(executedCmd.includes('curl -sSL https://example.com/install.sh | sudo bash'));
-      
-      const skills = keyManager.lastUpdatedSkills;
-      assert.ok(skills);
-      assert.equal(skills.length, 2);
-      assert.equal(skills[1].id, 'test-skill');
-      assert.equal(skills[1].name, 'Test Skill');
+      assert.equal(res.body.status, 'queued');
+      assert.ok(res.body.taskId);
+      assert.equal(enqueuedTasks.length, 1);
+      assert.equal(enqueuedTasks[0].command, 'clawhub install agent-browser');
+      assert.equal(enqueuedTasks[0].type, 'skill_install');
     });
 
-    it('should generate npm install command for NPM source', async () => {
-      let executedCmd = '';
-      const execMock = async (node, cmd) => {
-        executedCmd = cmd;
-        return { code: 0, stdout: 'ok', stderr: '' };
-      };
-      
-      const { app } = createTestApp(execMock);
-
+    it('should enqueue npm install task', async () => {
+      const { app, enqueuedTasks } = createTestApp();
       const res = await request(app, 'POST', '/api/nodes/n1/skills', {
-        body: {
-          skillId: 'npm-package',
-          source: 'npm'
-        }
+        body: { skillId: '@ollama/web-search', source: 'npm' },
       });
-
       assert.equal(res.statusCode, 200);
-      assert.ok(executedCmd.includes('$(which npm) install -g npm-package'));
+      assert.ok(enqueuedTasks[0].command.includes('npm install -g @ollama/web-search'));
+    });
+
+    it('should skip console source (no remote task)', async () => {
+      const { app, enqueuedTasks } = createTestApp();
+      const res = await request(app, 'POST', '/api/nodes/n1/skills', {
+        body: { skillId: 'claude-code', source: 'console' },
+      });
+      assert.equal(res.statusCode, 200);
+      assert.equal(res.body.status, 'completed');
+      assert.equal(enqueuedTasks.length, 0); // 不入队
     });
 
     it('should return 400 for unsupported source', async () => {
-      const { app } = createTestApp(async () => ({ code: 0 }));
+      const { app } = createTestApp();
       const res = await request(app, 'POST', '/api/nodes/n1/skills', {
-        body: {
-          skillId: 'bad',
-          source: 'ftp'
-        }
+        body: { skillId: 'bad', source: 'ftp' },
       });
       assert.equal(res.statusCode, 400);
     });
 
-    it('should register skills.sh source locally without SSH exec', async () => {
-      let sshCalled = false;
-      const execMock = async () => { sshCalled = true; return { code: 0 }; };
-      const { app, keyManager } = createTestApp(execMock);
-
+    it('should return 400 when missing skillId', async () => {
+      const { app } = createTestApp();
       const res = await request(app, 'POST', '/api/nodes/n1/skills', {
-        body: {
-          skillId: 'agent-tools',
-          name: 'Agent Tools',
-          source: 'skills.sh',
-          version: '1.0.0'
-        }
+        body: { source: 'npm' },
       });
-
-      assert.equal(res.statusCode, 200);
-      assert.equal(sshCalled, false); // skills.sh 不走 SSH
-      const skills = keyManager.lastUpdatedSkills;
-      assert.ok(skills);
-      assert.equal(skills[skills.length - 1].id, 'agent-tools');
+      assert.equal(res.statusCode, 400);
     });
 
-    it('should register console source locally without SSH exec', async () => {
-      let sshCalled = false;
-      const execMock = async () => { sshCalled = true; return { code: 0 }; };
-      const { app, keyManager } = createTestApp(execMock);
-
-      const res = await request(app, 'POST', '/api/nodes/n1/skills', {
-        body: {
-          skillId: 'built-in-monitor',
-          name: 'Built-in Monitor',
-          source: 'console'
-        }
+    it('should return 404 for unknown node', async () => {
+      const { app } = createTestApp();
+      const res = await request(app, 'POST', '/api/nodes/unknown/skills', {
+        body: { skillId: 'test', source: 'npm' },
       });
-
-      assert.equal(res.statusCode, 200);
-      assert.equal(sshCalled, false); // console 不走 SSH
-      assert.ok(keyManager.lastUpdatedSkills);
-    });
-
-    it('should trigger onChange WS broadcast after install', async () => {
-      const execMock = async () => ({ code: 0, stdout: 'ok', stderr: '' });
-      const { app, keyManager } = createTestApp(execMock);
-
-      await request(app, 'POST', '/api/nodes/n1/skills', {
-        body: { skillId: 'ws-test', source: 'npm' }
-      });
-
-      assert.equal(keyManager.lastChangeAction, 'skill_install');
-      assert.equal(keyManager.lastChangeNodeId, 'n1');
-    });
-
-    it('should return 500 if ssh execution fails', async () => {
-      const execMock = async () => ({ code: 1, stdout: '', stderr: 'failed' });
-      const { app, keyManager } = createTestApp(execMock);
-
-      const res = await request(app, 'POST', '/api/nodes/n1/skills', {
-        body: {
-          skillId: 'npm-package',
-          source: 'npm'
-        }
-      });
-
-      assert.equal(res.statusCode, 500);
-      assert.equal(keyManager.lastUpdatedSkills, null);
-      assert.ok(res.body.error.includes('安装执行失败'));
+      assert.equal(res.statusCode, 404);
     });
   });
 
-  describe('DELETE /api/nodes/:id/skills/:skillId', () => {
-    it('should execute npm uninstall and remove from skills list', async () => {
-      let executedCmd = '';
-      const execMock = async (node, cmd) => {
-        executedCmd = cmd;
-        return { code: 0, stdout: 'uninstalled', stderr: '' };
-      };
-      
-      const { app, keyManager } = createTestApp(execMock);
+  describe('DELETE /api/nodes/:id/skills/:skillId — 卸载入队', () => {
 
-      const res = await request(app, 'DELETE', '/api/nodes/n1/skills/old-skill', {});
-
+    it('should enqueue uninstall task with default disable command', async () => {
+      const { app, enqueuedTasks } = createTestApp();
+      const res = await request(app, 'DELETE', '/api/nodes/n1/skills/slack', {});
       assert.equal(res.statusCode, 200);
-      assert.ok(executedCmd.includes('$(which npm) uninstall -g old-skill'));
-      
-      const skills = keyManager.lastUpdatedSkills;
-      assert.ok(skills);
-      assert.equal(skills.length, 0); // old-skill removed
-    });
-
-    it('should trigger onChange WS broadcast after uninstall', async () => {
-      const execMock = async () => ({ code: 0, stdout: 'ok', stderr: '' });
-      const { app, keyManager } = createTestApp(execMock);
-
-      await request(app, 'DELETE', '/api/nodes/n1/skills/old-skill', {});
-
-      assert.equal(keyManager.lastChangeAction, 'skill_uninstall');
-      assert.equal(keyManager.lastChangeNodeId, 'n1');
+      assert.equal(res.body.status, 'queued');
+      assert.equal(enqueuedTasks[0].command, 'openclaw plugins disable slack');
+      assert.equal(enqueuedTasks[0].type, 'skill_uninstall');
     });
 
     it('should reject invalid skill IDs', async () => {
-      const { app } = createTestApp(async () => ({ code: 0 }));
+      const { app } = createTestApp();
       const res = await request(app, 'DELETE', '/api/nodes/n1/skills/bad;rm%20-rf%20/', {});
-      
       assert.equal(res.statusCode, 400);
+    });
+
+    it('should return 404 for unknown node', async () => {
+      const { app } = createTestApp();
+      const res = await request(app, 'DELETE', '/api/nodes/unknown/skills/test', {});
+      assert.equal(res.statusCode, 404);
     });
   });
 });

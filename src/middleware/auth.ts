@@ -1,5 +1,7 @@
 'use strict';
 
+import type { JwtPayload, UserRecord, TokenResult } from '../types/interfaces';
+
 const crypto = require('crypto');
 
 /**
@@ -10,30 +12,35 @@ const crypto = require('crypto');
  * payload: { userId, username, role, iat, exp }
  */
 
+// Express 请求/响应简化类型（避免引入完整 express 类型包）
+interface Request { headers: Record<string, string | undefined>; user?: Partial<JwtPayload>; [key: string]: unknown; }
+interface Response { status(code: number): Response; json(body: unknown): void; }
+type NextFunction = () => void;
+
 // --- 配置 ---
 const JWT_EXPIRES = 24 * 60 * 60; // 24h（秒）
 let _adminToken = process.env.ADMIN_TOKEN || '';
 let _jwtSecret = '';
-let _store: any = null; // NodeStore 实例（用于 apiToken 查找）
+let _store: { _stmts: { findUserByApiToken: { get(token: string): Partial<UserRecord> | undefined } } } | null = null;
 
 // --- Base64url ---
-const b64url = (buf: any) => Buffer.from(buf).toString('base64url');
-const b64urlDecode = (str: any) => Buffer.from(str, 'base64url');
+const b64url = (buf: string) => Buffer.from(buf).toString('base64url');
+const b64urlDecode = (str: string) => Buffer.from(str, 'base64url');
 
 // --- JWT ---
 
 /** @alpha: 设置 JWT 密钥（由 server.ts 在启动时调用） */
-function setJwtSecret(secret: any) {
+function setJwtSecret(secret: string) {
   _jwtSecret = secret;
 }
 
 /** @alpha: 注入 NodeStore（用于 apiToken 查找） */
-function setStore(store: any) {
-  _store = store;
+function setStore(store: unknown) {
+  _store = store as typeof _store;
 }
 
 /** 签发 JWT */
-function signJwt(payload: any) {
+function signJwt(payload: Omit<JwtPayload, 'iat' | 'exp'>): string {
   const header = b64url(JSON.stringify({ alg: 'HS256', typ: 'JWT' }));
   const now = Math.floor(Date.now() / 1000);
   const body = b64url(JSON.stringify({
@@ -47,7 +54,7 @@ function signJwt(payload: any) {
 }
 
 /** 验证 JWT，返回 payload 或 null */
-function verifyJwt(token: any) {
+function verifyJwt(token: string): JwtPayload | null {
   try {
     const parts = token.split('.');
     if (parts.length !== 3) return null;
@@ -67,14 +74,14 @@ function verifyJwt(token: any) {
 // --- 密码哈希 ---
 
 /** scrypt 哈希密码（同步） */
-function hashPassword(password: any) {
+function hashPassword(password: string): string {
   const salt = crypto.randomBytes(16).toString('hex');
   const hash = crypto.scryptSync(password, salt, 64).toString('hex');
   return `${salt}:${hash}`;
 }
 
 /** 验证密码 */
-function verifyPassword(password: any, stored: any) {
+function verifyPassword(password: string, stored: string): boolean {
   const [salt, hash] = stored.split(':');
   const derived = crypto.scryptSync(password, salt, 64).toString('hex');
   return timingSafeEqual(derived, hash);
@@ -83,17 +90,17 @@ function verifyPassword(password: any, stored: any) {
 // --- 中间件 ---
 
 /** 初始化 Token — 向后兼容 */
-function initToken() {
+function initToken(): string {
   if (!_adminToken) {
     _adminToken = crypto.randomBytes(24).toString('hex');
-    console.log(`\n  ⚠️  未配置 ADMIN_TOKEN，已自动生成:`);
-    console.log(`  🔑  ${_adminToken}\n`);
+    console.log(`\\n  ⚠️  未配置 ADMIN_TOKEN，已自动生成:`);
+    console.log(`  🔑  ${_adminToken}\\n`);
   }
   return _adminToken;
 }
 
 /** 获取当前 ADMIN_TOKEN */
-function getAdminToken() {
+function getAdminToken(): string {
   return _adminToken;
 }
 
@@ -103,7 +110,7 @@ function getAdminToken() {
  * 2. 回退检查旧 ADMIN_TOKEN
  * 3. 都不通过 → 401
  */
-function requireAuth(req: any, res: any, next: any) {
+function requireAuth(req: Request, res: Response, next: NextFunction) {
   const authHeader = req.headers.authorization;
   if (!authHeader || !authHeader.startsWith('Bearer ')) {
     return res.status(401).json({ error: '未提供认证 Token' });
@@ -137,10 +144,46 @@ function requireAuth(req: any, res: any, next: any) {
 }
 
 /**
+ * 统一 Token 解析器 — 纯函数，可在任意上下文（Express 中间件 / WS / 内联认证）调用
+ *
+ * 三级 fallback 顺序:
+ *   1. adminToken 精确匹配
+ *   2. JWT 验签 + 解析
+ *   3. apiToken 数据库查找
+ *
+ * @param token - Bearer 后的原始 token 字符串
+ * @returns {{ valid: boolean, userId?: string }}
+ */
+function resolveToken(token: string): TokenResult {
+  if (!token || typeof token !== 'string') return { valid: false };
+
+  // 1. adminToken 精确匹配
+  if (_adminToken && timingSafeEqual(token, _adminToken)) {
+    return { valid: true, userId: 'admin', source: 'adminToken' };
+  }
+
+  // 2. JWT
+  const payload = verifyJwt(token);
+  if (payload) {
+    return { valid: true, userId: payload.userId || '', source: 'jwt' };
+  }
+
+  // 3. apiToken
+  if (_store && token.length <= 64) {
+    const user = _store._stmts.findUserByApiToken?.get(token);
+    if (user) {
+      return { valid: true, userId: user.id, source: 'apiToken' };
+    }
+  }
+
+  return { valid: false };
+}
+
+/**
  * Express 中间件：要求管理员角色
  * 必须在 requireAuth 之后使用
  */
-function requireAdmin(req: any, res: any, next: any) {
+function requireAdmin(req: Request, res: Response, next: NextFunction) {
   if (!req.user || req.user.role !== 'admin') {
     return res.status(403).json({ error: '需要管理员权限' });
   }
@@ -148,7 +191,7 @@ function requireAdmin(req: any, res: any, next: any) {
 }
 
 /** 常量时间字符串比较 */
-function timingSafeEqual(a: any, b: any) {
+function timingSafeEqual(a: string, b: string): boolean {
   if (typeof a !== 'string' || typeof b !== 'string') return false;
   const bufA = Buffer.from(a);
   const bufB = Buffer.from(b);
@@ -159,6 +202,6 @@ function timingSafeEqual(a: any, b: any) {
 module.exports = {
   requireAuth, requireAdmin, initToken, getAdminToken,
   setJwtSecret, setStore, signJwt, verifyJwt,
-  hashPassword, verifyPassword,
+  hashPassword, verifyPassword, resolveToken,
 };
 export {}; // CJS 模块标记

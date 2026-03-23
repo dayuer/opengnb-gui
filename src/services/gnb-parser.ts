@@ -12,16 +12,16 @@
  * @param {string} raw - gnb_ctl 原始输出文本
  * @returns {object} 解析后的结构化数据
  */
-function parseGnbCtlStatus(raw: any) {
-  const result: any = {
+function parseGnbCtlStatus(raw: string) {
+  const result: { core: Record<string, string>; nodes: Record<string, string | number>[] } = {
     core: {},
     nodes: [],
   };
 
-  const lines = raw.split('\n').map((l: any) => l.trim()).filter(Boolean);
+  const lines = raw.split('\n').map((l: string) => l.trim()).filter(Boolean);
 
   let section = 'unknown';
-  let currentNode: any = null;
+  let currentNode: Record<string, string | number> | null = null;
 
   for (const line of lines) {
     // 检测段落标记
@@ -93,10 +93,10 @@ function parseGnbCtlStatus(raw: any) {
  * @param {string} raw - gnb_ctl 地址输出
  * @returns {Array<{uuid: string, addresses: Array}>}
  */
-function parseGnbCtlAddressList(raw: any) {
-  const nodes = [];
+function parseGnbCtlAddressList(raw: string) {
+  const nodes: { uuid: string; addresses: { ip: string; port: number; type: string }[] }[] = [];
   const lines = raw.split('\n').filter(Boolean);
-  let currentNode: any = null;
+  let currentNode: { uuid: string; addresses: { ip: string; port: number; type: string }[] } | null = null;
 
   for (const line of lines) {
     const nodeMatch = line.match(/^(\d{3,})\s/);
@@ -124,32 +124,32 @@ function parseGnbCtlAddressList(raw: any) {
 
 // --- 辅助函数 ---
 
-function extractValue(line: any) {
+function extractValue(line: string) {
   const parts = line.split(/[\s:=]+/);
   return parts.length > 1 ? parts.slice(1).join(' ').trim() : '';
 }
 
-function extractIPv4(line: any) {
+function extractIPv4(line: string) {
   const match = line.match(/(\d+\.\d+\.\d+\.\d+)/);
   return match ? match[1] : '';
 }
 
-function extractNumber(line: any) {
+function extractNumber(line: string) {
   const match = line.match(/(\d+)/);
   return match ? parseInt(match[1], 10) : 0;
 }
 
-function extractStatusLabel(line: any) {
+function extractStatusLabel(line: string) {
   if (line.includes('PONG') || line.includes('Direct')) return 'Direct';
   if (line.includes('PING') || line.includes('Detecting')) return 'Detecting';
   return 'Indirect';
 }
 
-function parseKeyValue(line: any) {
+function parseKeyValue(line: string) {
   const match = line.match(/^([a-zA-Z_]\w*)\s*[=:]\s*(.+)$/);
   if (!match) return null;
   return {
-    key: match[1].replace(/_([a-z])/g, (_: any, c: any) => c.toUpperCase()),
+    key: match[1].replace(/_([a-z])/g, (_: string, c: string) => c.toUpperCase()),
     value: match[2].trim(),
   };
 }
@@ -159,7 +159,7 @@ function parseKeyValue(line: any) {
  * @param {number} bytes
  * @returns {string}
  */
-function formatBytes(bytes: any) {
+function formatBytes(bytes: number) {
   if (bytes >= 1024 * 1024 * 1024) return `${(bytes / (1024 * 1024 * 1024)).toFixed(3)}G`;
   if (bytes >= 1024 * 1024) return `${(bytes / (1024 * 1024)).toFixed(3)}M`;
   if (bytes >= 1024) return `${(bytes / 1024).toFixed(3)}K`;

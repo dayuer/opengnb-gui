@@ -1,4 +1,5 @@
 'use strict';
+import type { Request, Response, NextFunction } from 'express';
 
 /**
  * 滑动窗口速率限制中间件（零依赖）
@@ -32,7 +33,7 @@ function createRateLimit({ windowMs = 60000, max = 100, message }: any = {}) {
   }, 60000);
   cleanupInterval.unref(); // 不阻止进程退出
 
-  return (req: any, res: any, next: any) => {
+  return (req: Request, res: Response, next: NextFunction) => {
     const ip = req.headers['x-forwarded-for']?.split(',')[0]?.trim() || req.ip || 'unknown';
     const now = Date.now();
 

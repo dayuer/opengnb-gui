@@ -14,19 +14,28 @@ const log = createLogger('GnbConfig');
  *
  * 从 KeyManager 提取，由 KeyManager 内部委托调用。
  */
+/** GnbConfig 依赖的 Store 接口 */
+interface GnbNodeStore {
+  approvedWithGnb(): { gnbNodeId: string; tunAddr: string; netmask?: string }[];
+  all(): { gnbNodeId?: string; tunAddr?: string }[];
+  allTunAddrs(): Set<string>;
+  findById(id: string): Record<string, unknown> | undefined;
+  update(id: string, data: Record<string, unknown>): void;
+}
+
 class GnbConfig {
   gnbNodeId: string;
   gnbConfDir: string;
   gnbTunAddr: string;
   gnbIndexAddr: string;
-  store: any;
+  store: GnbNodeStore;
 
   constructor(options: {
     gnbNodeId: string;
     gnbConfDir: string;
     gnbTunAddr: string;
     gnbIndexAddr: string;
-    store: any;
+    store: GnbNodeStore;
   }) {
     this.gnbNodeId = options.gnbNodeId;
     this.gnbConfDir = options.gnbConfDir;
@@ -62,7 +71,7 @@ class GnbConfig {
   /**
    * 审批后更新 Console 的 GNB 配置（全量重写）
    */
-  updateGnbConfig(node: any): void {
+  updateGnbConfig(node: { id: string; tunAddr?: string; gnbNodeId?: string }): void {
     if (!node.tunAddr) return;
     if (!node.gnbNodeId) {
       const gnbNodeId = this.nextGnbNodeId();
@@ -90,11 +99,11 @@ class GnbConfig {
       try {
         execSync('systemctl restart gnb', { timeout: 10000 });
         log.info('GNB 服务已重启');
-      } catch (e: any) {
-        log.warn(`GNB 重启跳过: ${e.message}`);
+      } catch (e: unknown) {
+        log.warn(`GNB 重启跳过: ${e instanceof Error ? e.message : String(e)}`);
       }
-    } catch (err: any) {
-      log.error(`GNB 全量重写失败: ${err.message}`);
+    } catch (err: unknown) {
+      log.error(`GNB 全量重写失败: ${err instanceof Error ? err.message : String(err)}`);
     }
   }
 
@@ -104,8 +113,8 @@ class GnbConfig {
   nextGnbNodeId(): string {
     const allNodes = this.store.all();
     const usedIds = allNodes
-      .filter((n: any) => n.gnbNodeId)
-      .map((n: any) => parseInt(n.gnbNodeId, 10));
+      .filter((n: { gnbNodeId?: string }) => n.gnbNodeId)
+      .map((n: { gnbNodeId?: string }) => parseInt(n.gnbNodeId!, 10));
     const consoleId = parseInt(this.gnbNodeId, 10);
     usedIds.push(consoleId);
     return String(Math.max(...usedIds) + 1);
@@ -159,8 +168,8 @@ class GnbConfig {
 
     try {
       execSync('systemctl restart gnb', { timeout: 10000 });
-    } catch (e: any) {
-      log.warn(`GNB 重启服务跳过: ${e.message}`);
+    } catch (e: unknown) {
+      log.warn(`GNB 重启服务跳过: ${e instanceof Error ? e.message : String(e)}`);
     }
 
     return { success: true, message: '公钥已保存' };
@@ -169,7 +178,7 @@ class GnbConfig {
   /**
    * 编辑 tunAddr 时重写 GNB 配置（全量模式）
    */
-  updateGnbAddressConf(node: any): void {
+  updateGnbAddressConf(node: { tunAddr?: string; gnbNodeId?: string }): void {
     if (!node.tunAddr || !node.gnbNodeId) return;
     this.writeFullGnbConf();
   }

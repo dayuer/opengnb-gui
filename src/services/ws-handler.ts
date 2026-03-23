@@ -2,7 +2,29 @@
 
 const { WebSocketServer } = require('ws');
 const { createLogger } = require('./logger');
+const { resolveToken } = require('../middleware/auth');
 const log = createLogger('WsHandler');
+import type { Server } from 'http';
+import type { Duplex } from 'stream';
+
+/** WebSocket 客户端扩展 */
+interface WsClient {
+  readyState: number;
+  _authenticated?: boolean;
+  _userId?: string;
+  send(data: string | Buffer): void;
+  close(code?: number, reason?: string): void;
+  once(event: string, fn: (...args: unknown[]) => void): void;
+  on(event: string, fn: (...args: unknown[]) => void): void;
+}
+
+/** 状态节点 */
+interface WsStatusNode {
+  id: string;
+  name?: string;
+  groupId?: string;
+  [key: string]: unknown;
+}
 
 const MAX_WS_CLIENTS = 10;
 
@@ -18,47 +40,30 @@ const MAX_WS_CLIENTS = 10;
  * @returns {{ wss, broadcast }}
  */
 function createWsHandlers(deps: {
-  server: any,
-  keyManager: any,
-  monitor: any,
-  aiOps: any,
-  sshManager: any,
-  audit: any,
-  opsLog: { loadAllOpsLogs: () => Record<string, any> },
-  adminToken: string,
-  verifyJwt: (token: string) => any,
-  store: any,
+  server: Server,
+  keyManager: { getApprovedNodesConfig(): Record<string, unknown>[]; getPendingNodes(): Record<string, unknown>[]; getGroups(): unknown[]; getNodesByOwner(userId: string): unknown[] },
+  monitor: { getAllStatus(): WsStatusNode[] },
+  aiOps: { _resolveNode(nodeId: string | null): Record<string, unknown> | undefined; streamChat(nc: Record<string, unknown> | null | undefined, prompt: string, cb: (chunk: Record<string, unknown>) => void): { kill(): void } },
+  sshManager: { shell(nodeConfig: Record<string, unknown>, opts: { cols: number; rows: number }): Promise<unknown> },
+  audit: { log(action: string, data: Record<string, unknown>, req?: unknown): void },
+  opsLog: { loadAllOpsLogs: () => Record<string, unknown> },
 }) {
-  const { server, keyManager, monitor, aiOps, sshManager, audit, opsLog, adminToken, verifyJwt, store } = deps;
+  const { server, keyManager, monitor, aiOps, sshManager, audit, opsLog } = deps;
 
   // --- 辅助函数 ---
 
   /** 合并监控数据 + Claw 配置 */
-  function enrichNodesData(statusArr: any) {
+  function enrichNodesData(statusArr: WsStatusNode[]) {
     const configs = keyManager.getApprovedNodesConfig();
-    return statusArr.map((s: any) => {
-      const cfg = configs.find((c: any) => c.id === s.id);
+    return statusArr.map((s: WsStatusNode) => {
+      const cfg = configs.find((c: Record<string, unknown>) => c.id === s.id);
       return {
         ...s,
-        clawToken: cfg?.clawToken ? cfg.clawToken.substring(0, 8) + '...' : '',
+        clawToken: cfg?.clawToken && typeof cfg.clawToken === 'string' ? cfg.clawToken.substring(0, 8) + '...' : '',
         clawPort: cfg?.clawPort || 0,
         groupId: cfg?.groupId || s.groupId || '',
       };
     });
-  }
-
-  /** WS token 校验 — 兼容 adminToken、JWT、apiToken */
-  function resolveWsToken(token: any) {
-    if (adminToken && token === adminToken) return { valid: true, userId: 'admin' };
-    // JWT
-    const payload = verifyJwt(token);
-    if (payload) return { valid: true, userId: payload.userId || '' };
-    // apiToken
-    if (store && token.length <= 64) {
-      const user = store._stmts.findUserByApiToken?.get(token);
-      if (user) return { valid: true, userId: user.id };
-    }
-    return { valid: false, userId: '' };
   }
 
   // ═══════════════════════════════════════
@@ -67,7 +72,7 @@ function createWsHandlers(deps: {
 
   const wss = new WebSocketServer({ noServer: true });
 
-  wss.on('connection', (ws: any, req: any) => {
+  wss.on('connection', (ws: WsClient, req: { url: string }) => {
     if (wss.clients.size > MAX_WS_CLIENTS) {
       ws.close(4002, '连接数超限');
       return;
@@ -77,7 +82,7 @@ function createWsHandlers(deps: {
     const url = new URL(req.url, 'http://localhost');
     const wsToken = url.searchParams.get('token');
     if (wsToken) {
-      const result = resolveWsToken(wsToken);
+      const result = resolveToken(wsToken);
       if (result.valid) {
         authenticated = true;
         ws._userId = result.userId;
@@ -85,7 +90,7 @@ function createWsHandlers(deps: {
     }
 
     const AUTH_TIMEOUT = 5000;
-    let authTimer: any = null;
+    let authTimer: ReturnType<typeof setTimeout> | null = null;
 
     function onAuthenticated() {
       if (authTimer) { clearTimeout(authTimer); authTimer = null; }
@@ -97,7 +102,7 @@ function createWsHandlers(deps: {
       ws.send(JSON.stringify({
         type: 'snapshot',
         data: enrichNodesData(monitor.getAllStatus()),
-        pending: keyManager.getPendingNodes().filter((n: any) => !n.ownerId || n.ownerId === userId),
+        pending: keyManager.getPendingNodes().filter((n: Record<string, unknown>) => !n.ownerId || n.ownerId === userId),
         groups: keyManager.getGroups(),
         allNodes: keyManager.getNodesByOwner(userId),
         timestamp: new Date().toISOString(),
@@ -118,11 +123,11 @@ function createWsHandlers(deps: {
         }
       }, AUTH_TIMEOUT);
 
-      ws.once('message', (data: any) => {
+      ws.once('message', (data: Buffer) => {
         try {
           const msg = JSON.parse(data.toString());
           if (msg.type === 'auth' && msg.token) {
-            const result = resolveWsToken(msg.token);
+            const result = resolveToken(msg.token);
             if (result.valid) {
               authenticated = true;
               ws._userId = result.userId;
@@ -152,7 +157,7 @@ function createWsHandlers(deps: {
 
   const wssSsh = new WebSocketServer({ noServer: true });
 
-  wssSsh.on('connection', async (ws: any, req: any) => {
+  wssSsh.on('connection', async (ws: WsClient, req: { url: string }) => {
     const url = new URL(req.url, 'http://localhost');
     const nodeId = url.searchParams.get('nodeId');
     const cols = parseInt(url.searchParams.get('cols') as string) || 80;
@@ -163,14 +168,14 @@ function createWsHandlers(deps: {
       ws.close(4001, '认证超时');
     }, AUTH_TIMEOUT);
 
-    ws.once('message', async (data: any) => {
+    ws.once('message', async (data: Buffer) => {
       clearTimeout(authTimer);
       let msg;
       try { msg = JSON.parse(data.toString()); } catch (_) {
         ws.close(4001, '认证消息格式错误');
         return;
       }
-      if (msg.type !== 'auth' || !msg.token || !resolveWsToken(msg.token).valid) {
+      if (msg.type !== 'auth' || !msg.token || !resolveToken(msg.token).valid) {
         ws.close(4001, '认证失败');
         return;
       }
@@ -181,7 +186,7 @@ function createWsHandlers(deps: {
         return;
       }
       const configs = keyManager.getApprovedNodesConfig();
-      const nodeConfig = configs.find((c: any) => c.id === targetNodeId);
+      const nodeConfig = configs.find((c: Record<string, unknown>) => c.id === targetNodeId);
       if (!nodeConfig) {
         ws.close(4004, '节点不存在');
         return;
@@ -192,17 +197,17 @@ function createWsHandlers(deps: {
       let sshStream = null;
       try {
         sshStream = await sshManager.shell(nodeConfig, { cols: msg.cols || cols, rows: msg.rows || rows });
-      } catch (err: any) {
-        log.error(`SSH Shell 创建失败: ${err.message}`);
-        ws.send(`\r\n\x1b[31m连接失败: ${err.message}\x1b[0m\r\n`);
+      } catch (err: unknown) {
+        log.error(`SSH Shell 创建失败: ${err instanceof Error ? err.message : String(err)}`);
+        ws.send(`\r\n\x1b[31m连接失败: ${err instanceof Error ? err.message : String(err)}\x1b[0m\r\n`);
         ws.close(4005, 'SSH 连接失败');
         return;
       }
 
-      sshStream.on('data', (data: any) => {
+      sshStream.on('data', (data: Buffer) => {
         if (ws.readyState === 1) ws.send(data);
       });
-      sshStream.stderr.on('data', (data: any) => {
+      sshStream.stderr.on('data', (data: Buffer) => {
         if (ws.readyState === 1) ws.send(data);
       });
       sshStream.on('close', () => {
@@ -210,7 +215,7 @@ function createWsHandlers(deps: {
         if (ws.readyState === 1) ws.close(1000, 'SSH 会话结束');
       });
 
-      ws.on('message', (msg: any) => {
+      ws.on('message', (msg: Buffer | string) => {
         if (!sshStream || sshStream.destroyed) return;
         if (typeof msg === 'string' || (msg instanceof Buffer && msg[0] === 0x7b)) {
           try {
@@ -231,7 +236,7 @@ function createWsHandlers(deps: {
           sshStream.destroy();
         }
       });
-      ws.on('error', (err: any) => {
+      ws.on('error', (err: Error) => {
         log.error(`WebSocket 错误: ${err.message}`);
         if (sshStream && !sshStream.destroyed) sshStream.destroy();
       });
@@ -244,16 +249,16 @@ function createWsHandlers(deps: {
 
   const wssAi = new WebSocketServer({ noServer: true });
 
-  wssAi.on('connection', (ws: any, req: any) => {
+  wssAi.on('connection', (ws: WsClient, req: { url: string }) => {
     const AUTH_TIMEOUT = 5000;
     let authenticated = false;
-    let nodeId: any = null;
+    let nodeId: string | null = null;
 
     const authTimer = setTimeout(() => {
       if (!authenticated) ws.close(4001, '认证超时');
     }, AUTH_TIMEOUT);
 
-    ws.once('message', (raw: any) => {
+    ws.once('message', (raw: Buffer) => {
       clearTimeout(authTimer);
       let msg;
       try { msg = JSON.parse(raw.toString()); } catch (_) {
@@ -264,7 +269,7 @@ function createWsHandlers(deps: {
         ws.close(4001, '认证消息格式错误');
         return;
       }
-      const authResult = resolveWsToken(msg.token);
+      const authResult = resolveToken(msg.token);
       if (!authResult.valid) {
         ws.send(JSON.stringify({ type: 'error', text: '认证失败' }));
         ws.close(4001);
@@ -275,9 +280,9 @@ function createWsHandlers(deps: {
       log.info(`AI 连接: nodeId=${nodeId}, user=${authResult.userId}`);
 
       const nodeConfig = aiOps._resolveNode(nodeId);
-      let activeHandle: any = null;
+      let activeHandle: { kill(): void } | null = null;
 
-      ws.on('message', (raw: any) => {
+      ws.on('message', (raw: Buffer) => {
         let msg;
         try { msg = JSON.parse(raw.toString()); } catch (_) { return; }
 
@@ -288,7 +293,7 @@ function createWsHandlers(deps: {
           }
 
           ws.send(JSON.stringify({ type: 'ack', text: msg.text }));
-          activeHandle = aiOps.streamChat(nodeConfig, msg.text, (chunk: any) => {
+          activeHandle = aiOps.streamChat(nodeConfig, msg.text, (chunk: Record<string, unknown>) => {
             if (ws.readyState !== 1) return;
             ws.send(JSON.stringify(chunk));
             if (chunk.type === 'done' || chunk.type === 'error') {
@@ -303,7 +308,7 @@ function createWsHandlers(deps: {
         if (activeHandle) activeHandle.kill();
       });
 
-      ws.on('error', (err: any) => {
+      ws.on('error', (err: Error) => {
         log.error(`AI WebSocket 错误: ${err.message}`);
         if (activeHandle) activeHandle.kill();
       });
@@ -314,14 +319,14 @@ function createWsHandlers(deps: {
   // HTTP upgrade 路由分发
   // ═══════════════════════════════════════
 
-  server.on('upgrade', (req: any, socket: any, head: any) => {
+  server.on('upgrade', (req: { url: string }, socket: Duplex, head: Buffer) => {
     const { pathname } = new URL(req.url, 'http://localhost');
     if (pathname === '/ws') {
-      wss.handleUpgrade(req, socket, head, (ws: any) => { wss.emit('connection', ws, req); });
+      wss.handleUpgrade(req, socket, head, (ws: WsClient) => { wss.emit('connection', ws, req); });
     } else if (pathname === '/ws/ssh') {
-      wssSsh.handleUpgrade(req, socket, head, (ws: any) => { wssSsh.emit('connection', ws, req); });
+      wssSsh.handleUpgrade(req, socket, head, (ws: WsClient) => { wssSsh.emit('connection', ws, req); });
     } else if (pathname === '/ws/ai') {
-      wssAi.handleUpgrade(req, socket, head, (ws: any) => { wssAi.emit('connection', ws, req); });
+      wssAi.handleUpgrade(req, socket, head, (ws: WsClient) => { wssAi.emit('connection', ws, req); });
     } else {
       socket.destroy();
     }
@@ -330,7 +335,7 @@ function createWsHandlers(deps: {
   // --- 公开接口 ---
 
   /** 向所有已认证 WS 客户端广播消息 */
-  function broadcast(msg: any) {
+  function broadcast(msg: string | Record<string, unknown>) {
     const data = typeof msg === 'string' ? msg : JSON.stringify(msg);
     for (const client of wss.clients) {
       if (client.readyState === 1) client.send(data);
@@ -353,14 +358,14 @@ function createWsHandlers(deps: {
   }
 
   /** 推送监控更新（monitor 'update' 事件的处理器） */
-  function broadcastMonitorUpdate(allStatus: any) {
+  function broadcastMonitorUpdate(allStatus: WsStatusNode[]) {
     for (const client of wss.clients) {
       if (client.readyState !== 1 || !client._authenticated) continue;
       const userId = client._userId || '';
       const payload = JSON.stringify({
         type: 'update',
         data: enrichNodesData(allStatus),
-        pending: keyManager.getPendingNodes().filter((n: any) => !n.ownerId || n.ownerId === userId),
+        pending: keyManager.getPendingNodes().filter((n: Record<string, unknown>) => !n.ownerId || n.ownerId === userId),
         groups: keyManager.getGroups(),
         allNodes: keyManager.getNodesByOwner(userId),
         timestamp: new Date().toISOString(),

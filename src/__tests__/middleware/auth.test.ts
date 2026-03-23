@@ -82,3 +82,70 @@ describe('middleware/auth', () => {
     assert.equal(mod.getAdminToken(), token);
   });
 });
+
+// ═══════════════════════════════════════
+// resolveToken — 统一 Token 解析器
+// ═══════════════════════════════════════
+
+describe('resolveToken', () => {
+  let resolveToken, setJwtSecret, signJwt, setStore, initToken;
+
+  beforeEach(() => {
+    delete require.cache[require.resolve('../../middleware/auth')];
+    process.env.ADMIN_TOKEN = 'test-admin-token';
+    const mod = require('../../middleware/auth');
+    resolveToken = mod.resolveToken;
+    setJwtSecret = mod.setJwtSecret;
+    signJwt = mod.signJwt;
+    setStore = mod.setStore;
+    initToken = mod.initToken;
+    initToken();
+    setJwtSecret('test-secret-key-for-resolveToken');
+  });
+
+  it('should resolve adminToken → { valid: true, userId: "admin" }', () => {
+    const result = resolveToken('test-admin-token');
+    assert.ok(result.valid);
+    assert.equal(result.userId, 'admin');
+  });
+
+  it('should resolve valid JWT → { valid: true, userId }', () => {
+    const jwt = signJwt({ userId: 'user-123', username: 'alice', role: 'admin' });
+    const result = resolveToken(jwt);
+    assert.ok(result.valid);
+    assert.equal(result.userId, 'user-123');
+  });
+
+  it('should resolve valid apiToken → { valid: true, userId }', () => {
+    const mockStore = {
+      _stmts: {
+        findUserByApiToken: {
+          get: (token) => token === 'api-token-abc' ? { id: 'u-42', username: 'bob' } : undefined,
+        },
+      },
+    };
+    setStore(mockStore);
+    const result = resolveToken('api-token-abc');
+    assert.ok(result.valid);
+    assert.equal(result.userId, 'u-42');
+  });
+
+  it('should reject invalid token → { valid: false }', () => {
+    const result = resolveToken('completely-wrong');
+    assert.equal(result.valid, false);
+  });
+
+  it('should reject null/undefined/empty', () => {
+    assert.equal(resolveToken(null).valid, false);
+    assert.equal(resolveToken(undefined).valid, false);
+    assert.equal(resolveToken('').valid, false);
+  });
+
+  it('should prefer JWT over adminToken when both could match', () => {
+    // JWT 有三段，adminToken 通常没有 → JWT 优先尝试
+    const jwt = signJwt({ userId: 'jwt-user', role: 'admin' });
+    const result = resolveToken(jwt);
+    assert.ok(result.valid);
+    assert.equal(result.userId, 'jwt-user');
+  });
+});

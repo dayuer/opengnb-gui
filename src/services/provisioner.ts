@@ -12,12 +12,37 @@ const EventEmitter = require('events');
  *   4. 安装 OpenClaw Agent（Node.js + 配置）
  *   5. 验证服务运行状态
  */
-class Provisioner extends EventEmitter {
-  sshManager: any;
-  config: any;
-  tasks: Map<string, any>;
 
-  constructor(options: any) {
+/** SSH 管理器接口 */
+interface SshManagerLike {
+  exec(nodeConfig: NodeConfig, command: string, timeout?: number): Promise<{ stdout: string; stderr: string; code: number }>;
+}
+
+/** 节点配置 */
+interface NodeConfig {
+  id: string;
+  name: string;
+  tunAddr: string;
+  sshPort?: number;
+  sshUser?: string;
+  gnbMapPath?: string;
+  gnbCtlPath?: string;
+  [key: string]: unknown;
+}
+
+/** 配置下发选项 */
+interface ProvisionOptions {
+  installGnb?: boolean;
+  installClaw?: boolean;
+  gnbConf?: Record<string, unknown>;
+}
+
+class Provisioner extends EventEmitter {
+  sshManager: SshManagerLike;
+  config: Record<string, unknown>;
+  tasks: Map<string, Record<string, unknown>>;
+
+  constructor(options: { sshManager: SshManagerLike; provisionConfig?: Record<string, unknown> }) {
     super();
     this.sshManager = options.sshManager;
     this.config = options.provisionConfig || {};
@@ -33,7 +58,7 @@ class Provisioner extends EventEmitter {
    * @param {object} [options.gnbConf] - GNB 配置参数
    * @returns {Promise<{success: boolean, logs: string[]}>}
    */
-  async provision(nodeConfig: any, options: any = {}) {
+  async provision(nodeConfig: NodeConfig, options: ProvisionOptions = {}) {
     const taskId = nodeConfig.id;
     const logs: string[] = [];
     const log = (msg: string) => {
@@ -83,9 +108,10 @@ class Provisioner extends EventEmitter {
       log('✅ 配置下发完成');
       this.tasks.set(taskId, { status: 'done', logs, finishedAt: new Date().toISOString() });
       return { success: true, logs };
-    } catch (err: any) {
-      log(`❌ 配置下发失败: ${err.message}`);
-      this.tasks.set(taskId, { status: 'failed', logs, error: err.message });
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : String(err);
+      log(`❌ 配置下发失败: ${msg}`);
+      this.tasks.set(taskId, { status: 'failed', logs, error: msg });
       return { success: false, logs };
     }
   }
@@ -94,7 +120,7 @@ class Provisioner extends EventEmitter {
    * 安装 GNB
    * @private
    */
-  async _installGnb(nodeConfig: any, gnbConf: any, log: any) {
+  async _installGnb(nodeConfig: NodeConfig, gnbConf: Record<string, unknown>, log: (msg: string) => void) {
     // 检查是否已安装
     const check = await this._execQuiet(nodeConfig, 'which gnb 2>/dev/null || echo "NOT_FOUND"');
     if (!check.includes('NOT_FOUND')) {
@@ -121,7 +147,7 @@ class Provisioner extends EventEmitter {
    * 生成 GNB 配置并配置 systemd
    * @private
    */
-  async _configureGnb(nodeConfig: any, gnbConf: any, log: any) {
+  async _configureGnb(nodeConfig: NodeConfig, gnbConf: Record<string, unknown>, log: (msg: string) => void) {
     const nodeId = nodeConfig.id;
     const confDir = `/opt/gnb/conf/${nodeId}`;
 
@@ -174,7 +200,7 @@ SVCUNIT`, log);
    * 流程: 升级 Node → npm install -g openclaw → 手动创建 config + systemd → 提取 token
    * @private
    */
-  async _installClaw(nodeConfig: any, log: any) {
+  async _installClaw(nodeConfig: NodeConfig, log: (msg: string) => void) {
     // @alpha: 统一 PATH — sudo 默认 secure_path 不含 /usr/local/bin
     const envPath = 'export PATH=/usr/local/bin:$PATH;';
     const sudoEnv = 'sudo env PATH=/usr/local/bin:$PATH';
@@ -213,8 +239,8 @@ SVCUNIT`, log);
           );
           const listData = JSON.parse(listResp || '{}');
           const tgzFile = (listData.files || [])
-            .map((f: any) => f.name)
-            .filter((n: any) => n.endsWith('.tgz'))
+            .map((f: { name: string }) => f.name)
+            .filter((n: string) => n.endsWith('.tgz'))
             .sort()
             .pop(); // 取最新
 
@@ -233,8 +259,8 @@ SVCUNIT`, log);
           } else {
             log('      Console 镜像无 openclaw 包，回退到 npm');
           }
-        } catch (e: any) {
-          log(`      Console 镜像安装失败 (${e.message})，回退到 npm`);
+        } catch (e: unknown) {
+          log(`      Console 镜像安装失败 (${e instanceof Error ? e.message : String(e)})，回退到 npm`);
         }
       }
 
@@ -335,7 +361,7 @@ SVCUNIT`, log);
    * 从终端提取 OpenClaw Gateway Token
    * @private
    */
-  async _extractClawToken(nodeConfig: any, log: any) {
+  async _extractClawToken(nodeConfig: NodeConfig, log: (msg: string) => void) {
     // OpenClaw 2026.x 将 token 存储在 openclaw.json → gateway.auth.token
     const tokenPaths = [
       // 优先: 从 config 文件直接提取 token
@@ -382,7 +408,7 @@ SVCUNIT`, log);
    * 注意: Gateway 没有 /status JSON 端点，通过进程检测 + 端口可达性验证
    * @private
    */
-  async _verifyClawRPC(nodeConfig: any, token: any, log: any) {
+  async _verifyClawRPC(nodeConfig: NodeConfig, token: string, log: (msg: string) => void) {
     try {
       // 检查进程是否运行
       const proc = (await this._execQuiet(nodeConfig, 'pgrep -f openclaw-gateway >/dev/null 2>&1 && echo RUNNING || echo STOPPED')).trim();
@@ -402,8 +428,8 @@ SVCUNIT`, log);
       }
       log(`      Gateway 端口响应: ${portCheck}`);
       return false;
-    } catch (err: any) {
-      log(`      RPC 验证失败: ${err.message}`);
+    } catch (err: unknown) {
+      log(`      RPC 验证失败: ${err instanceof Error ? err.message : String(err)}`);
       return false;
     }
   }
@@ -413,7 +439,7 @@ SVCUNIT`, log);
    * @private
    * @returns {string|null}
    */
-  _getConsoleApiBase(_nodeConfig: any) {
+  _getConsoleApiBase(_nodeConfig: NodeConfig) {
     return this.config.consoleApiBase || null;
   }
 
@@ -421,7 +447,7 @@ SVCUNIT`, log);
    * 验证服务状态
    * @private
    */
-  async _verify(nodeConfig: any, log: any) {
+  async _verify(nodeConfig: NodeConfig, log: (msg: string) => void) {
     const gnbStatus = await this._execQuiet(nodeConfig, 'sudo systemctl is-active gnb 2>/dev/null || echo "inactive"');
     log(`      GNB 服务: ${gnbStatus.trim()}`);
 
@@ -433,14 +459,14 @@ SVCUNIT`, log);
    * 执行远程命令并记录日志
    * @private
    */
-  async _exec(nodeConfig: any, command: any, log: any, timeout = 600000) {
+  async _exec(nodeConfig: NodeConfig, command: string, log: (msg: string) => void, timeout = 600000) {
     try {
       const result = await this.sshManager.exec(nodeConfig, command, timeout);
       if (result.stdout.trim()) log(`      ${result.stdout.trim().substring(0, 200)}`);
       if (result.stderr.trim() && result.code !== 0) log(`      [STDERR] ${result.stderr.trim().substring(0, 200)}`);
       return result;
-    } catch (err: any) {
-      log(`      [ERROR] ${command}: ${err.message}`);
+    } catch (err: unknown) {
+      log(`      [ERROR] ${command}: ${err instanceof Error ? err.message : String(err)}`);
       throw err;
     }
   }
@@ -449,7 +475,7 @@ SVCUNIT`, log);
    * 静默执行（不抛异常）
    * @private
    */
-  async _execQuiet(nodeConfig: any, command: any) {
+  async _execQuiet(nodeConfig: NodeConfig, command: string) {
     try {
       const result = await this.sshManager.exec(nodeConfig, command, 15000);
       return result.stdout;
@@ -463,7 +489,7 @@ SVCUNIT`, log);
    * 获取配置下发任务状态
    * @param {string} nodeId
    */
-  getTaskStatus(nodeId: any) {
+  getTaskStatus(nodeId: string) {
     return this.tasks.get(nodeId) || null;
   }
 }

@@ -2,6 +2,46 @@
 
 const { execFile, spawn } = require('node:child_process');
 
+/** 节点配置 */
+interface AiNodeConfig {
+  id: string;
+  name?: string;
+  tunAddr: string;
+  host?: string;
+  sshPort?: number;
+  sshUser?: string;
+  [key: string]: unknown;
+}
+
+/** SSH 管理器接口 */
+interface AiSshManager {
+  exec(nodeConfig: AiNodeConfig, command: string, timeout?: number): Promise<{ stdout: string; stderr: string; code: number }>;
+  execAsync(nodeConfig: AiNodeConfig, command: string, jobId: string, callbackUrl: string): Promise<{ dispatched: boolean }>;
+}
+
+/** Provisioner 接口 */
+interface AiProvisioner {
+  provision(nodeConfig: AiNodeConfig, options?: Record<string, unknown>): Promise<unknown>;
+}
+
+/** Job 管理器接口 */
+interface AiJobManager {
+  create(nodeId: string, command: string): { jobId: string };
+  markRunning(jobId: string): void;
+  fail(jobId: string, error: string): void;
+}
+
+/** AiOps 状态节点 */
+interface StatusNode {
+  id: string;
+  name?: string;
+  tunAddr: string;
+  online: boolean;
+  sshLatencyMs: number;
+  sysInfo?: Record<string, unknown>;
+  [key: string]: unknown;
+}
+
 /**
  * AI 运维服务 — 内置命令路由器
  *
@@ -62,14 +102,14 @@ const BLOCKED_PATTERNS = [
   { pattern: /\bkillall\b/i,             reason: '禁止批量杀进程' },
 ];
 class AiOps {
-  nodesConfig: any[];
-  sshManager: any;
-  getNodeStatus: Function;
-  provisioner: any;
-  jobManager: any;
+  nodesConfig: AiNodeConfig[];
+  sshManager: AiSshManager;
+  getNodeStatus: () => StatusNode[];
+  provisioner: AiProvisioner;
+  jobManager: AiJobManager | null;
   callbackBaseUrl: string;
 
-  constructor(options: any) {
+  constructor(options: { nodesConfig: AiNodeConfig[]; sshManager: AiSshManager; getNodeStatus: () => StatusNode[]; provisioner: AiProvisioner; jobManager?: AiJobManager; callbackBaseUrl?: string }) {
     this.nodesConfig = options.nodesConfig;
     this.sshManager = options.sshManager;
     this.getNodeStatus = options.getNodeStatus;
@@ -83,7 +123,7 @@ class AiOps {
    * @param {string} userMessage
    * @returns {Promise<object>}
    */
-  async chat(userMessage: any) {
+  async chat(userMessage: string) {
     const msg = (userMessage || '').trim();
     if (!msg) return { response: '请输入指令', commands: [] as string[] };
 
@@ -162,7 +202,7 @@ class AiOps {
 
   // --- 指令处理 ---
 
-  async _handleInstallClaw(nodeId: any) {
+  async _handleInstallClaw(nodeId: string | null) {
     const nodeConfig = this._resolveNode(nodeId);
     if (!nodeConfig) return { response: this._nodeNotFoundMsg(nodeId), commands: [] as string[] };
 
@@ -174,7 +214,7 @@ class AiOps {
     };
   }
 
-  async _handleProvision(nodeId: any) {
+  async _handleProvision(nodeId: string | null) {
     const nodeConfig = this._resolveNode(nodeId);
     if (!nodeConfig) return { response: this._nodeNotFoundMsg(nodeId), commands: [] as string[] };
 
@@ -186,68 +226,68 @@ class AiOps {
     };
   }
 
-  async _handleStatus(nodeId: any) {
+  async _handleStatus(nodeId: string | null) {
     const allStatus = this.getNodeStatus();
     if (nodeId) {
-      const node = allStatus.find((n: any) => n.id === nodeId);
+      const node = allStatus.find((n: StatusNode) => n.id === nodeId);
       if (!node) return { response: this._nodeNotFoundMsg(nodeId), commands: [] as string[] };
       return { response: this._formatNodeStatus(node), commands: [] as string[] };
     }
     if (!allStatus.length) return { response: '当前无已接入节点', commands: [] as string[] };
-    const lines = allStatus.map((n: any) => {
+    const lines = allStatus.map((n: StatusNode) => {
       const dot = n.online ? '🟢' : '🔴';
       return `${dot} ${n.name || n.id} (${n.tunAddr}) — ${n.online ? `${n.sshLatencyMs}ms` : '离线'}`;
     });
     return { response: `节点状态：\n${lines.join('\n')}`, commands: [] as string[] };
   }
 
-  async _handleRestart(nodeId: any, service: any) {
+  async _handleRestart(nodeId: string | null, service: string) {
     const nodeConfig = this._resolveNode(nodeId);
     if (!nodeConfig) return { response: this._nodeNotFoundMsg(nodeId), commands: [] as string[] };
 
     try {
       const result = await this.sshManager.exec(nodeConfig, `systemctl restart ${service} && sleep 1 && systemctl is-active ${service}`);
       return { response: `✅ ${service} 已重启: ${result.stdout.trim()}`, commands: [] as string[], targetNodeId: nodeConfig.id };
-    } catch (err: any) {
-      return { response: `❌ 重启失败: ${err.message}`, commands: [] as string[], targetNodeId: nodeConfig.id };
+    } catch (err: unknown) {
+      return { response: `❌ 重启失败: ${err instanceof Error ? err.message : String(err)}`, commands: [] as string[], targetNodeId: nodeConfig.id };
     }
   }
 
-  async _handleLogs(nodeId: any) {
+  async _handleLogs(nodeId: string | null) {
     const nodeConfig = this._resolveNode(nodeId);
     if (!nodeConfig) return { response: this._nodeNotFoundMsg(nodeId), commands: [] as string[] };
 
     try {
       const result = await this.sshManager.exec(nodeConfig, 'journalctl -u gnb -u openclaw-gateway --no-pager -n 20 --output short-iso');
       return { response: `📋 最近日志:\n\`\`\`\n${result.stdout.trim()}\n\`\`\``, commands: [] as string[], targetNodeId: nodeConfig.id };
-    } catch (err: any) {
-      return { response: `❌ 获取日志失败: ${err.message}`, commands: [] as string[], targetNodeId: nodeConfig.id };
+    } catch (err: unknown) {
+      return { response: `❌ 获取日志失败: ${err instanceof Error ? err.message : String(err)}`, commands: [] as string[], targetNodeId: nodeConfig.id };
     }
   }
 
-  async _handleDisk(nodeId: any) {
+  async _handleDisk(nodeId: string | null) {
     const nodeConfig = this._resolveNode(nodeId);
     if (!nodeConfig) return { response: this._nodeNotFoundMsg(nodeId), commands: [] as string[] };
     try {
       const result = await this.sshManager.exec(nodeConfig, 'df -h && echo "---" && du -sh /var/log/* 2>/dev/null | sort -rh | head -5');
       return { response: `💾 磁盘使用:\n\`\`\`\n${result.stdout.trim()}\n\`\`\``, commands: [] as string[], targetNodeId: nodeConfig.id };
-    } catch (err: any) {
-      return { response: `❌ 获取磁盘信息失败: ${err.message}`, commands: [] as string[], targetNodeId: nodeConfig.id };
+    } catch (err: unknown) {
+      return { response: `❌ 获取磁盘信息失败: ${err instanceof Error ? err.message : String(err)}`, commands: [] as string[], targetNodeId: nodeConfig.id };
     }
   }
 
-  async _handlePerformance(nodeId: any) {
+  async _handlePerformance(nodeId: string | null) {
     const nodeConfig = this._resolveNode(nodeId);
     if (!nodeConfig) return { response: this._nodeNotFoundMsg(nodeId), commands: [] as string[] };
     try {
       const result = await this.sshManager.exec(nodeConfig, 'echo "=== 负载 ==="; uptime; echo "\\n=== CPU ==="; top -bn1 | head -5; echo "\\n=== 内存 ==="; free -h; echo "\\n=== IO ==="; iostat -x 1 1 2>/dev/null || echo "iostat 不可用"');
       return { response: `⚡ 性能概况:\n\`\`\`\n${result.stdout.trim()}\n\`\`\``, commands: [] as string[], targetNodeId: nodeConfig.id };
-    } catch (err: any) {
-      return { response: `❌ 获取性能信息失败: ${err.message}`, commands: [] as string[], targetNodeId: nodeConfig.id };
+    } catch (err: unknown) {
+      return { response: `❌ 获取性能信息失败: ${err instanceof Error ? err.message : String(err)}`, commands: [] as string[], targetNodeId: nodeConfig.id };
     }
   }
 
-  async _handleExec(msg: any) {
+  async _handleExec(msg: string) {
     // 格式: exec <nodeId> <command>
     const parts = msg.replace(/^(exec|run|执行)\s+/i, '').trim();
     const spaceIdx = parts.indexOf(' ');
@@ -266,15 +306,15 @@ class AiOps {
       let output = result.stdout.trim();
       if (result.stderr.trim()) output += `\n[STDERR] ${result.stderr.trim()}`;
       return { response: `\`\`\`\n${output || '(空输出)'}\n\`\`\``, commands: [] as string[] };
-    } catch (err: any) {
-      return { response: `❌ 执行失败: ${err.message}`, commands: [] as string[] };
+    } catch (err: unknown) {
+      return { response: `❌ 执行失败: ${err instanceof Error ? err.message : String(err)}`, commands: [] as string[] };
     }
   }
 
   /**
    * 调用 Claude Code CLI
    */
-  async _handleClaude(prompt: any, nodeId: any) {
+  async _handleClaude(prompt: string, nodeId: string | null) {
     if (!prompt) return { response: '用法: @claude <你的问题或任务>', commands: [] as string[] };
 
     // 拼接节点上下文
@@ -304,9 +344,9 @@ class AiOps {
         timeout: 120_000,
         maxBuffer: 1024 * 512,
         env: { ...process.env, NO_COLOR: '1', PATH: `${extraPaths}:${process.env.PATH || ''}` },
-      }, (err: any, stdout: any, stderr: any) => {
+      }, (err: Error | null, stdout: string, stderr: string) => {
         if (err) {
-          const msg = err.killed
+          const msg = (err as { killed?: boolean }).killed
             ? '❌ Claude 执行超时（2 分钟）'
             : `❌ Claude 执行失败: ${err.message}`;
           return resolve({ response: msg, commands: [] as string[] });
@@ -322,7 +362,7 @@ class AiOps {
   }
 
   // @alpha: 流式 Claude Code 调用 — 供 /ws/ai 使用
-  streamChat(nodeConfig: any, prompt: any, onChunk: any) {
+  streamChat(nodeConfig: AiNodeConfig | null, prompt: string, onChunk: (chunk: Record<string, unknown>) => void) {
     const nodeBin = process.execPath.replace(/\/[^/]+$/, '');
     const extraPaths = [nodeBin, '/root/.nvm/versions/node/v24.14.0/bin', '/usr/local/bin'].join(':');
 
@@ -366,7 +406,7 @@ class AiOps {
     child.stdin.end();
 
     let buf = '';
-    child.stdout.on('data', (data: any) => {
+    child.stdout.on('data', (data: Buffer) => {
       buf += data.toString();
       const lines = buf.split('\n');
       buf = lines.pop() || '';
@@ -376,12 +416,12 @@ class AiOps {
       }
     });
 
-    child.stderr.on('data', (data: any) => {
+    child.stderr.on('data', (data: Buffer) => {
       const msg = data.toString().trim();
       if (msg) onChunk({ type: 'system', text: msg });
     });
 
-    child.on('close', (code: any) => {
+    child.on('close', (code: number | null) => {
       // 处理缓冲区剩余
       if (buf.trim()) {
         try { onChunk(JSON.parse(buf)); } catch (_) {}
@@ -389,7 +429,7 @@ class AiOps {
       onChunk({ type: 'done', exitCode: code || 0 });
     });
 
-    child.on('error', (err: any) => {
+    child.on('error', (err: Error) => {
       onChunk({ type: 'error', text: `Claude 启动失败: ${err.message}` });
     });
 
@@ -400,7 +440,7 @@ class AiOps {
   // 未识别的命令不再自动作为 shell 命令执行
 
   // @beta: 异步执行命令
-  async _handleAsyncExec(msg: any) {
+  async _handleAsyncExec(msg: string) {
     if (!this.jobManager) {
       return { response: '❌ 异步命令框架未初始化', commands: [] as string[] };
     }
@@ -429,10 +469,11 @@ class AiOps {
         targetNodeId: nodeConfig.id,
         jobId,
       };
-    } catch (err: any) {
-      this.jobManager.fail(jobId, err.message);
+    } catch (err: unknown) {
+      const errMsg = err instanceof Error ? err.message : String(err);
+      this.jobManager.fail(jobId, errMsg);
       return {
-        response: `❌ 投递失败: ${err.message}\nJob ID: \`${jobId}\``,
+        response: `❌ 投递失败: ${errMsg}\nJob ID: \`${jobId}\``,
         commands: [] as string[],
         targetNodeId: nodeConfig.id,
       };
@@ -465,7 +506,7 @@ class AiOps {
    * @param {string} cmd - 待检查的命令
    * @returns {object|null} 拦截响应对象，安全时返回 null
    */
-  _checkCommandSafety(cmd: any) {
+  _checkCommandSafety(cmd: string) {
     // 去掉变量展开、反引号等混淆手法
     const normalized = cmd
       .replace(/\$\{[^}]*\}/g, '')  // 去掉 ${...}
@@ -485,19 +526,14 @@ class AiOps {
     return null;
   }
 
-  _extractNodeId(msg: any) {
-    // 尝试从消息中提取节点 ID
-    // 支持格式: "安装 openclaw VM-0-16-debian", "安装 openclaw 到 VM-0-16-debian"
+  _extractNodeId(msg: string) {
     const cleaned = msg.replace(/^(安装|配置下发|重启|日志|状态|磁盘|性能)\s*(openclaw|claw|gnb|服务)?\s*(到|on|for)?\s*/i, '').trim();
     if (cleaned && !cleaned.includes(' ')) return cleaned;
-
-    // 如果只有一个节点，直接使用
     if (this.nodesConfig.length === 1) return this.nodesConfig[0].id;
-
     return null;
   }
 
-  _resolveNode(nodeId: any) {
+  _resolveNode(nodeId: string | null): AiNodeConfig | undefined {
     if (!nodeId) {
       // 如果只有一个节点，自动选择
       if (this.nodesConfig.length === 1) return this.nodesConfig[0];
@@ -506,7 +542,7 @@ class AiOps {
     return this.nodesConfig.find(n => n.id === nodeId || n.name === nodeId);
   }
 
-  _nodeNotFoundMsg(nodeId: any) {
+  _nodeNotFoundMsg(nodeId: string | null) {
     if (!nodeId) {
       const ids = this.nodesConfig.map(n => n.id).join(', ');
       return `请指定节点 ID。可用节点: ${ids || '无'}`;
@@ -514,7 +550,7 @@ class AiOps {
     return `节点 "${nodeId}" 未找到`;
   }
 
-  _formatNodeStatus(node: any) {
+  _formatNodeStatus(node: StatusNode) {
     const lines = [
       `${node.online ? '🟢' : '🔴'} ${node.name || node.id}`,
       `TUN: ${node.tunAddr}`,

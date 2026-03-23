@@ -1,4 +1,5 @@
 'use strict';
+import type { Request, Response, NextFunction } from 'express';
 
 const express = require('express');
 const crypto = require('crypto');
@@ -14,7 +15,7 @@ function createSkillsRouter(skillsStore: any) {
   const router = express.Router();
 
   // GET /api/skills — 列表
-  router.get('/', (req: any, res: any) => {
+  router.get('/', (req: Request, res: Response) => {
     try {
       const { category, search } = req.query;
 
@@ -31,13 +32,13 @@ function createSkillsRouter(skillsStore: any) {
       }
 
       res.json({ skills, total: skills.length });
-    } catch (err: any) {
+    } catch (err: unknown) {
       res.status(500).json({ error: err.message });
     }
   });
 
   // POST /api/skills — 上传新技能
-  router.post('/', (req: any, res: any) => {
+  router.post('/', (req: Request, res: Response) => {
     try {
       const { name, description, category, version, author, icon, iconGradient, installType, skillContent, source } = req.body;
 
@@ -67,13 +68,13 @@ function createSkillsRouter(skillsStore: any) {
       });
 
       res.json({ skill });
-    } catch (err: any) {
+    } catch (err: unknown) {
       res.status(500).json({ error: err.message });
     }
   });
 
   // DELETE /api/skills/:id — 删除用户上传的技能
-  router.delete('/:id', (req: any, res: any) => {
+  router.delete('/:id', (req: Request, res: Response) => {
     try {
       const skill = skillsStore.findById(req.params.id);
       if (!skill) {
@@ -85,7 +86,7 @@ function createSkillsRouter(skillsStore: any) {
 
       const deleted = skillsStore.delete(req.params.id);
       res.json({ deleted });
-    } catch (err: any) {
+    } catch (err: unknown) {
       res.status(500).json({ error: err.message });
     }
   });

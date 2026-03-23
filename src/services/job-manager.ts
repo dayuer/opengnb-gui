@@ -12,13 +12,26 @@ const crypto = require('crypto');
  *
  * @alpha: 核心服务
  */
-class JobManager {
-  store: any;
-  timeoutMs: number;
-  onComplete: Function | null;
-  _cleanupTimer: any;
+/** Job Store 接口 */
+interface JobStore {
+  db: { prepare(sql: string): { all(...args: unknown[]): unknown[]; run(...args: unknown[]): unknown }; };
+  _stmts: {
+    insertJob: { run(params: Record<string, unknown>): unknown };
+    findJob: { get(jobId: string): Record<string, unknown> | undefined };
+    updateJobResult: { run(params: Record<string, unknown>): unknown };
+    jobsByNode: { all(nodeId: string, limit: number): Record<string, unknown>[] };
+    recentJobs: { all(limit: number): Record<string, unknown>[] };
+    deleteJobsBefore: { run(cutoff: string): unknown };
+  };
+}
 
-  constructor(options: any = {}) {
+class JobManager {
+  store: JobStore;
+  timeoutMs: number;
+  onComplete: ((job: Record<string, unknown>) => void) | null;
+  _cleanupTimer: ReturnType<typeof setInterval> | null;
+
+  constructor(options: { store: JobStore; timeoutMs?: number; onComplete?: (job: Record<string, unknown>) => void } = {} as { store: JobStore }) {
     this.store = options.store;
     this.timeoutMs = options.timeoutMs || 60000;
     this.onComplete = options.onComplete || null;
@@ -34,7 +47,7 @@ class JobManager {
    * @param {string} command - 原始命令
    * @returns {{jobId: string, job: object}}
    */
-  create(nodeId: any, command: any) {
+  create(nodeId: string, command: string) {
     const jobId = crypto.randomBytes(8).toString('hex');
     const now = new Date().toISOString();
 
@@ -54,7 +67,7 @@ class JobManager {
    * 标记 job 为 running（SSH 已投递）
    * @param {string} jobId
    */
-  markRunning(jobId: any) {
+  markRunning(jobId: string) {
     const job = this.store._stmts.findJob.get(jobId);
     if (job && job.status === 'dispatched') {
       this.store._stmts.updateJobResult.run({
@@ -75,7 +88,7 @@ class JobManager {
    * @param {object} result - {exitCode, stdout, stderr}
    * @returns {object|null}
    */
-  complete(jobId: any, result: any) {
+  complete(jobId: string, result: { exitCode: number; stdout?: string; stderr?: string }) {
     const job = this.store._stmts.findJob.get(jobId);
     if (!job) return null;
     if (job.status === 'completed' || job.status === 'failed') return job;
@@ -102,7 +115,7 @@ class JobManager {
    * @param {string} error
    * @returns {object|null}
    */
-  fail(jobId: any, error: any) {
+  fail(jobId: string, error: string) {
     const job = this.store._stmts.findJob.get(jobId);
     if (!job) return null;
 
@@ -126,7 +139,7 @@ class JobManager {
    * @param {string} jobId
    * @returns {object|null}
    */
-  get(jobId: any) {
+  get(jobId: string) {
     return this.store._stmts.findJob.get(jobId) || null;
   }
 
@@ -136,7 +149,7 @@ class JobManager {
    * @param {number} [limit=20]
    * @returns {object[]}
    */
-  listByNode(nodeId: any, limit = 20) {
+  listByNode(nodeId: string, limit = 20) {
     return this.store._stmts.jobsByNode.all(nodeId, limit);
   }
 
@@ -157,7 +170,7 @@ class JobManager {
       "SELECT * FROM jobs WHERE status IN ('dispatched', 'running') AND createdAt < ?"
     ).all(cutoff);
 
-    for (const job of pendingJobs) {
+    for (const job of pendingJobs as Record<string, unknown>[]) {
       this.store._stmts.updateJobResult.run({
         id: job.id,
         status: 'timeout',
@@ -167,8 +180,8 @@ class JobManager {
         error: `超时 (${this.timeoutMs / 1000}s)`,
         completedAt: new Date().toISOString(),
       });
-      const updated = this.store._stmts.findJob.get(job.id);
-      if (this.onComplete) this.onComplete(updated);
+      const updated = this.store._stmts.findJob.get(job.id as string);
+      if (this.onComplete && updated) this.onComplete(updated);
     }
   }
 

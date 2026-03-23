@@ -1,4 +1,5 @@
 'use strict';
+import type { Request, Response, NextFunction } from 'express';
 
 /**
  * 统一错误处理中间件
@@ -10,7 +11,7 @@
 /**
  * Express 错误处理中间件（4 参数签名）
  */
-function errorHandler(err: any, req: any, res: any, _next: any) {
+function errorHandler(err: Error & { statusCode?: number; status?: number }, req: Request, res: Response, _next: NextFunction) {
   const isProd = process.env.NODE_ENV === 'production';
   const status = err.statusCode || err.status || 500;
 

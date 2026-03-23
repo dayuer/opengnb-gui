@@ -1,4 +1,5 @@
 'use strict';
+import type { Request, Response, NextFunction } from 'express';
 
 const express = require('express');
 const path = require('path');
@@ -31,14 +32,14 @@ function createMirrorRouter(dataDir: any) {
   }
 
   // GET /api/mirror/gnb — GNB 文件列表
-  router.get('/gnb', (req: any, res: any) => {
+  router.get('/gnb', (req: Request, res: Response) => {
     const verFile = path.join(mirrorDir, 'gnb', '.version');
     const version = fs.existsSync(verFile) ? fs.readFileSync(verFile, 'utf-8').trim() : 'unknown';
     res.json({ software: 'gnb', version, files: listFiles('gnb') });
   });
 
   // GET /api/mirror/gnb/:file — 下载 GNB 文件
-  router.get('/gnb/:file', (req: any, res: any) => {
+  router.get('/gnb/:file', (req: Request, res: Response) => {
     const safeName = path.basename(req.params.file);
     if (safeName !== req.params.file || safeName.includes('..')) {
       return res.status(400).json({ error: '非法文件名' });
@@ -52,14 +53,14 @@ function createMirrorRouter(dataDir: any) {
   });
 
   // GET /api/mirror/openclaw — OpenClaw 文件列表
-  router.get('/openclaw', (req: any, res: any) => {
+  router.get('/openclaw', (req: Request, res: Response) => {
     const verFile = path.join(mirrorDir, 'openclaw', '.version');
     const version = fs.existsSync(verFile) ? fs.readFileSync(verFile, 'utf-8').trim() : 'unknown';
     res.json({ software: 'openclaw', version, files: listFiles('openclaw') });
   });
 
   // GET /api/mirror/openclaw/:file — 下载 OpenClaw 文件
-  router.get('/openclaw/:file', (req: any, res: any) => {
+  router.get('/openclaw/:file', (req: Request, res: Response) => {
     const safeName = path.basename(req.params.file);
     if (safeName !== req.params.file || safeName.includes('..')) {
       return res.status(400).json({ error: '非法文件名' });

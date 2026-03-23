@@ -1,6 +1,9 @@
 'use strict';
+import type { Request, Response, NextFunction } from 'express';
 
 const express = require('express');
+const crypto = require('crypto');
+const { buildInstallCommand, buildUninstallCommand } = require('../services/skill-command');
 
 /**
  * 节点管理 API 路由（含分组 + 指标子路由）
@@ -9,8 +12,9 @@ const express = require('express');
  * @param {Array} nodesConfig
  * @param {import('../services/key-manager')} [keyManager]
  * @param {import('../services/metrics-store')} [metricsStore]
+ * @param {import('../services/task-queue')} [taskQueue]
  */
-function createNodesRouter(monitor: any, sshManager: any, nodesConfig: any, keyManager: any, metricsStore: any) {
+function createNodesRouter(monitor: any, sshManager: any, nodesConfig: any, keyManager: any, metricsStore: any, taskQueue?: any) {
   const router = express.Router();
 
   // ═══════════════════════════════════════
@@ -18,12 +22,12 @@ function createNodesRouter(monitor: any, sshManager: any, nodesConfig: any, keyM
   // ═══════════════════════════════════════
   if (metricsStore) {
     // GET /api/nodes/metrics/summary — 全局汇总
-    router.get('/metrics/summary', (req: any, res: any) => {
+    router.get('/metrics/summary', (req: Request, res: Response) => {
       res.json(metricsStore.summary());
     });
 
     // GET /api/nodes/metrics?nodeId=xxx&range=1h
-    router.get('/metrics', (req: any, res: any) => {
+    router.get('/metrics', (req: Request, res: Response) => {
       const { nodeId, range } = req.query;
       if (!nodeId) {
         return res.status(400).json({ error: '缺少 nodeId 参数' });
@@ -36,34 +40,34 @@ function createNodesRouter(monitor: any, sshManager: any, nodesConfig: any, keyM
   // 必须放在 /:id 之前，避免 "groups" 被当作 nodeId
   // ═══════════════════════════════════════
   if (keyManager) {
-    router.get('/groups', (req: any, res: any) => {
+    router.get('/groups', (req: Request, res: Response) => {
       res.json({ groups: keyManager.getGroups() });
     });
 
-    router.post('/groups', (req: any, res: any) => {
+    router.post('/groups', (req: Request, res: Response) => {
       const { name, color } = req.body;
       try {
         const group = keyManager.createGroup({ name, color });
         res.status(201).json(group);
-      } catch (err: any) {
+      } catch (err: unknown) {
         const status = err.message.includes('已存在') ? 409 : 400;
         res.status(status).json({ error: err.message });
       }
     });
 
-    router.put('/groups/:id', (req: any, res: any) => {
+    router.put('/groups/:id', (req: Request, res: Response) => {
       const result = keyManager.updateGroup(req.params.id, req.body);
       res.status(result.success ? 200 : 404).json(result);
     });
 
-    router.delete('/groups/:id', (req: any, res: any) => {
+    router.delete('/groups/:id', (req: Request, res: Response) => {
       const result = keyManager.deleteGroup(req.params.id);
       res.status(result.success ? 200 : 404).json(result);
     });
   }
 
   // GET /api/nodes — 全部节点状态
-  router.get('/', (req: any, res: any) => {
+  router.get('/', (req: Request, res: Response) => {
     res.json({
       timestamp: new Date().toISOString(),
       nodes: monitor.getAllStatus(),
@@ -71,7 +75,7 @@ function createNodesRouter(monitor: any, sshManager: any, nodesConfig: any, keyM
   });
 
   // GET /api/nodes/:id — 单节点详情
-  router.get('/:id', (req: any, res: any) => {
+  router.get('/:id', (req: Request, res: Response) => {
     const status = monitor.getNodeStatus(req.params.id);
     if (!status) {
       return res.status(404).json({ error: `节点 ${req.params.id} 未找到` });
@@ -84,7 +88,7 @@ function createNodesRouter(monitor: any, sshManager: any, nodesConfig: any, keyM
   if (keyManager) {
     const { exec: execCmd } = require('child_process');
 
-    router.put('/:id', async (req: any, res: any) => {
+    router.put('/:id', async (req: Request, res: Response) => {
       const { name, tunAddr, sshPort, sshUser } = req.body;
 
       // 非 tunAddr 变更 → 直接保存
@@ -133,7 +137,7 @@ function createNodesRouter(monitor: any, sshManager: any, nodesConfig: any, keyM
           });
         }
         console.log(`[RemoteSync] ✅ 节点 address.conf 已验证: ${expectedLine}`);
-      } catch (err: any) {
+      } catch (err: unknown) {
         console.error(`[RemoteSync] SSH 失败: ${err.message}`);
         return res.status(503).json({
           error: `远程同步失败: ${err.message}`,
@@ -192,7 +196,7 @@ function createNodesRouter(monitor: any, sshManager: any, nodesConfig: any, keyM
 
   const SHELL_META = /[;&`$(){}!><\n\r\\'"]/;
 
-  router.post('/:id/exec', async (req: any, res: any) => {
+  router.post('/:id/exec', async (req: Request, res: Response) => {
     const { command } = req.body;
     if (!command || typeof command !== 'string') {
       return res.status(400).json({ error: '缺少 command 参数' });
@@ -220,7 +224,7 @@ function createNodesRouter(monitor: any, sshManager: any, nodesConfig: any, keyM
     try {
       const result = await sshManager.exec(nodeConfig, cmd);
       res.json(result);
-    } catch (err: any) {
+    } catch (err: unknown) {
       const msg = process.env.NODE_ENV === 'production' ? '命令执行失败' : err.message;
       res.status(500).json({ error: msg });
     }
@@ -231,7 +235,7 @@ function createNodesRouter(monitor: any, sshManager: any, nodesConfig: any, keyM
   // ═══════════════════════════════════════
 
   // POST /api/nodes/:id/skills — 下发安装技能（入队 Agent 任务队列）
-  router.post('/:id/skills', async (req: any, res: any) => {
+  router.post('/:id/skills', async (req: Request, res: Response) => {
     const { skillId, source, version, name } = req.body;
     if (!skillId || !source) {
       return res.status(400).json({ error: '缺少 skillId 或 source 参数' });
@@ -243,55 +247,26 @@ function createNodesRouter(monitor: any, sshManager: any, nodesConfig: any, keyM
       return res.status(404).json({ error: `节点 ${nodeId} 未找到或暂离线` });
     }
 
-    // 构造安装命令
-    let command = '';
-    if (source === 'openclaw-bundled') {
-      // stock 内置插件：用 enable（不需要 plugins.allow 白名单）
-      command = `openclaw plugins enable ${skillId}`;
-    } else if (source === 'clawhub') {
-      // ClawHub 第三方插件：clawhub install
-      command = `clawhub install ${skillId}`;
-    } else if (source === 'github') {
-      // GitHub 仓库直装：openclaw plugins install github:user/repo
-      const repo = req.body.githubRepo || skillId;
-      command = `openclaw plugins install github:${repo}`;
-    } else if (source === 'openclaw') {
-      // 旧版 openclaw 第三方（向后兼容）
-      command = [
-        `openclaw plugins install ${skillId}`,
-        `ALLOW=$(openclaw config get plugins.allow 2>/dev/null || echo '[]')`,
-        `UPDATED=$(echo "$ALLOW" | jq --arg p "${skillId}" 'if type == "array" then . + [$p] | unique else [$p] end')`,
-        `openclaw config set plugins.allow "$UPDATED" --strict-json`,
-      ].join(' && ');
-    } else if (source === 'skills.sh') {
-      const slug = req.body.slug || skillId;
-      command = `npx -y skills add ${slug}`;
-    } else if (source === 'npm') {
-      command = `npm install -g ${skillId} --registry=https://registry.npmmirror.com`;
-    } else if (source === 'console') {
-      return res.json({ taskId: 'local', status: 'completed', message: '平台内置技能，无需远程安装' });
-    } else if (source.startsWith('http')) {
-      command = `curl -sSL ${source} | bash`;
-    } else {
-      return res.status(400).json({ error: '不支持的安装源: ' + source });
-    }
+    // 策略模式：查表生成安装命令
+    const result = buildInstallCommand({ skillId, source, slug: req.body.slug, githubRepo: req.body.githubRepo });
+    if (result.error) return res.status(400).json({ error: result.message });
+    if (result.skip) return res.json({ taskId: 'local', status: 'completed', message: result.message });
 
-    const crypto = require('crypto');
     const task = {
       taskId: crypto.randomUUID(),
       type: 'skill_install',
-      command,
+      command: result.command,
       skillId,
       skillName: name || skillId,
       timeoutMs: 120000,
     };
 
-    monitor.enqueueTask(nodeId, task);
+    taskQueue.enqueueTask(nodeId, task);
     res.json({ taskId: task.taskId, status: 'queued', message: '安装任务已入队，等待节点执行' });
   });
 
   // DELETE /api/nodes/:id/skills/:skillId — 下发卸载技能
-  router.delete('/:id/skills/:skillId', async (req: any, res: any) => {
+  router.delete('/:id/skills/:skillId', async (req: Request, res: Response) => {
     const nodeId = req.params.id;
     const nodeConfig = nodesConfig.find((n: any) => n.id === nodeId);
     if (!nodeConfig) {
@@ -305,23 +280,8 @@ function createNodesRouter(monitor: any, sshManager: any, nodesConfig: any, keyM
 
     const crypto = require('crypto');
     const uninstallSource = req.body?.source || req.query?.source || '';
-    // 根据 source 类型生成卸载命令
-    let uninstallCmd: string;
-    if (uninstallSource === 'clawhub') {
-      uninstallCmd = `clawhub uninstall ${skillId}`;
-    } else if (uninstallSource === 'github') {
-      uninstallCmd = `openclaw plugins uninstall ${skillId}`;
-    } else if (uninstallSource === 'openclaw') {
-      uninstallCmd = [
-        `openclaw plugins uninstall ${skillId}`,
-        `ALLOW=$(openclaw config get plugins.allow 2>/dev/null || echo '[]')`,
-        `UPDATED=$(echo "$ALLOW" | jq --arg p "${skillId}" 'if type == "array" then [.[] | select(. != $p)] else [] end')`,
-        `openclaw config set plugins.allow "$UPDATED" --strict-json`,
-      ].join(' && ');
-    } else {
-      // 默认（含 openclaw-bundled）用 disable
-      uninstallCmd = `openclaw plugins disable ${skillId}`;
-    }
+    // 策略模式：查表生成卸载命令
+    const uninstallCmd = buildUninstallCommand({ skillId, source: uninstallSource });
     const task = {
       taskId: crypto.randomUUID(),
       type: 'skill_uninstall',
@@ -330,19 +290,19 @@ function createNodesRouter(monitor: any, sshManager: any, nodesConfig: any, keyM
       timeoutMs: 60000,
     };
 
-    monitor.enqueueTask(nodeId, task);
+    taskQueue.enqueueTask(nodeId, task);
     res.json({ taskId: task.taskId, status: 'queued', message: '卸载任务已入队' });
   });
 
   // GET /api/nodes/:id/tasks — 查询节点任务队列状态
-  router.get('/:id/tasks', (req: any, res: any) => {
-    const tasks = monitor.getNodeTasks(req.params.id);
+  router.get('/:id/tasks', (req: Request, res: Response) => {
+    const tasks = taskQueue.getNodeTasks(req.params.id);
     res.json({ tasks });
   });
 
   // DELETE /api/nodes/:id/tasks/:taskId — 删除指定任务
-  router.delete('/:id/tasks/:taskId', (req: any, res: any) => {
-    const ok = monitor.deleteTask(req.params.taskId, req);
+  router.delete('/:id/tasks/:taskId', (req: Request, res: Response) => {
+    const ok = taskQueue.deleteTask(req.params.taskId, req);
     if (!ok) return res.status(404).json({ error: '任务不存在' });
     res.json({ message: '任务已删除' });
   });

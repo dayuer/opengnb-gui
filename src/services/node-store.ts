@@ -1,10 +1,34 @@
 'use strict';
 
+import type { NodeRecord } from '../types/interfaces';
+
 const Database = require('better-sqlite3');
 const path = require('path');
 const fs = require('fs');
 const { createLogger } = require('./logger');
 const log = createLogger('NodeStore');
+
+// --- DDL 常量：避免多处 copy-paste ---
+const AGENT_TASKS_DDL = `
+  CREATE TABLE IF NOT EXISTS agent_tasks (
+    taskId TEXT PRIMARY KEY,
+    nodeId TEXT NOT NULL,
+    type TEXT NOT NULL,
+    command TEXT NOT NULL,
+    skillId TEXT DEFAULT '',
+    skillName TEXT DEFAULT '',
+    status TEXT DEFAULT 'queued',
+    timeoutMs INTEGER DEFAULT 60000,
+    resultCode INTEGER,
+    resultStdout TEXT,
+    resultStderr TEXT,
+    queuedAt TEXT NOT NULL,
+    dispatchedAt TEXT,
+    completedAt TEXT
+  );
+  CREATE INDEX IF NOT EXISTS idx_tasks_node_status ON agent_tasks(nodeId, status);
+  CREATE INDEX IF NOT EXISTS idx_tasks_queued ON agent_tasks(queuedAt);
+`;
 
 // --- 子模块 mixin ---
 const { prepareGroupStatements, groupMethods } = require('../stores/group-store');
@@ -26,8 +50,8 @@ const { prepareTaskStatements, taskMethods } = require('../stores/task-store');
  */
 class NodeStore {
   dbPath: string;
-  db: any;
-  _stmts: any;
+  db: unknown;
+  _stmts: Record<string, { run: (...args: unknown[]) => unknown; get: (...args: unknown[]) => unknown; all: (...args: unknown[]) => unknown[] }>;
 
   constructor(dbPath: string) {
     this.dbPath = dbPath;
@@ -37,7 +61,7 @@ class NodeStore {
   /**
    * 初始化数据库（建表 + 混入子模块）
    */
-  init(existingNodes: any[] = []) {
+  init(existingNodes: Partial<NodeRecord>[] = []) {
     fs.mkdirSync(path.dirname(this.dbPath), { recursive: true });
 
     this.db = new Database(this.dbPath);
@@ -142,24 +166,7 @@ class NodeStore {
       CREATE INDEX IF NOT EXISTS idx_jobs_status ON jobs(status);
       CREATE INDEX IF NOT EXISTS idx_jobs_created ON jobs(createdAt);
 
-      CREATE TABLE IF NOT EXISTS agent_tasks (
-        taskId TEXT PRIMARY KEY,
-        nodeId TEXT NOT NULL,
-        type TEXT NOT NULL,
-        command TEXT NOT NULL,
-        skillId TEXT DEFAULT '',
-        skillName TEXT DEFAULT '',
-        status TEXT DEFAULT 'queued',
-        timeoutMs INTEGER DEFAULT 60000,
-        resultCode INTEGER,
-        resultStdout TEXT,
-        resultStderr TEXT,
-        queuedAt TEXT NOT NULL,
-        dispatchedAt TEXT,
-        completedAt TEXT
-      );
-      CREATE INDEX IF NOT EXISTS idx_tasks_node_status ON agent_tasks(nodeId, status);
-      CREATE INDEX IF NOT EXISTS idx_tasks_queued ON agent_tasks(queuedAt);
+      ${AGENT_TASKS_DDL}
     `);
 
     // 向后兼容迁移
@@ -169,26 +176,7 @@ class NodeStore {
 
     // @v4: 独立建表迁移 — 防御大 exec 块在旧 DB 上跳过新表
     try {
-      this.db.exec(`
-        CREATE TABLE IF NOT EXISTS agent_tasks (
-          taskId TEXT PRIMARY KEY,
-          nodeId TEXT NOT NULL,
-          type TEXT NOT NULL,
-          command TEXT NOT NULL,
-          skillId TEXT DEFAULT '',
-          skillName TEXT DEFAULT '',
-          status TEXT DEFAULT 'queued',
-          timeoutMs INTEGER DEFAULT 60000,
-          resultCode INTEGER,
-          resultStdout TEXT,
-          resultStderr TEXT,
-          queuedAt TEXT NOT NULL,
-          dispatchedAt TEXT,
-          completedAt TEXT
-        );
-        CREATE INDEX IF NOT EXISTS idx_tasks_node_status ON agent_tasks(nodeId, status);
-        CREATE INDEX IF NOT EXISTS idx_tasks_queued ON agent_tasks(queuedAt);
-      `);
+      this.db.exec(AGENT_TASKS_DDL);
     } catch { /* 表已存在 */ }
   }
 
@@ -233,8 +221,8 @@ class NodeStore {
   // ═══════════════════════════════════════
 
   /** @private 从 JSON 数组迁移数据 */
-  _migrateFromJson(nodes: any) {
-    const insertMany = this.db.transaction((items: any) => {
+  _migrateFromJson(nodes: Partial<NodeRecord>[]) {
+    const insertMany = this.db.transaction((items: Partial<NodeRecord>[]) => {
       for (const n of items) {
         this._stmts.insert.run(this._toRow(n));
       }
@@ -284,7 +272,7 @@ class NodeStore {
   // ═══════════════════════════════════════
 
   /** @private 将节点对象规范化为数据库行 */
-  _toRow(node: any) {
+  _toRow(node: Partial<NodeRecord>) {
     return {
       id: node.id || '',
       name: node.name || node.id || '',
@@ -310,7 +298,7 @@ class NodeStore {
   }
 
   /** @private 将数据库行转换为兼容的节点对象 */
-  _fromRow(row: any) {
+  _fromRow(row: Record<string, unknown>) {
     if (!row) return null;
     return {
       ...row,
@@ -323,42 +311,42 @@ class NodeStore {
   // 节点查询
   // ═══════════════════════════════════════
 
-  findById(id: any) {
+  findById(id: string) {
     return this._fromRow(this._stmts.findById.get(id));
   }
 
-  findByName(name: any) {
+  findByName(name: string) {
     return this._fromRow(this._stmts.findByName.get(name));
   }
 
-  findByStatus(status: any) {
-    return this._stmts.findByStatus.all(status).map((r: any) => this._fromRow(r));
+  findByStatus(status: string) {
+    return this._stmts.findByStatus.all(status).map((r: Record<string, unknown>) => this._fromRow(r));
   }
 
   all() {
-    return this._stmts.all.all().map((r: any) => this._fromRow(r));
+    return this._stmts.all.all().map((r: Record<string, unknown>) => this._fromRow(r));
   }
 
   count() {
     return this._stmts.count.get().cnt;
   }
 
-  countByStatus(status: any) {
+  countByStatus(status: string) {
     return this._stmts.countByStatus.get(status).cnt;
   }
 
-  isTunAddrTaken(tunAddr: any, excludeNodeId = '') {
+  isTunAddrTaken(tunAddr: string, excludeNodeId = '') {
     const row = this._stmts.findByTunAddr.get(tunAddr, excludeNodeId);
     return row ? this._fromRow(row) : null;
   }
 
   approvedWithGnb() {
-    return this._stmts.approvedWithGnb.all().map((r: any) => this._fromRow(r));
+    return this._stmts.approvedWithGnb.all().map((r: Record<string, unknown>) => this._fromRow(r));
   }
 
-  filter({ status, groupId, keyword, page = 1, pageSize = 0 }: any = {}) {
+  filter({ status, groupId, keyword, page = 1, pageSize = 0 }: { status?: string; groupId?: string; keyword?: string; page?: number; pageSize?: number } = {}) {
     let sql = 'SELECT * FROM nodes WHERE 1=1';
-    const params: any = {};
+    const params: Record<string, string> = {};
     if (status) { sql += ' AND status = @status'; params.status = status; }
     if (groupId) { sql += ' AND groupId = @groupId'; params.groupId = groupId; }
     if (keyword) {
@@ -371,18 +359,18 @@ class NodeStore {
       params.limit = pageSize;
       params.offset = (page - 1) * pageSize;
     }
-    return this.db.prepare(sql).all(params).map((r: any) => this._fromRow(r));
+    return this.db.prepare(sql).all(params).map((r: Record<string, unknown>) => this._fromRow(r));
   }
 
   // ═══════════════════════════════════════
   // 节点写入
   // ═══════════════════════════════════════
 
-  insert(node: any) {
+  insert(node: Partial<NodeRecord>) {
     this._stmts.insert.run(this._toRow(node));
   }
 
-  update(id: any, fields: any) {
+  update(id: string, fields: Partial<NodeRecord>) {
     const sets = [];
     const params: Record<string, any> = { id };
     for (const [key, val] of Object.entries(fields)) {
@@ -401,12 +389,12 @@ class NodeStore {
     this.db.prepare(`UPDATE nodes SET ${sets.join(', ')} WHERE id = @id`).run(params);
   }
 
-  remove(id: any) {
+  remove(id: string) {
     this._stmts.remove.run(id);
   }
 
   allTunAddrs() {
-    return new Set(this._stmts.allTunAddrs.all().map((r: any) => r.tunAddr));
+    return new Set(this._stmts.allTunAddrs.all().map((r: Record<string, unknown>) => r.tunAddr));
   }
 
   close() {

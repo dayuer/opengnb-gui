@@ -37,7 +37,7 @@ class AuditLogger {
         detailJson: JSON.stringify(detail),
       });
       this._rotateIfNeeded();
-    } catch (err: any) {
+    } catch (err: unknown) {
       log.error(`写入失败: ${err.message}`);
     }
   }

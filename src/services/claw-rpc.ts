@@ -10,10 +10,25 @@
  *   - HTTP API (GET/POST /v1/*, /status)
  *   - CLI 命令代理 (openclaw gateway call <method>)
  */
-class ClawRPC {
-  sshManager: any;
 
-  constructor(sshManager: any) {
+/** 节点 Claw 配置 */
+interface ClawNodeConfig {
+  id: string;
+  tunAddr: string;
+  clawToken?: string;
+  clawPort?: number;
+  [key: string]: unknown;
+}
+
+/** SSH 管理器接口 */
+interface ClawSshManager {
+  exec(nodeConfig: ClawNodeConfig, command: string, timeout?: number): Promise<{ stdout: string; stderr: string; code: number }>;
+}
+
+class ClawRPC {
+  sshManager: ClawSshManager;
+
+  constructor(sshManager: ClawSshManager) {
     this.sshManager = sshManager;
   }
 
@@ -25,7 +40,7 @@ class ClawRPC {
    * @param {object|null} [body=null] - POST body
    * @returns {Promise<object>}
    */
-  async httpCall(nodeConfig: any, endpoint: any, method = 'GET', body: any = null) {
+  async httpCall(nodeConfig: ClawNodeConfig, endpoint: string, method = 'GET', body: Record<string, unknown> | null = null) {
     const port = nodeConfig.clawPort || 18789;
     const token = nodeConfig.clawToken;
     if (!token) throw new Error(`节点 ${nodeConfig.id} 未配置 OpenClaw Token`);
@@ -34,9 +49,9 @@ class ClawRPC {
     if (!tunAddr) throw new Error(`节点 ${nodeConfig.id} 未配置 TUN 地址`);
 
     const url = `http://${tunAddr}:${port}${endpoint}`;
-    const options: any = {
+    const options: RequestInit = {
       method,
-      headers: { 'Authorization': `Bearer ${token}` } as any,
+      headers: { 'Authorization': `Bearer ${token}` } as Record<string, string>,
     };
     if (body) {
       options.headers['Content-Type'] = 'application/json';
@@ -56,9 +71,9 @@ class ClawRPC {
       } catch {
         return { raw: text };
       }
-    } catch (err: any) {
+    } catch (err: unknown) {
       clearTimeout(timeout);
-      throw new Error(`OpenClaw HTTP 调用失败 (${tunAddr}:${port}): ${err.message}`);
+      throw new Error(`OpenClaw HTTP 调用失败 (${tunAddr}:${port}): ${err instanceof Error ? err.message : String(err)}`);
     }
   }
 
@@ -69,11 +84,11 @@ class ClawRPC {
    * @param {object} [params={}]
    * @returns {Promise<object>}
    */
-  async rpcCall(nodeConfig: any, method: any, params = {}) {
+  async rpcCall(nodeConfig: ClawNodeConfig, method: string, params: Record<string, unknown> = {}) {
     const envPath = 'export PATH=/usr/local/bin:$PATH;';
     const cmd = `${envPath} sudo openclaw gateway call ${method} --params '${JSON.stringify(params)}' --json 2>/dev/null`;
     const result = await this.sshManager.exec(nodeConfig, cmd, 30000);
-    const output = (result && result.stdout) ? result.stdout.trim() : (typeof result === 'string' ? result.trim() : '');
+    const output = result.stdout.trim();
     try {
       return JSON.parse(output);
     } catch {
@@ -84,37 +99,37 @@ class ClawRPC {
   // ——— 便捷方法 ———
 
   /** 健康检查 */
-  async getStatus(nodeConfig: any) {
+  async getStatus(nodeConfig: ClawNodeConfig) {
     return this.rpcCall(nodeConfig, 'status');
   }
 
   /** 模型列表 */
-  async getModels(nodeConfig: any) {
+  async getModels(nodeConfig: ClawNodeConfig) {
     return this.httpCall(nodeConfig, '/v1/models');
   }
 
   /** 获取 Gateway 配置 */
-  async getConfig(nodeConfig: any) {
+  async getConfig(nodeConfig: ClawNodeConfig) {
     return this.rpcCall(nodeConfig, 'config.get');
   }
 
   /** 增量修改配置 */
-  async patchConfig(nodeConfig: any, rawPatch: any, baseHash: any) {
+  async patchConfig(nodeConfig: ClawNodeConfig, rawPatch: string, baseHash: string) {
     return this.rpcCall(nodeConfig, 'config.patch', { raw: rawPatch, baseHash });
   }
 
   /** 会话列表 */
-  async getSessions(nodeConfig: any) {
+  async getSessions(nodeConfig: ClawNodeConfig) {
     return this.rpcCall(nodeConfig, 'sessions.list');
   }
 
   /** 渠道状态 */
-  async getChannels(nodeConfig: any) {
+  async getChannels(nodeConfig: ClawNodeConfig) {
     return this.rpcCall(nodeConfig, 'channels.status');
   }
 
   /** 执行 Agent 推理 */
-  async agentRun(nodeConfig: any, message: any, sessionKey: any) {
+  async agentRun(nodeConfig: ClawNodeConfig, message: string, sessionKey: string) {
     return this.httpCall(nodeConfig, '/v1/agent/run', 'POST', { message, sessionKey });
   }
 }
