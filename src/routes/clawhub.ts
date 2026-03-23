@@ -85,7 +85,7 @@ async function searchClawHub(query: string, page: number = 1): Promise<any> {
 }
 
 /**
- * 通过 clawhub CLI 搜索（用于 REST API 不可达时）
+ * 通过 clawhub CLI 搜索（解析文本输出，格式：`slug  Name  (score)`）
  */
 async function searchViaCLI(query: string): Promise<any> {
   const cacheKey = `cli-search:${query}`;
@@ -94,14 +94,14 @@ async function searchViaCLI(query: string): Promise<any> {
 
   const { execSync } = require('child_process');
   try {
-    const output = execSync(`clawhub search "${query}" --json 2>/dev/null || echo "[]"`, {
+    const output = execSync(`clawhub search "${query.replace(/"/g, '\\"')}" --limit 20 --no-input 2>&1`, {
       timeout: 15000,
       encoding: 'utf-8',
     });
-    const skills = JSON.parse(output.trim() || '[]');
+    const skills = parseCLISearchOutput(output);
     const result = {
-      skills: Array.isArray(skills) ? skills.map(normalizeSkill) : [],
-      total: Array.isArray(skills) ? skills.length : 0,
+      skills,
+      total: skills.length,
       source: 'cli',
     };
     cacheSet(cacheKey, result);
@@ -113,7 +113,39 @@ async function searchViaCLI(query: string): Promise<any> {
 }
 
 /**
- * 获取单个技能详情
+ * 解析 CLI search 文本输出
+ * 格式示例：
+ *   - Searching
+ *   agent-browser-clawdbot  Agent Browser  (3.783)
+ *   browser-automation  Browser Automation  (3.749)
+ */
+function parseCLISearchOutput(output: string): any[] {
+  const lines = output.split('\n').filter(l => l.trim() && !l.startsWith('-') && !l.startsWith('error'));
+  return lines.map(line => {
+    //  格式: slug\s\s+Name\s\s+(score)
+    const match = line.match(/^(\S+)\s{2,}(.+?)\s+\((\d+\.\d+)\)\s*$/);
+    if (!match) return null;
+    const [, slug, name, score] = match;
+    return {
+      id: slug,
+      name: name.trim(),
+      version: 'latest',
+      author: '',
+      description: '',
+      category: 'ai',
+      icon: 'package',
+      iconGradient: 'linear-gradient(135deg, #6366f1 0%, #a5b4fc 100%)',
+      rating: parseFloat(score),
+      installs: 0,
+      source: 'clawhub',
+      slug,
+      installType: 'prompt',
+    };
+  }).filter(Boolean);
+}
+
+/**
+ * 获取单个技能详情（解析 `clawhub inspect` 文本输出）
  */
 async function getSkillDetail(skillId: string): Promise<any> {
   const cacheKey = `detail:${skillId}`;
@@ -134,14 +166,14 @@ async function getSkillDetail(skillId: string): Promise<any> {
       return skill;
     }
 
-    // CLI 回退
+    // CLI 回退：解析 clawhub inspect 文本输出
     const { execSync } = require('child_process');
-    const output = execSync(`clawhub info "${skillId}" --json 2>/dev/null || echo "{}"`, {
+    const output = execSync(`clawhub inspect "${skillId.replace(/"/g, '\\"')}" --no-input 2>&1`, {
       timeout: 15000,
       encoding: 'utf-8',
     });
-    const skill = normalizeSkill(JSON.parse(output.trim() || '{}'));
-    cacheSet(cacheKey, skill);
+    const skill = parseCLIInspectOutput(output, skillId);
+    if (skill) cacheSet(cacheKey, skill);
     return skill;
   } catch (err: any) {
     return null;
@@ -149,7 +181,52 @@ async function getSkillDetail(skillId: string): Promise<any> {
 }
 
 /**
- * 获取热门/推荐技能
+ * 解析 CLI inspect 文本输出
+ * 格式示例：
+ *   agent-browser-clawdbot  Agent Browser
+ *   Summary: Headless browser automation CLI...
+ *   Owner: matrixy
+ *   Created: 2026-01-21...
+ *   Latest: 0.1.0
+ *   License: MIT-0
+ */
+function parseCLIInspectOutput(output: string, fallbackId: string): any {
+  const lines = output.split('\n').filter(l => l.trim() && !l.startsWith('-'));
+  if (lines.length === 0) return null;
+
+  // 第一行：slug  Name
+  const headerMatch = lines[0]?.match(/^(\S+)\s{2,}(.+)$/);
+  const meta: Record<string, string> = {};
+  for (const line of lines.slice(1)) {
+    const idx = line.indexOf(':');
+    if (idx > 0) {
+      const key = line.substring(0, idx).trim().toLowerCase();
+      const val = line.substring(idx + 1).trim();
+      meta[key] = val;
+    }
+  }
+
+  return {
+    id: headerMatch?.[1] || fallbackId,
+    name: headerMatch?.[2]?.trim() || meta['name'] || fallbackId,
+    version: meta['latest'] || 'latest',
+    author: meta['owner'] || '',
+    description: meta['summary'] || '',
+    category: 'ai',
+    icon: 'package',
+    iconGradient: 'linear-gradient(135deg, #6366f1 0%, #a5b4fc 100%)',
+    rating: 0,
+    installs: 0,
+    source: 'clawhub',
+    slug: headerMatch?.[1] || fallbackId,
+    installType: 'prompt',
+    license: meta['license'] || '',
+    updatedAt: meta['updated'] || '',
+  };
+}
+
+/**
+ * 获取热门/推荐技能（优先 REST API，回退 `clawhub explore`）
  */
 async function getFeatured(): Promise<any> {
   const cacheKey = 'featured';
@@ -170,10 +247,32 @@ async function getFeatured(): Promise<any> {
       return result;
     }
 
-    // 回退：搜索热门关键词
-    return await searchClawHub('popular');
+    // 回退：用 clawhub explore 获取最新技能
+    return await exploreViaCLI();
   } catch (err: any) {
-    return { skills: [], total: 0, source: 'error', error: err.message };
+    return await exploreViaCLI();
+  }
+}
+
+/** 通过 `clawhub explore` 获取最新更新的技能 */
+async function exploreViaCLI(): Promise<any> {
+  const cacheKey = 'explore-cli';
+  const cached = cacheGet(cacheKey);
+  if (cached) return cached;
+
+  const { execSync } = require('child_process');
+  try {
+    const output = execSync('clawhub explore --limit 20 --no-input 2>&1', {
+      timeout: 15000,
+      encoding: 'utf-8',
+    });
+    // explore 输出格式类似 search
+    const skills = parseCLISearchOutput(output);
+    const result = { skills, total: skills.length, source: 'cli' };
+    cacheSet(cacheKey, result);
+    return result;
+  } catch {
+    return { skills: [], total: 0, source: 'cli-error' };
   }
 }
 
