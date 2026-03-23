@@ -242,20 +242,25 @@ function createNodesRouter(monitor: any, sshManager: any, nodesConfig: any, keyM
       return res.status(404).json({ error: `节点 ${req.params.id} 未找到或暂离线` });
     }
 
-    // @alpha: skills.sh / console / openclaw 类技能为 prompt 或平台能力，不需要 SSH 远程安装
-    const isLocalOnly = source === 'skills.sh' || source === 'console' || source === 'openclaw';
+    // 仅 console 类技能为平台内置能力，不需要 SSH 远程安装
+    const isLocalOnly = source === 'console';
 
     // 构造安装命令（仅远程源需要）
-    // @fix: 用 bash -lc 包裹以加载 login profile（NVM/fnm 环境下 npm 不在默认 PATH）
+    // @fix: bash -lc 包裹以加载 login profile（NVM/fnm 环境下 npm/openclaw 不在默认 PATH）
     let cmd = '';
     if (!isLocalOnly) {
       let innerCmd = '';
-      if (source.startsWith('http')) {
-        innerCmd = `curl -sSL ${source} | sudo bash`;
+      if (source === 'openclaw' || source === 'openclaw-bundled') {
+        // OpenClaw 原生 CLI 安装
+        innerCmd = `openclaw skills install ${skillId}`;
+      } else if (source === 'skills.sh') {
+        // skills.sh 生态安装（slug 格式: user/repo@skill-name）
+        const slug = req.body.slug || skillId;
+        innerCmd = `npx -y skills add ${slug}`;
       } else if (source === 'npm') {
-        innerCmd = `sudo $(which npm) install -g ${skillId}`;
-      } else if (source === 'openclaw') {
-        innerCmd = `sudo $(which npm) install -g @openclaw/${skillId}`;
+        innerCmd = `sudo $(which npm) install -g ${skillId} --registry=https://registry.npmmirror.com`;
+      } else if (source.startsWith('http')) {
+        innerCmd = `curl -sSL ${source} | sudo bash`;
       } else {
         return res.status(400).json({ error: '不支持的安装源: ' + source });
       }
