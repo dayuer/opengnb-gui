@@ -9,12 +9,11 @@ import { App } from '../core';
 
 let settingsTab = 'general';
 
-function switchSettingsTab(tab) {
-  settingsTab = tab;
-  Settings.render($('#main-content'));
-}
-
 export const Settings = {
+  switchSettingsTab(tab: string) {
+    settingsTab = tab;
+    Settings.render($('#main-content'));
+  },
   async render(container) {
     const tabs = [
       { id: 'general', icon: 'settings', label: '通用' },
@@ -34,7 +33,7 @@ export const Settings = {
         <div class="flex items-center overflow-x-auto border-b border-border-subtle px-2">
           ${tabs.map(t => {
             const active = settingsTab === t.id;
-            return `<button class="flex items-center gap-2 px-5 py-4 text-sm whitespace-nowrap transition-all cursor-pointer relative ${active ? 'text-primary font-bold' : 'text-text-muted hover:text-text-primary'} [&_svg]:w-4 [&_svg]:h-4" onclick="switchSettingsTab('${t.id}')">
+            return `<button class="flex items-center gap-2 px-5 py-4 text-sm whitespace-nowrap transition-all cursor-pointer relative ${active ? 'text-primary font-bold' : 'text-text-muted hover:text-text-primary'} [&_svg]:w-4 [&_svg]:h-4" onclick="Settings.switchSettingsTab('${t.id}')">
               ${L(t.icon)}<span>${t.label}</span>
               ${active ? `<div class="absolute bottom-0 left-1/2 -translate-x-1/2 h-0.5 w-3/4 signature-gradient rounded-full"></div>` : ''}
             </button>`;
