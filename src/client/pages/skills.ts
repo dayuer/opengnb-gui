@@ -275,7 +275,7 @@ export const Skills = {
       ? `${(skill.installs / 1000).toFixed(1)}k`
       : `${skill.installs || 0}`;
     const delay = Math.min(index * 40, 400);
-    const isCustom = !skill.isBuiltin;
+    const isCustom = skill.source === 'custom';
 
     // 来源徽章颜色
     const sourceBadgeClass: Record<string, string> = {

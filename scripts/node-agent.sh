@@ -67,8 +67,8 @@ START_MS=$(($(date +%s%N 2>/dev/null || echo "0") / 1000000))
 GNB_STATUS=""
 GNB_ADDRS=""
 if command -v "$GNB_CTL" &>/dev/null && [ -e "$GNB_MAP_PATH" ]; then
-  GNB_STATUS=$("$GNB_CTL" -b "$GNB_MAP_PATH" -s 2>/dev/null || true)
-  GNB_ADDRS=$("$GNB_CTL" -b "$GNB_MAP_PATH" -a 2>/dev/null || true)
+  GNB_STATUS=$(timeout 2 "$GNB_CTL" -b "$GNB_MAP_PATH" -s 2>/dev/null || true)
+  GNB_ADDRS=$(timeout 2 "$GNB_CTL" -b "$GNB_MAP_PATH" -a 2>/dev/null || true)
 fi
 
 # --- 2. 系统信息（::KEY::VALUE 格式，与 Console _parseSysInfo 兼容）---
@@ -113,13 +113,21 @@ for cfg_path in "$HOME/.openclaw/openclaw.json" "/root/.openclaw/openclaw.json" 
 done
 
 if [ "$CLAW_RUNNING" = "true" ]; then
-  CLAW_RPC_OK=$(curl -sf -m 2 "http://127.0.0.1:${CLAW_PORT}/api/status" >/dev/null 2>&1 && echo "true" || echo "false")
+  CLAW_RPC_OK=$(curl -sf -m 1 "http://127.0.0.1:${CLAW_PORT}/api/status" >/dev/null 2>&1 && echo "true" || echo "false")
 fi
 
-# --- 采集 OpenClaw 已安装 skills（shell 解析 │ 分隔表格）---
+# --- 采集 OpenClaw 已安装 skills（缓存优先） ---
+# 策略：优先读取本地 skills.json 缓存（~0ms），不存在时才执行 openclaw skills list（~5-10s）
 INSTALLED_SKILLS="[]"
-if command -v openclaw &>/dev/null; then
-  SKILLS_RAW=$(openclaw skills list 2>/dev/null || true)
+SKILLS_CACHE="/opt/gnb/cache/skills.json"
+mkdir -p "$(dirname "$SKILLS_CACHE")" 2>/dev/null
+
+if [ -f "$SKILLS_CACHE" ]; then
+  # 缓存命中 — 直接读取
+  INSTALLED_SKILLS=$(cat "$SKILLS_CACHE" 2>/dev/null || echo "[]")
+elif command -v openclaw &>/dev/null; then
+  # 缓存未命中 — 执行 openclaw skills list 并写入缓存
+  SKILLS_RAW=$(timeout 5 openclaw skills list 2>/dev/null || true)
   if [ -n "$SKILLS_RAW" ]; then
     # 解析 │ 分隔表格：跳过表头和 missing 行，提取 skill 名称和 source
     INSTALLED_SKILLS=$(echo "$SKILLS_RAW" | awk -F'│' '
@@ -140,6 +148,8 @@ if command -v openclaw &>/dev/null; then
       }
     ' | jq -s '.' 2>/dev/null || echo "[]")
   fi
+  # 写入缓存
+  echo "$INSTALLED_SKILLS" > "$SKILLS_CACHE" 2>/dev/null || true
 fi
 
 END_MS=$(($(date +%s%N 2>/dev/null || echo "0") / 1000000))
@@ -244,6 +254,14 @@ if [ -f "$RESPONSE_FILE" ]; then
         fi
       fi
       COMPLETED_AT=$(date -u '+%Y-%m-%dT%H:%M:%SZ' 2>/dev/null || date '+%Y-%m-%dT%H:%M:%SZ')
+
+      # 技能相关任务完成后，失效 skills.json 缓存（下次心跳重新生成）
+      case "$TASK_CMD" in
+        *install*|*uninstall*|*enable*|*disable*|*clawhub*|*skills*)
+          rm -f "$SKILLS_CACHE" 2>/dev/null
+          task_log "已清除 skills.json 缓存（触发: ${TASK_CMD}）"
+          ;;
+      esac
 
       # 截取输出（最多 2000 字节）
       STDOUT_CONTENT=$(head -c 2000 "$STDOUT_FILE" 2>/dev/null || true)
