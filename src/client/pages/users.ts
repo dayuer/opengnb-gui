@@ -199,9 +199,30 @@ export const Users = {
             <p class="text-xs text-text-muted">用于接收系统告警和通知</p>
           </div>
           <div class="space-y-2">
-            <label class="block text-sm font-medium">地区</label>
-            <input class="w-full px-4 py-3 bg-elevated border border-border-default rounded-xl text-sm outline-none focus-visible:ring-2 focus-visible:ring-primary/20 focus-visible:border-primary transition-[box-shadow,border-color]" value="Asia Pacific" placeholder="团队所在地区">
-            <p class="text-xs text-text-muted">影响默认节点区域分配</p>
+            <label class="block text-sm font-medium">时区</label>
+            <select class="w-full px-4 py-3 bg-elevated border border-border-default rounded-xl text-sm outline-none focus-visible:ring-2 focus-visible:ring-primary/20 focus-visible:border-primary transition-[box-shadow,border-color] cursor-pointer appearance-none" style="background-image: url('data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 width=%2212%22 height=%2212%22 viewBox=%220 0 24 24%22 fill=%22none%22 stroke=%22currentColor%22 stroke-width=%222%22><polyline points=%226 9 12 15 18 9%22/></svg>'); background-repeat: no-repeat; background-position: right 16px center;">
+              <option value="Pacific/Honolulu">UTC−10:00 — 夏威夷</option>
+              <option value="America/Anchorage">UTC−09:00 — 阿拉斯加</option>
+              <option value="America/Los_Angeles">UTC−08:00 — 美国太平洋</option>
+              <option value="America/Denver">UTC−07:00 — 美国山区</option>
+              <option value="America/Chicago">UTC−06:00 — 美国中部</option>
+              <option value="America/New_York">UTC−05:00 — 美国东部</option>
+              <option value="America/Sao_Paulo">UTC−03:00 — 巴西利亚</option>
+              <option value="Atlantic/Reykjavik">UTC+00:00 — 冰岛 / UTC</option>
+              <option value="Europe/London">UTC+00:00 — 伦敦</option>
+              <option value="Europe/Paris">UTC+01:00 — 巴黎 / 柏林</option>
+              <option value="Europe/Helsinki">UTC+02:00 — 赫尔辛基</option>
+              <option value="Europe/Moscow">UTC+03:00 — 莫斯科</option>
+              <option value="Asia/Dubai">UTC+04:00 — 迪拜</option>
+              <option value="Asia/Kolkata">UTC+05:30 — 印度</option>
+              <option value="Asia/Almaty">UTC+06:00 — 阿拉木图</option>
+              <option value="Asia/Bangkok">UTC+07:00 — 曼谷</option>
+              <option value="Asia/Shanghai" selected>UTC+08:00 — 中国标准时间</option>
+              <option value="Asia/Tokyo">UTC+09:00 — 东京 / 首尔</option>
+              <option value="Australia/Sydney">UTC+10:00 — 悉尼</option>
+              <option value="Pacific/Auckland">UTC+12:00 — 新西兰</option>
+            </select>
+            <p class="text-xs text-text-muted">影响默认节点区域分配和时间显示</p>
           </div>
         </div>
       </div>
@@ -276,17 +297,28 @@ export const Users = {
     </div>`;
   },
 
+  _genPassword(len = 12): string {
+    const chars = 'ABCDEFGHJKMNPQRSTUVWXYZabcdefghjkmnpqrstuvwxyz23456789';
+    const arr = new Uint8Array(len);
+    crypto.getRandomValues(arr);
+    return Array.from(arr, b => chars[b % chars.length]).join('');
+  },
+
   showCreateModal() {
+    const pwd = this._genPassword();
     Modal.show(`
       <h3 class="text-lg font-bold font-headline mb-6">邀请团队成员</h3>
-      <div class="space-y-4">
+      <div id="invite-form" class="space-y-4">
         <div class="space-y-2">
           <label class="block text-sm font-medium">用户名</label>
           <input type="text" id="new-username" placeholder="输入用户名" autofocus class="w-full bg-elevated border border-border-default rounded-xl px-4 py-3 text-sm outline-none focus-visible:ring-2 focus-visible:ring-primary/20 focus-visible:border-primary transition-[box-shadow,border-color]">
         </div>
         <div class="space-y-2">
-          <label class="block text-sm font-medium">初始密码（至少 8 位）</label>
-          <input type="password" id="new-password" placeholder="输入密码" class="w-full bg-elevated border border-border-default rounded-xl px-4 py-3 text-sm outline-none focus-visible:ring-2 focus-visible:ring-primary/20 focus-visible:border-primary transition-[box-shadow,border-color]">
+          <label class="block text-sm font-medium">初始密码（自动生成）</label>
+          <div class="flex items-center gap-2">
+            <input type="text" id="new-password" value="${pwd}" readonly class="flex-1 bg-elevated border border-border-default rounded-xl px-4 py-3 text-sm font-mono outline-none">
+            <button type="button" class="p-3 bg-elevated border border-border-default rounded-xl hover:bg-primary/10 hover:border-primary transition cursor-pointer [&_svg]:w-4 [&_svg]:h-4 text-text-muted hover:text-primary" onclick="Users._refreshPassword()" title="重新生成">${L('refresh-cw')}</button>
+          </div>
         </div>
         <div class="space-y-2">
           <label class="block text-sm font-medium">角色权限</label>
@@ -298,11 +330,30 @@ export const Users = {
         </div>
         <div id="create-user-error" class="hidden text-danger text-xs"></div>
       </div>
+      <div id="invite-result" class="hidden space-y-4">
+        <div class="flex items-center gap-2 text-success mb-2">
+          ${L('check-circle')}
+          <span class="text-sm font-bold">成员创建成功！请将以下信息发送给该用户：</span>
+        </div>
+        <textarea id="invite-credential" readonly rows="5" class="w-full bg-elevated border border-border-default rounded-xl px-4 py-3 text-sm font-mono outline-none resize-none leading-relaxed"></textarea>
+      </div>
       <div class="flex justify-end gap-3 mt-6">
         <button class="px-5 py-2.5 text-sm font-semibold text-text-muted hover:bg-elevated rounded-xl transition cursor-pointer" onclick="App.closeModal()">取消</button>
-        <button class="px-6 py-2.5 text-sm font-bold signature-gradient text-white rounded-xl shadow-lg shadow-primary/20 hover:scale-[1.02] active:scale-95 transition-transform cursor-pointer" onclick="Users.createUser()">邀请</button>
+        <button id="invite-submit-btn" class="px-6 py-2.5 text-sm font-bold signature-gradient text-white rounded-xl shadow-lg shadow-primary/20 hover:scale-[1.02] active:scale-95 transition-transform cursor-pointer" onclick="Users.createUser()">邀请</button>
+        <button id="invite-copy-btn" class="hidden px-6 py-2.5 text-sm font-bold signature-gradient text-white rounded-xl shadow-lg shadow-primary/20 hover:scale-[1.02] active:scale-95 transition-transform cursor-pointer flex items-center gap-2 [&_svg]:w-4 [&_svg]:h-4" onclick="Users._copyCredential()">${L('copy')} 复制凭证</button>
       </div>
     `);
+    refreshIcons();
+  },
+
+  _refreshPassword() {
+    const el = $('#new-password') as HTMLInputElement;
+    if (el) el.value = this._genPassword();
+  },
+
+  _copyCredential() {
+    const el = $('#invite-credential') as HTMLTextAreaElement;
+    if (el) { navigator.clipboard.writeText(el.value); showToast('已复制凭证信息'); }
   },
 
   async createUser() {
@@ -310,14 +361,22 @@ export const Users = {
     const password = ($('#new-password') as HTMLInputElement)?.value;
     const role = ($('#new-role') as HTMLSelectElement)?.value || 'member';
     const errEl = $('#create-user-error');
-    if (!username || !password) return;
+    if (!username || !password) { if (errEl) { errEl.textContent = '请输入用户名'; errEl.classList.remove('hidden'); } return; }
     try {
       const res = await App.authFetch('/api/auth/register', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ username, password, role }) });
       const data = await res.json();
       if (!res.ok) { if (errEl) { errEl.textContent = data.error || '邀请失败'; errEl.classList.remove('hidden'); } return; }
-      App.closeModal();
+      // 创建成功 — 显示凭证
+      const loginUrl = location.origin;
+      const credential = `SynonClaw Console 登录信息\n${'─'.repeat(28)}\n登录地址: ${loginUrl}\n用户名:   ${username}\n初始密码: ${password}\n角色:     ${role === 'admin' ? '管理员' : '普通成员'}\n${'─'.repeat(28)}\n⚠️ 请登录后立即修改密码`;
+      const credEl = $('#invite-credential') as HTMLTextAreaElement;
+      if (credEl) credEl.value = credential;
+      // 切换到结果视图
+      const form = $('#invite-form'); if (form) form.classList.add('hidden');
+      const result = $('#invite-result'); if (result) result.classList.remove('hidden');
+      const submitBtn = $('#invite-submit-btn'); if (submitBtn) submitBtn.classList.add('hidden');
+      const copyBtn = $('#invite-copy-btn'); if (copyBtn) copyBtn.classList.remove('hidden');
       _cachedUsers = null;
-      await Users.render($('#main-content'));
     } catch (e) { if (errEl) { errEl.textContent = e.message; errEl.classList.remove('hidden'); } }
   },
 
