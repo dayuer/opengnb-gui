@@ -11,16 +11,28 @@ const log = createLogger('SkillsStore');
  * 技能注册表 — SQLite 持久化层
  *
  * 管理所有技能元数据（内置 + 用户上传），对外暴露 CRUD 接口。
- * 内置技能标记 isBuiltin: 1，不可被用户删除。
+ * 支持两种模式：
+ *   1. 共享模式：传入已打开的 DB 实例（推荐，与 NodeStore 共用 nodes.db）
+ *   2. 独立模式：传入路径（向后兼容，独立 skills.db）
  */
 class SkillsStore {
   dbPath: string;
   db: any;
   _stmts: any;
+  _shared: boolean;
 
-  constructor(dbPath: string) {
-    this.dbPath = dbPath;
-    this.db = null;
+  constructor(dbOrPath: any) {
+    if (typeof dbOrPath === 'object' && dbOrPath !== null && typeof dbOrPath.prepare === 'function') {
+      // 共享模式 — 接收已打开的 DB 实例
+      this.db = dbOrPath;
+      this.dbPath = '';
+      this._shared = true;
+    } else {
+      // 独立模式 — 路径（向后兼容）
+      this.dbPath = dbOrPath;
+      this.db = null;
+      this._shared = false;
+    }
     this._stmts = {};
   }
 
@@ -28,11 +40,12 @@ class SkillsStore {
    * 初始化数据库 + 预装内置技能
    */
   init() {
-    fs.mkdirSync(path.dirname(this.dbPath), { recursive: true });
-
-    this.db = new Database(this.dbPath);
-    this.db.pragma('journal_mode = WAL');
-    this.db.pragma('synchronous = NORMAL');
+    if (!this._shared) {
+      fs.mkdirSync(path.dirname(this.dbPath), { recursive: true });
+      this.db = new Database(this.dbPath);
+      this.db.pragma('journal_mode = WAL');
+      this.db.pragma('synchronous = NORMAL');
+    }
 
     this._createTables();
     this._prepareStatements();

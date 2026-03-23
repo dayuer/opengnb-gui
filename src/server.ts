@@ -259,7 +259,7 @@ async function boot() {
   app.use('/api/mirror', createMirrorRouter(DATA_DIR));
 
   // 技能注册表 — 需认证
-  const skillsStore = new SkillsStore(path.join(DATA_DIR, 'skills.db'));
+  const skillsStore = new SkillsStore(keyManager.store.db);
   skillsStore.init();
   app.use('/api/skills', requireAuth, createSkillsRouter(skillsStore));
 

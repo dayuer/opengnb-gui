@@ -73,6 +73,10 @@ npm install --omit=dev     # Remove dev dependencies to save space
 npm rebuild
 mkdir -p data
 
+# 数据库 schema 初始化/迁移（在服务启动前执行）
+echo "      初始化数据库 schema..."
+DATA_DIR=$APP_DIR/data npx tsx scripts/init-db.ts
+
 # 清理生产环境不需要的文件
 rm -rf src/__tests__ doc team
 echo "      已清理测试/文档目录"
