@@ -322,7 +322,6 @@ export const SkillModals = {
           refreshIcons();
 
           try {
-            // Step 1: 下发安装命令
             const res = await App.authFetch(`/api/nodes/${targetNodeId}/skills`, {
               method: 'POST',
               headers: { 'Content-Type': 'application/json' },
@@ -340,16 +339,7 @@ export const SkillModals = {
               throw new Error(errData.error || `Server responded with ${res.status}`);
             }
 
-            // Step 2: 悲观更新 — 轮询等待 agent 上报确认
-            installBtn.innerHTML = '<i data-lucide="loader-2" class="w-4 h-4 animate-spin"></i> 安装中，等待节点确认...';
-            refreshIcons();
-
-            const confirmed = await SkillModals._waitForSkillConfirm(targetNodeId, skill.id, skill.name, 60000);
-            if (confirmed) {
-              showToast(`技能 ${skill.name} 已成功安装到节点`, 'success');
-            } else {
-              showToast(`安装命令已下发，但节点尚未确认（可能需要更长时间）`, 'info');
-            }
+            showToast(`技能 ${skill.name} 安装任务已下发，请在节点详情中查看进度`, 'success');
             closeHandler();
           } catch (err: any) {
             console.error('Install failed:', err);
@@ -365,37 +355,5 @@ export const SkillModals = {
       console.error(e);
       showToast('无法调取节点信息', 'error');
     }
-  },
-
-  /**
-   * 悲观确认：轮询等待 agent 上报 skill 安装成功
-   * 每 5 秒查询一次节点状态，检查 agent 上报的 skills 中是否包含目标 skill
-   */
-  async _waitForSkillConfirm(nodeId: string, skillId: string, skillName: string, timeoutMs: number): Promise<boolean> {
-    const interval = 5000;
-    const maxAttempts = Math.ceil(timeoutMs / interval);
-
-    for (let i = 0; i < maxAttempts; i++) {
-      await new Promise(r => setTimeout(r, interval));
-
-      try {
-        const res = await App.authFetch(`/api/nodes/${nodeId}`);
-        if (!res.ok) continue;
-        const data = await res.json();
-
-        // agent 上报的 skills（来自 openclaw skills list）
-        const skills: any[] = data.skills || [];
-        const found = skills.some((s: any) => {
-          const name = (s.name || s.id || '').toLowerCase();
-          return name === skillId.toLowerCase() || name === skillName.toLowerCase();
-        });
-
-        if (found) return true;
-      } catch {
-        // 网络错误，继续重试
-      }
-    }
-
-    return false;
   },
 };
