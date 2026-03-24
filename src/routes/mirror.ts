@@ -77,4 +77,4 @@ function createMirrorRouter(dataDir: any) {
 }
 
 module.exports = createMirrorRouter;
-export {}; // CJS 模块标记
+export { }; // CJS 模块标记
