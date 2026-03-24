@@ -49,7 +49,7 @@ function createMirrorRouter(dataDir: any) {
     if (!fs.existsSync(filePath)) return res.status(404).json({ error: '文件不存在' });
     const stat = fs.statSync(filePath);
     if (stat.size > MAX_FILE_SIZE) return res.status(413).json({ error: '文件过大' });
-    res.download(filePath);
+    res.sendFile(path.resolve(filePath));
   });
 
   // GET /api/mirror/openclaw — OpenClaw 文件列表
@@ -70,7 +70,7 @@ function createMirrorRouter(dataDir: any) {
     if (!fs.existsSync(filePath)) return res.status(404).json({ error: '文件不存在' });
     const stat = fs.statSync(filePath);
     if (stat.size > MAX_FILE_SIZE) return res.status(413).json({ error: '文件过大' });
-    res.download(filePath);
+    res.sendFile(path.resolve(filePath));
   });
 
   return router;

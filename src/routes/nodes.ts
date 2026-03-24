@@ -49,8 +49,9 @@ function createNodesRouter(monitor: any, sshManager: any, keyManager: any, metri
         const group = keyManager.createGroup({ name, color });
         res.status(201).json(group);
       } catch (err: unknown) {
-        const status = err.message.includes('已存在') ? 409 : 400;
-        res.status(status).json({ error: err.message });
+        const errMsg = (err as Error).message ?? String(err);
+        const status = errMsg.includes('已存在') ? 409 : 400;
+        res.status(status).json({ error: errMsg });
       }
     });
 
@@ -137,9 +138,10 @@ function createNodesRouter(monitor: any, sshManager: any, keyManager: any, metri
         }
         console.log(`[RemoteSync] ✅ 节点 address.conf 已验证: ${expectedLine}`);
       } catch (err: unknown) {
-        console.error(`[RemoteSync] SSH 失败: ${err.message}`);
+        const errMsg = (err as Error).message ?? String(err);
+        console.error(`[RemoteSync] SSH 失败: ${errMsg}`);
         return res.status(503).json({
-          error: `远程同步失败: ${err.message}`,
+          error: `远程同步失败: ${errMsg}`,
           hint: '节点不可达，IP 未变更。请检查 SSH 连接后重试。',
         });
       }
@@ -224,7 +226,8 @@ function createNodesRouter(monitor: any, sshManager: any, keyManager: any, metri
       const result = await sshManager.exec(nodeConfig, cmd);
       res.json(result);
     } catch (err: unknown) {
-      const msg = process.env.NODE_ENV === 'production' ? '命令执行失败' : err.message;
+      const errMsg = (err as Error).message ?? String(err);
+      const msg = process.env.NODE_ENV === 'production' ? '命令执行失败' : errMsg;
       res.status(500).json({ error: msg });
     }
   });
