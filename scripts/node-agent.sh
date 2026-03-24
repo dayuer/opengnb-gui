@@ -7,6 +7,13 @@
 # 依赖：jq, curl, bash, coreutils（无 Python）
 # ═══════════════════════════════════════════════════════════════
 
+# --- 全局安全超时：防止子进程挂死导致 oneshot 永不退出 ---
+AGENT_TIMEOUT=45
+if [ -z "${_AGENT_GUARDED:-}" ]; then
+  export _AGENT_GUARDED=1
+  exec timeout --kill-after=5 "${AGENT_TIMEOUT}s" "$0" "$@"
+fi
+
 # --- 任务日志（集中记录任务执行全过程） ---
 TASK_LOG="/opt/gnb/log/agent-tasks.log"
 mkdir -p "$(dirname "$TASK_LOG")" 2>/dev/null
@@ -127,7 +134,8 @@ if [ -f "$SKILLS_CACHE" ]; then
   INSTALLED_SKILLS=$(cat "$SKILLS_CACHE" 2>/dev/null || echo "[]")
 elif command -v openclaw &>/dev/null; then
   # 缓存未命中 — 执行 openclaw skills list 并写入缓存
-  SKILLS_RAW=$(timeout 5 openclaw skills list 2>/dev/null || true)
+  # --kill-after=2: timeout 后 2 秒强制 SIGKILL，防止 openclaw 子进程残留
+  SKILLS_RAW=$(timeout --kill-after=2 5 openclaw skills list 2>/dev/null || true)
   if [ -n "$SKILLS_RAW" ]; then
     # 解析 │ 分隔表格：跳过表头和 missing 行，提取 skill 名称和 source
     INSTALLED_SKILLS=$(echo "$SKILLS_RAW" | awk -F'│' '

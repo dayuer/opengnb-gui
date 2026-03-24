@@ -616,6 +616,7 @@ After=gnb.service
 
 [Service]
 Type=oneshot
+TimeoutStartSec=55
 EnvironmentFile=/opt/gnb/bin/agent.env
 ExecStart=/opt/gnb/bin/node-agent.sh
 SVCEOF
