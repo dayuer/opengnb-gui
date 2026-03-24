@@ -86,6 +86,8 @@ class SkillsStore {
     if (this.count() === 0) {
       this._seed();
     }
+    // 每次启动：修正已有 seed 数据的 source/slug（幂等）
+    this._migrateSeedData();
   }
 
   /** @private 建表 */
@@ -218,16 +220,38 @@ class SkillsStore {
     if (this.db) this.db.close();
   }
 
+  /**
+   * @private 修正已有 seed 数据的 source/slug
+   *
+   * 场景：内置技能的 source/slug 在代码侧被修正后，
+   * 已运行过 seed 的 DB 不会自动更新。此方法在每次启动时
+   * 对比 BUILTIN_SKILLS 并幂等地修正 source + slug。
+   */
+  _migrateSeedData() {
+    const updateStmt = (this.db as any).prepare(
+      'UPDATE skills SET source = ?, slug = ? WHERE id = ? AND isBuiltin = 1 AND (source != ? OR slug != ?)'
+    );
+    let updated = 0;
+    for (const s of SkillsStore.BUILTIN_SKILLS) {
+      const result = updateStmt.run(s.source, s.slug || '', s.id, s.source, s.slug || '');
+      if (result.changes > 0) updated++;
+    }
+    if (updated > 0) {
+      log.info(`已修正 ${updated} 个内置技能的 source/slug`);
+    }
+  }
+
   // ═══════════════════════════════════════════
   //  内置技能数据（从 skills.ts 迁移）
   // ═══════════════════════════════════════════
   static BUILTIN_SKILLS = [
-    // --- ClawHub 第三方插件 ---
-    { id: 'agent-browser', name: 'Agent Browser', version: 'v1.0', author: 'Vercel Labs / OpenClaw', description: '浏览器自动化 CLI — AI 代理驱动网页交互、表单填充、截图与数据提取。119K+ 安装。', category: 'ai', icon: 'globe', iconGradient: 'linear-gradient(135deg, #0ea5e9 0%, #38bdf8 100%)', rating: 4.9, installs: 119200, source: 'clawhub', slug: 'agent-browser', installType: 'prompt' },
-    { id: 'find-skills', name: 'Find Skills', version: 'v1.0', author: 'OpenClaw', description: '技能发现助手 — 搜索 skills.sh 开放生态，智能推荐并安装适合的 agent 技能', category: 'ai', icon: 'search', iconGradient: 'linear-gradient(135deg, #8b5cf6 0%, #c4b5fd 100%)', rating: 4.6, installs: 3200, source: 'clawhub', slug: 'find-skills', installType: 'prompt' },
-    { id: 'feishu-doc', name: '飞书文档', version: 'v1.0', author: 'OpenClaw', description: '飞书文档协作集成 — 自动读写飞书云文档、表格与知识库', category: 'integration', icon: 'file-text', iconGradient: 'linear-gradient(135deg, #3b82f6 0%, #93c5fd 100%)', rating: 4.5, installs: 420, source: 'clawhub', slug: 'feishu-doc', installType: 'prompt' },
-    { id: 'feishu-channel', name: '飞书消息通道', version: 'v1.0', author: 'OpenClaw / LarkSuite', description: '飞书 Bot 消息通道 — WebSocket 实时通信、群聊与私聊指令分发', category: 'integration', icon: 'message-circle', iconGradient: 'linear-gradient(135deg, #2563eb 0%, #60a5fa 100%)', rating: 4.6, installs: 510, source: 'clawhub', slug: 'feishu-channel', installType: 'prompt' },
-    { id: 'blog-writer', name: 'Blog Writer', version: 'v1.0', author: 'SynonClaw', description: '博客写手 — 根据大纲自动生成 MDX 博文，构建并发布到站点', category: 'content', icon: 'pen-tool', iconGradient: 'linear-gradient(135deg, #f59e0b 0%, #fbbf24 100%)', rating: 4.4, installs: 180, source: 'clawhub', slug: 'blog-writer', installType: 'prompt' },
+    // --- ClawHub 第三方插件（slug 必须匹配 ClawHub 注册表实际名称） ---
+    { id: 'agent-browser', name: 'Agent Browser', version: 'v1.0', author: 'Vercel Labs / OpenClaw', description: '浏览器自动化 CLI — AI 代理驱动网页交互、表单填充、截图与数据提取。119K+ 安装。', category: 'ai', icon: 'globe', iconGradient: 'linear-gradient(135deg, #0ea5e9 0%, #38bdf8 100%)', rating: 4.9, installs: 119200, source: 'clawhub', slug: 'agent-browser-clawdbot', installType: 'prompt' },
+    // --- Console 内置展示（暂无远程安装，仅作商店展示） ---
+    { id: 'find-skills', name: 'Find Skills', version: 'v1.0', author: 'OpenClaw', description: '技能发现助手 — 搜索 skills.sh 开放生态，智能推荐并安装适合的 agent 技能', category: 'ai', icon: 'search', iconGradient: 'linear-gradient(135deg, #8b5cf6 0%, #c4b5fd 100%)', rating: 4.6, installs: 3200, source: 'console', slug: 'find-skills', installType: 'prompt' },
+    { id: 'feishu-doc', name: '飞书文档', version: 'v1.0', author: 'OpenClaw', description: '飞书文档协作集成 — 自动读写飞书云文档、表格与知识库', category: 'integration', icon: 'file-text', iconGradient: 'linear-gradient(135deg, #3b82f6 0%, #93c5fd 100%)', rating: 4.5, installs: 420, source: 'console', slug: 'feishu-doc', installType: 'prompt' },
+    { id: 'feishu-channel', name: '飞书消息通道', version: 'v1.0', author: 'OpenClaw / LarkSuite', description: '飞书 Bot 消息通道 — WebSocket 实时通信、群聊与私聊指令分发', category: 'integration', icon: 'message-circle', iconGradient: 'linear-gradient(135deg, #2563eb 0%, #60a5fa 100%)', rating: 4.6, installs: 510, source: 'console', slug: 'feishu-channel', installType: 'prompt' },
+    { id: 'blog-writer', name: 'Blog Writer', version: 'v1.0', author: 'SynonClaw', description: '博客写手 — 根据大纲自动生成 MDX 博文，构建并发布到站点', category: 'content', icon: 'pen-tool', iconGradient: 'linear-gradient(135deg, #f59e0b 0%, #fbbf24 100%)', rating: 4.4, installs: 180, source: 'console', slug: 'blog-writer', installType: 'prompt' },
     // --- OpenClaw stock 内置插件 ---
     { id: 'slack', name: 'Slack', version: 'v1.0', author: 'OpenClaw', description: 'Slack 消息通道集成 — 接收指令、推送告警与运维通知', category: 'integration', icon: 'hash', iconGradient: 'linear-gradient(135deg, #611f69 0%, #e01e5a 100%)', rating: 4.3, installs: 380, source: 'openclaw-bundled', installType: 'prompt' },
     { id: 'qwen-portal-auth', name: '通义千问认证', version: 'v1.0', author: 'OpenClaw', description: '通义千问 Portal 免 API-Key 认证 — 自动 Cookie 刷新与会话保持', category: 'ai', icon: 'key-round', iconGradient: 'linear-gradient(135deg, #7c3aed 0%, #c084fc 100%)', rating: 4.2, installs: 290, source: 'openclaw-bundled', installType: 'prompt' },
