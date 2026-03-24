@@ -200,7 +200,7 @@ function initRoutes(deps: any) {
   app.use('/api/auth', express.json(), createAuthRouter(store));
 
   // 管理路由
-  app.use('/api/nodes', requireAuth, audit.middleware('nodes'), createNodesRouter(monitor, sshManager, monitor.nodesConfig, keyManager, metricsStore, taskQueue));
+  app.use('/api/nodes', requireAuth, audit.middleware('nodes'), createNodesRouter(monitor, sshManager, keyManager, metricsStore, taskQueue));
   app.use('/api/ai', requireAuth, strictLimit, audit.middleware('ai_ops'), createAiRouter(aiOps, opsLog.saveOpsLog));
   app.use('/api/jobs', createJobsRouter({ jobManager, sshManager, keyManager: { getNodeById: (id: any) => store.findById(id) }, requireAuth, broadcastWS: (msg: any) => { wsHandlers.broadcast(msg); } }));
 

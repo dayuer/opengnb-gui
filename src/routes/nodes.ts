@@ -9,12 +9,11 @@ const { buildInstallCommand, buildUninstallCommand } = require('../services/skil
  * 节点管理 API 路由（含分组 + 指标子路由）
  * @param {import('../services/gnb-monitor')} monitor
  * @param {import('../services/ssh-manager')} sshManager
- * @param {Array} nodesConfig
  * @param {import('../services/key-manager')} [keyManager]
  * @param {import('../services/metrics-store')} [metricsStore]
  * @param {import('../services/task-queue')} [taskQueue]
  */
-function createNodesRouter(monitor: any, sshManager: any, nodesConfig: any, keyManager: any, metricsStore: any, taskQueue?: any) {
+function createNodesRouter(monitor: any, sshManager: any, keyManager: any, metricsStore: any, taskQueue?: any) {
   const router = express.Router();
 
   // ═══════════════════════════════════════
@@ -216,7 +215,7 @@ function createNodesRouter(monitor: any, sshManager: any, nodesConfig: any, keyM
       });
     }
 
-    const nodeConfig = nodesConfig.find((n: any) => n.id === req.params.id);
+    const nodeConfig = monitor.nodesConfig.find((n: any) => n.id === req.params.id);
     if (!nodeConfig) {
       return res.status(404).json({ error: `节点 ${req.params.id} 未配置` });
     }
@@ -242,7 +241,7 @@ function createNodesRouter(monitor: any, sshManager: any, nodesConfig: any, keyM
     }
 
     const nodeId = req.params.id;
-    const nodeConfig = nodesConfig.find((n: any) => n.id === nodeId);
+    const nodeConfig = monitor.nodesConfig.find((n: any) => n.id === nodeId);
     if (!nodeConfig) {
       return res.status(404).json({ error: `节点 ${nodeId} 未找到或暂离线` });
     }
@@ -268,7 +267,7 @@ function createNodesRouter(monitor: any, sshManager: any, nodesConfig: any, keyM
   // DELETE /api/nodes/:id/skills/:skillId — 下发卸载技能
   router.delete('/:id/skills/:skillId', async (req: Request, res: Response) => {
     const nodeId = req.params.id;
-    const nodeConfig = nodesConfig.find((n: any) => n.id === nodeId);
+    const nodeConfig = monitor.nodesConfig.find((n: any) => n.id === nodeId);
     if (!nodeConfig) {
       return res.status(404).json({ error: `节点 ${nodeId} 未找到或不可达` });
     }
