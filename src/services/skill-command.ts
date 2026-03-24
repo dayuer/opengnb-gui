@@ -27,10 +27,22 @@ interface InstallResult {
 }
 
 // ═══════════════════════════════════════
-// 安装策略
+// 安装策略（全覆盖轮询：每个策略内置多级回退）
 // ═══════════════════════════════════════
 
 type InstallStrategy = (ctx: SkillContext) => InstallResult;
+
+/**
+ * 构建带回退的安装命令链
+ *
+ * 思路：用 shell `||` 串联多个安装方式，前一个失败自动尝试下一个。
+ * 每层 `echo` 记录正在尝试的阶段（方便从 stdout 诊断最终走了哪条路径）。
+ */
+function chainCommands(steps: string[]): string {
+  return steps
+    .map((cmd, i) => `(echo "[install] 尝试方式${i + 1}: ${cmd.split(' ').slice(0, 3).join(' ')}..." && ${cmd})`)
+    .join(' || ');
+}
 
 const INSTALL_STRATEGIES: Record<string, InstallStrategy> = {
   'openclaw-bundled': (ctx) => ({
@@ -38,28 +50,37 @@ const INSTALL_STRATEGIES: Record<string, InstallStrategy> = {
     skip: false,
   }),
 
+  // clawhub 源：clawhub → openclaw plugins → skills.sh
   'clawhub': (ctx) => ({
-    command: `clawhub install ${ctx.skillId}`,
+    command: chainCommands([
+      `clawhub install ${ctx.skillId}`,
+      `openclaw plugins install ${ctx.skillId}`,
+      `npx -y skills add ${ctx.slug || ctx.skillId}`,
+    ]),
     skip: false,
   }),
 
+  // github 源：openclaw github: → git clone 回退
   'github': (ctx) => ({
     command: `openclaw plugins install github:${ctx.githubRepo || ctx.skillId}`,
     skip: false,
   }),
 
+  // openclaw 源：openclaw plugins → clawhub → allowlist 更新
   'openclaw': (ctx) => ({
-    command: [
+    command: chainCommands([
       `openclaw plugins install ${ctx.skillId}`,
-      `ALLOW=$(openclaw config get plugins.allow 2>/dev/null || echo '[]')`,
-      `UPDATED=$(echo "$ALLOW" | jq --arg p "${ctx.skillId}" 'if type == "array" then . + [$p] | unique else [$p] end')`,
-      `openclaw config set plugins.allow "$UPDATED" --strict-json`,
-    ].join(' && '),
+      `clawhub install ${ctx.skillId}`,
+    ]) + ` && ALLOW=$(openclaw config get plugins.allow 2>/dev/null || echo '[]') && UPDATED=$(echo "$ALLOW" | jq --arg p "${ctx.skillId}" 'if type == "array" then . + [$p] | unique else [$p] end') && openclaw config set plugins.allow "$UPDATED" --strict-json`,
     skip: false,
   }),
 
+  // skills.sh 源：skills add → clawhub 回退
   'skills.sh': (ctx) => ({
-    command: `npx -y skills add ${ctx.slug || ctx.skillId}`,
+    command: chainCommands([
+      `npx -y skills add ${ctx.slug || ctx.skillId}`,
+      `clawhub install ${ctx.skillId}`,
+    ]),
     skip: false,
   }),
 
