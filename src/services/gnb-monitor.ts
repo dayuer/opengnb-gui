@@ -140,33 +140,55 @@ class GnbMonitor extends EventEmitter {
     const sysInfo = frame.sysInfo as Record<string, unknown> | undefined;
     const gnbPeers = (frame.gnbPeers as unknown[]) ?? [];
     const clawRunning = Boolean(frame.clawRunning);
+    const clawRpcOk  = Boolean(frame.clawRpcOk);
 
-    // 映射 daemon sysInfo 字段到 GnbMonitor 内部状态格式
+    // GNB 对等状态（gnb_ctl 原始输出，与 node-agent.sh 格式一致）
+    const gnbStatus    = String(frame.gnbStatus ?? '');
+    const gnbAddresses = String(frame.gnbAddresses ?? '');
+
+    // 已安装 skills（/opt/gnb/cache/skills.json 读取结果）
+    const installedSkills = Array.isArray(frame.installedSkills)
+      ? frame.installedSkills as Record<string, unknown>[]
+      : [];
+
+    // load 从 sysInfo.load 读取（"1.23 0.45 0.67"）
+    const loadAvgRaw = sysInfo?.load as string ?? sysInfo?.loadAvg as string ?? '0';
+
+    // 映射到 GnbMonitor 内部状态格式
     const state = {
       online: true,
       lastUpdate: now,
-      sshLatencyMs: 0, // daemon 本地采集，无 SSH 延迟
+      sshLatencyMs: 0,
       core: { tunAddr: frame.gnbTunAddr || '' },
-      nodes: gnbPeers, // P2P 对等节点列表（格式已与 gnb-parser 对齐）
-      addresses: [],
+      nodes: gnbPeers,
+      addresses: gnbAddresses ? gnbAddresses.split('\n').filter(Boolean) : [],
+      gnbStatus,     // 原始 gnb_ctl -s 输出，前端拓扑图解析用
       sysInfo: sysInfo ? {
-        hostname: sysInfo.hostname,
-        cpuUsage: sysInfo.cpuPercent,
+        hostname:   sysInfo.hostname,
+        os:         sysInfo.os,
+        kernel:     sysInfo.kernel,
+        arch:       sysInfo.arch,
+        cpuModel:   sysInfo.cpuModel,
+        cpuCores:   sysInfo.cpuCores,
+        cpuUsage:   sysInfo.cpuPercent,
         memTotalMB: sysInfo.memTotalMb,
-        memUsedMB: sysInfo.memUsedMb,
+        memUsedMB:  sysInfo.memUsedMb,
         diskUsePct: sysInfo.diskPercent ? `${sysInfo.diskPercent}%` : '0%',
-        uptime: sysInfo.uptimeSec,
-        loadAvg: '0',
+        uptime:     sysInfo.uptimeSec,
+        loadAvg:    loadAvgRaw,
       } : {},
-      openclaw: clawRunning ? { status: 'running' } : { status: 'stopped' },
-      skills: [],
-      daemonHeartbeat: true, // 标记来源
+      openclaw: {
+        status: clawRunning ? 'running' : 'stopped',
+        rpcOk:  clawRpcOk,
+      },
+      skills: installedSkills,      // ← 真实 skills 数据（取代空数组）
+      daemonHeartbeat: true,
       error: null as string | null,
     };
 
     this.latestState.set(nodeId, state);
 
-    // OpenClaw token 自动发现（若 daemon 帧携带）
+    // OpenClaw token 自动发现
     const clawToken = frame.clawToken as string | undefined;
     if (clawToken) {
       const nodeConfig = this.nodesConfig.find(n => n.id === nodeId);
@@ -175,18 +197,18 @@ class GnbMonitor extends EventEmitter {
       }
     }
 
-    // 记录指标
+    // 记录指标（含真实 loadAvg）
     if (this.metricsStore && sysInfo) {
       (this.metricsStore as { record: (id: string, data: Record<string, unknown>) => void }).record(nodeId, {
-        cpu: sysInfo.cpuPercent ?? 0,
-        memPct: sysInfo.memPercent ?? 0,
-        diskPct: sysInfo.diskPercent ?? 0,
+        cpu:        sysInfo.cpuPercent ?? 0,
+        memPct:     sysInfo.memPercent ?? 0,
+        diskPct:    sysInfo.diskPercent ?? 0,
         sshLatency: 0,
-        loadAvg: '0',
-        p2pDirect: gnbPeers.filter((p: unknown) => (p as Record<string, unknown>).status === 'Direct').length,
-        p2pTotal: gnbPeers.length,
+        loadAvg:    loadAvgRaw,
+        p2pDirect:  gnbPeers.filter((p: unknown) => (p as Record<string, unknown>).status === 'Direct').length,
+        p2pTotal:   gnbPeers.length,
         memTotalMB: sysInfo.memTotalMb ?? 0,
-        memUsedMB: sysInfo.memUsedMb ?? 0,
+        memUsedMB:  sysInfo.memUsedMb ?? 0,
       });
     }
 
