@@ -4,6 +4,7 @@ const { WebSocketServer } = require('ws');
 const { createLogger } = require('./logger');
 const { resolveToken, verifyJwt } = require('../middleware/auth');
 const { checkCommandSafety } = require('./command-filter');
+import alertingGateway from './alerting-gateway';
 const log = createLogger('WsHandler');
 import type { Server } from 'http';
 import type { Duplex } from 'stream';
@@ -516,6 +517,18 @@ function createWsHandlers(deps: {
             if (audit) {
               audit.log('watchdog_alert', { nodeId, service: frame.service, reason: frame.reason });
             }
+            // 推送外部告警通知（飞书/钉钉等）
+            alertingGateway.alertWatchdog(
+              nodeId,
+              String(frame.service || 'unknown'),
+              String(frame.reason || ''),
+              Boolean(frame.restarted),
+            );
+            break;
+
+          case 'claw_event':
+            // 转发 OpenClaw 实时事件（health/tick）给前端
+            broadcast(JSON.stringify({ type: 'claw_event', nodeId, event: frame.event, data: frame.data }));
             break;
 
           default:

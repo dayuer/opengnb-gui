@@ -159,3 +159,193 @@
 /* ── 分组行：hover 时显示操作按钮 ── */
 .group-row .group-actions { display: none; }
 .group-row:hover .group-actions { display: flex; }
+
+/* ═══════════════════════════════════════════════════
+   Responsive — Mobile-first breakpoints
+   Mobile  < 768px   → 单列 + Drawer sidebar
+   Tablet  768-1024px → 内容区域收缩，sidebar 保持
+   Desktop > 1024px  → 当前桌面布局（不变）
+   ═══════════════════════════════════════════════════ */
+
+/* ── Mobile 顶部 Header（汉堡 + Logo） ── */
+#mobile-header {
+  display: none;
+  position: fixed;
+  top: 0; left: 0; right: 0;
+  height: 56px;
+  z-index: 40;
+  background: var(--color-surface);
+  border-bottom: 1px solid var(--color-border-subtle);
+  align-items: center;
+  padding: 0 16px;
+  gap: 12px;
+}
+#mobile-header .mobile-logo { font-weight: 700; font-size: 17px; color: var(--color-primary); flex: 1; }
+#btn-hamburger {
+  width: 40px; height: 40px;
+  display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 5px;
+  border: none; background: transparent; cursor: pointer; border-radius: var(--radius-md);
+  padding: 0;
+}
+#btn-hamburger span {
+  display: block; width: 22px; height: 2px;
+  background: var(--color-text-primary);
+  border-radius: 2px;
+  transition: transform 0.25s, opacity 0.25s;
+}
+#btn-hamburger.open span:nth-child(1) { transform: translateY(7px) rotate(45deg); }
+#btn-hamburger.open span:nth-child(2) { opacity: 0; }
+#btn-hamburger.open span:nth-child(3) { transform: translateY(-7px) rotate(-45deg); }
+
+/* ── 响应式表格 → 卡片堆叠 ── */
+.responsive-table { width: 100%; }
+.responsive-table thead { display: table-header-group; }
+.responsive-table tbody tr { display: table-row; }
+
+/* ── 拓扑图触摸优化 ── */
+#topology-canvas { touch-action: none; }
+
+@media (max-width: 767px) {
+  /* Body 顶部留出 mobile header 空间 */
+  body { padding-top: 56px; }
+
+  /* 显示 mobile header */
+  #mobile-header { display: flex; }
+
+  /* Sidebar 变为右侧/左侧固定 Drawer */
+  #sidebar {
+    position: fixed !important;
+    top: 56px !important;
+    left: -280px !important;
+    width: 260px !important;
+    height: calc(100vh - 56px) !important;
+    z-index: 50 !important;
+    transition: left 0.28s cubic-bezier(0.4, 0, 0.2, 1) !important;
+    overflow-y: auto !important;
+    box-shadow: var(--shadow-lg) !important;
+  }
+  #sidebar.sidebar-open { left: 0 !important; }
+
+  /* Backdrop */
+  #sidebar-backdrop {
+    display: none;
+    position: fixed;
+    inset: 0;
+    top: 56px;
+    z-index: 49;
+    background: var(--color-overlay);
+    backdrop-filter: blur(2px);
+  }
+  #sidebar-backdrop.active { display: block; }
+
+  /* 主内容区撑满 */
+  #app-content, main, .main-content { margin-left: 0 !important; width: 100% !important; }
+
+  /* 统计卡片单列 */
+  .stats-grid,
+  [class*="grid-cols-2"],
+  [class*="grid-cols-3"],
+  [class*="grid-cols-4"] {
+    grid-template-columns: 1fr !important;
+  }
+
+  /* 表格 → 卡片堆叠 */
+  .responsive-table thead { display: none !important; }
+  .responsive-table tbody tr {
+    display: flex !important;
+    flex-direction: column !important;
+    margin-bottom: 12px !important;
+    border-radius: var(--radius-lg) !important;
+    border: 1px solid var(--color-border-default) !important;
+    background: var(--color-surface) !important;
+    padding: 12px !important;
+    gap: 6px !important;
+    box-shadow: var(--shadow-sm) !important;
+  }
+  .responsive-table td {
+    display: flex !important;
+    flex-direction: row !important;
+    align-items: center !important;
+    padding: 4px 0 !important;
+    border-bottom: none !important;
+    font-size: 13px !important;
+  }
+  .responsive-table td::before {
+    content: attr(data-label);
+    font-weight: 600;
+    color: var(--color-text-muted);
+    font-size: 11px;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    min-width: 80px;
+    margin-right: 8px;
+  }
+
+  /* 页面 padding 缩减 */
+  .page-padded { padding: 16px 12px !important; }
+
+  /* Topology 触摸提示 */
+  .topology-hint { display: none !important; }
+
+  /* 顶部 page-header 允许折行 */
+  .page-header { flex-wrap: wrap !important; gap: 8px !important; }
+  .page-header-actions { justify-content: flex-end !important; width: 100% !important; }
+
+  /* 节点详情面板全宽 */
+  .node-detail-panel { width: 100% !important; position: fixed !important; bottom: 0 !important; left: 0 !important; right: 0 !important; top: auto !important; border-radius: var(--radius-lg) var(--radius-lg) 0 0 !important; max-height: 70vh !important; overflow-y: auto !important; }
+}
+
+@media (min-width: 768px) and (max-width: 1023px) {
+  /* Tablet: sidebar 收窄 */
+  #sidebar { width: 64px !important; overflow: hidden; }
+  #sidebar .nav-label { display: none !important; }
+  #sidebar .sidebar-logo-text { display: none !important; }
+  [id="app-content"] { margin-left: 64px !important; }
+}
+
+/* ─────────────────────────────────────────────────────
+   RU4-7: 页面级 DIV-grid mobile 适配
+   Tailwind 的 md: 前缀已处理 ≥768px，这里补充 < 768px
+   ───────────────────────────────────────────────────── */
+
+@media (max-width: 767px) {
+  /* 节点行：grid-cols-2 md:grid-cols-4 → 单列 */
+  #nodes-table-wrap [class*="grid-cols-2"],
+  #nodes-table-wrap [class*="grid-cols-4"] {
+    grid-template-columns: 1fr !important;
+  }
+
+  /* 节点行 flex 信息区域 → 换行 */
+  #nodes-table-wrap .flex.items-center { flex-wrap: wrap !important; }
+  #nodes-table-wrap .flex-1.grid { width: 100% !important; }
+
+  /* 仪表盘统计 card → 单列 */
+  #dashboard-stats { grid-template-columns: 1fr !important; }
+
+  /* 技能/用户/分组 卡片 grid → 单列 */
+  #skills-grid { grid-template-columns: 1fr !important; }
+  #users-table [class*="grid-cols-"],
+  #groups-table [class*="grid-cols-"] { grid-template-columns: 1fr !important; }
+
+  /* Settings 表单区域全宽 */
+  #settings-content .grid { grid-template-columns: 1fr !important; }
+
+  /* Topology 全宽，禁止缩放偏移 */
+  #topology-wrap { width: 100% !important; overflow: hidden !important; }
+  #topology-wrap svg { max-width: 100% !important; height: auto !important; }
+
+  /* 弹窗全宽 */
+  .modal-dialog { width: calc(100vw - 32px) !important; max-width: 100% !important; }
+
+  /* 节点详情侧边面板：改为底部滑出 */
+  [id$="-detail-panel"] {
+    width: 100% !important;
+    position: fixed !important;
+    bottom: 0 !important; left: 0 !important; right: 0 !important; top: auto !important;
+    border-radius: var(--radius-xl) var(--radius-xl) 0 0 !important;
+    max-height: 75vh !important;
+    overflow-y: auto !important;
+    box-shadow: 0 -8px 32px rgba(0,0,0,0.12) !important;
+  }
+}
+

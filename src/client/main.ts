@@ -42,5 +42,20 @@ w.Topology = Topology;
 
 // --- 启动 ---
 document.addEventListener('DOMContentLoaded', () => {
+  // RU3: 注入 mobile 顶部 header（汉堡菜单 + Logo）
+  const mobileHeader = document.createElement('div');
+  mobileHeader.id = 'mobile-header';
+  mobileHeader.innerHTML = `
+    <button id="btn-hamburger" aria-label="打开菜单" onclick="App.toggleSidebar()">
+      <span></span><span></span><span></span>
+    </button>
+    <span class="mobile-logo">SynonClaw</span>
+  `;
+  document.body.insertBefore(mobileHeader, document.body.firstChild);
+
+  // 点击 backdrop 关闭 sidebar
+  const backdrop = document.getElementById('sidebar-backdrop');
+  backdrop?.addEventListener('click', () => App.closeSidebar());
+
   App.init();
 });

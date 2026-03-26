@@ -1,5 +1,6 @@
 'use strict';
 import type { NodeConfig, AgentReport, GnbMonitorOptions, SysInfo, PeerNode } from '../types/interfaces';
+import alertingGateway from './alerting-gateway';
 
 const EventEmitter = require('events');
 const { createLogger } = require('./logger');
@@ -238,6 +239,9 @@ class GnbMonitor extends EventEmitter {
         state.online = false;
         state.error = `超过 ${Math.round(this.staleTimeoutMs / 1000)}s 无上报`;
         this.emit('stale', nodeId);
+        // WH3: 节点离线外部告警
+        const cfg = this.nodesConfig.find((n: NodeConfig) => n.id === nodeId);
+        alertingGateway.alertNodeOffline(nodeId, cfg?.name || nodeId);
       }
     }
   }

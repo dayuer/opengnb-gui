@@ -1,0 +1,98 @@
+name: Release — Cross Compile synon-daemon
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+env:
+  BINARY: synon-daemon
+  CARGO_TERM_COLOR: always
+
+jobs:
+  build:
+    name: Build ${{ matrix.target }}
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - target: x86_64-unknown-linux-musl
+            arch_tag: x86_64-musl
+          - target: aarch64-unknown-linux-musl
+            arch_tag: aarch64-musl
+          - target: armv7-unknown-linux-musleabihf
+            arch_tag: armv7-musl
+          - target: mips-unknown-linux-musl
+            arch_tag: mips-musl
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install cross
+        uses: taiki-e/install-action@cross
+
+      - name: Build (cross)
+        working-directory: ./synon-daemon
+        run: cross build --release --target ${{ matrix.target }}
+
+      - name: Rename binary
+        run: |
+          cp synon-daemon/target/${{ matrix.target }}/release/${{ env.BINARY }} \
+             ${{ env.BINARY }}-${{ matrix.arch_tag }}
+
+      - name: Compute SHA256
+        run: |
+          sha256sum ${{ env.BINARY }}-${{ matrix.arch_tag }} > \
+            ${{ env.BINARY }}-${{ matrix.arch_tag }}.sha256
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ env.BINARY }}-${{ matrix.arch_tag }}
+          path: |
+            ${{ env.BINARY }}-${{ matrix.arch_tag }}
+            ${{ env.BINARY }}-${{ matrix.arch_tag }}.sha256
+
+  release:
+    name: Create GitHub Release
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          merge-multiple: true
+
+      - name: Create Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ github.ref_name }}
+          name: synon-daemon ${{ github.ref_name }}
+          body: |
+            ## synon-daemon ${{ github.ref_name }}
+
+            ### 下载
+
+            | 架构 | 文件 |
+            |------|------|
+            | x86_64 (musl) | `synon-daemon-x86_64-musl` |
+            | aarch64 (musl) | `synon-daemon-aarch64-musl` |
+            | armv7 (musl) | `synon-daemon-armv7-musl` |
+            | mips (musl) | `synon-daemon-mips-musl` |
+
+            ### 安装
+
+            ```bash
+            # 示例（x86_64）
+            curl -fsSL https://github.com/${{ github.repository }}/releases/download/${{ github.ref_name }}/synon-daemon-x86_64-musl \
+              -o /opt/gnb/bin/synon-daemon
+            chmod +x /opt/gnb/bin/synon-daemon
+            ```
+          files: |
+            synon-daemon-*
+          draft: false
+          prerelease: false

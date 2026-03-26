@@ -145,17 +145,20 @@ export const App = {
   toggleSidebar(): void {
     const sb = $('#sidebar');
     const bd = $('#sidebar-backdrop');
-    if (window.innerWidth <= 768 && sb && bd) {
-      sb.toggleAttribute('data-open');
-      bd.classList.toggle('hidden');
-    }
+    const btn = $('#btn-hamburger');
+    if (!sb) return;
+    const isOpen = sb.classList.toggle('sidebar-open');
+    bd?.classList.toggle('active', isOpen);
+    btn?.classList.toggle('open', isOpen);
   },
 
   closeSidebar(): void {
     const sb = $('#sidebar');
     const bd = $('#sidebar-backdrop');
-    sb?.removeAttribute('data-open');
-    bd?.classList.add('hidden');
+    const btn = $('#btn-hamburger');
+    sb?.classList.remove('sidebar-open');
+    bd?.classList.remove('active');
+    btn?.classList.remove('open');
   },
 
   // --- 用户菜单 ---
