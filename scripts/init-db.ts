@@ -202,6 +202,8 @@ const migrations = [
   `ALTER TABLE users ADD COLUMN apiToken TEXT DEFAULT ''`,
   `ALTER TABLE nodes ADD COLUMN ownerId TEXT DEFAULT ''`,
   `ALTER TABLE nodes ADD COLUMN skills TEXT DEFAULT '[]'`,
+  // 密钥滚动：0=已同步；1=待同步新公钥（daemon 重连后补发）
+  `ALTER TABLE nodes ADD COLUMN pubkeyRotationPending INTEGER DEFAULT 0`,
 ];
 for (const sql of migrations) {
   try { db.exec(sql); } catch { /* 列已存在 */ }

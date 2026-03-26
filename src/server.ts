@@ -249,6 +249,20 @@ function initRoutes(deps: any) {
     res.json(task);
   });
 
+  // 密钥滚动更新 — 仅管理员，强速率限制（每小时 3 次）
+  const keyRotateLimit = createRateLimit({ windowMs: 60 * 60 * 1000, max: 3, message: '密钥轮换请求过于频繁' });
+  app.post('/api/settings/rotate-key', requireAuth, requireRole('admin'), keyRotateLimit, async (req: Request, res: Response) => {
+    try {
+      const result = await keyManager.rotateKeyPair(wsHandlers, sshManager);
+      audit.log('key_rotate', { actor: (req as any).user?.id, ...result });
+      res.json({ success: true, message: `密钥轮换完成`, ...result });
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : String(err);
+      console.error('[KeyRotate] 轮换失败:', msg);
+      res.status(500).json({ success: false, message: msg });
+    }
+  });
+
   // 健康检查
   app.get('/api/health', (req: Request, res: Response) => {
     const allNodes = keyManager.getAllNodes();
@@ -309,6 +323,21 @@ function initEventHandlers(deps: any) {
     }
     console.log(`[RouteUpdate] address.conf 已广播到 ${onlineDaemons.length} 个在线 daemon`);
   };
+
+  // daemon 重连时补发密钥（处理离线节点的密钥滚动）
+  wsHandlers.setOnDaemonConnect((nodeId: string) => {
+    const pendingNodes = keyManager.getPendingRotationNodes();
+    if (!pendingNodes.includes(nodeId)) return;
+
+    const newPubKey = keyManager.getPublicKey();
+    const reqId = `keyrot-catchup-${Date.now()}`;
+    wsHandlers.sendToDaemon(nodeId, { type: 'key_rotate', reqId, newPubkey: newPubKey }, 20000)
+      .then(() => {
+        keyManager.markKeyRotationSynced(nodeId);
+        console.log(`[KeyRotate] 离线节点 ${nodeId} 密钥已补发完成`);
+      })
+      .catch((e: Error) => console.warn(`[KeyRotate] 补发失败 ${nodeId}: ${e.message}`));
+  });
 
   monitor.on('update', (allStatus: any) => wsHandlers.broadcastMonitorUpdate(allStatus));
 

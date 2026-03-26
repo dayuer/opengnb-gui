@@ -427,6 +427,9 @@ function createWsHandlers(deps: {
   /** reqId → Promise resolve/reject（用于 req/res 配对）*/
   const daemonPending = new Map<string, { resolve: (v: unknown) => void; reject: (e: Error) => void }>();
 
+  /** daemon 重连回调 — 由 server.ts 注入，用于密钥滚动补发等逻辑 */
+  let onDaemonConnect: ((nodeId: string) => void) | null = null;
+
   /** 向指定节点的 daemon 发送命令，等待响应（最多 10s）*/
   function sendToDaemon(nodeId: string, cmd: Record<string, unknown>, timeout = 10000): Promise<unknown> {
     const ws = daemonConns.get(nodeId);
@@ -480,6 +483,9 @@ function createWsHandlers(deps: {
       }
 
       ws.send(JSON.stringify({ type: 'hello-ack', ok: true }));
+
+      // 密钥滚动补发：若该节点有待同步的新公钥，立即发送
+      if (onDaemonConnect) onDaemonConnect(nodeId);
 
       // 注册后续消息处理器
       ws.on('message', (data: Buffer | string) => {
@@ -535,6 +541,7 @@ function createWsHandlers(deps: {
     enrichNodesData,
     sendToDaemon,
     daemonConns,
+    setOnDaemonConnect: (fn: (nodeId: string) => void) => { onDaemonConnect = fn; },
   };
 }
 

@@ -745,6 +745,95 @@ class KeyManager {
   }
 
   // @alpha V2: _save/_backup/_loadWithRecovery 已移除，由 SQLite (NodeStore) 接管持久化
+
+  /**
+   * 密钥滚动更新 — 两阶段广播，零中断
+   *
+   * Phase 1: 向所有在线 daemon 追加新公钥
+   * Phase 2: Console 切换私钥 → 向所有在线 daemon 删除旧公钥
+   * 离线节点: 写 pubkeyRotationPending=1，重连时补发
+   */
+  async rotateKeyPair(
+    wsHandlers: { sendToDaemon: Function; daemonConns: Map<string, unknown> },
+    sshManager: { disconnectAll: () => void }
+  ) {
+    log.info('密钥轮换开始...');
+
+    const oldPubKey = this.getPublicKey();
+    const newKeyPath = this.privateKeyPath + '.new';
+    const newPubKeyPath = this.publicKeyPath + '.new';
+
+    // 生成新密钥对（ssh-keygen 优先，fallback crypto 模块）
+    try {
+      execSync(`ssh-keygen -t ed25519 -f "${newKeyPath}" -N "" -C "gnb-console-rotated-${Date.now()}"`, { stdio: 'pipe' });
+    } catch {
+      const { generateKeyPairSync } = crypto;
+      const { privateKey, publicKey } = generateKeyPairSync('ed25519', {
+        publicKeyEncoding: { type: 'spki', format: 'pem' },
+        privateKeyEncoding: { type: 'pkcs8', format: 'pem' },
+      });
+      fs.writeFileSync(newKeyPath, privateKey, { mode: 0o600 });
+      fs.writeFileSync(newPubKeyPath, publicKey);
+    }
+    const newPubKey = fs.readFileSync(newPubKeyPath, 'utf-8').trim();
+    log.info(`新公钥已生成: ${newPubKey.slice(0, 40)}...`);
+
+    const onlineDaemons = Array.from(wsHandlers.daemonConns.keys() as IterableIterator<string>);
+    const allApproved = this.store.findByStatus('approved') as any[];
+
+    // Phase 1: 追加新公钥到所有在线 daemon
+    if (onlineDaemons.length > 0) {
+      const reqId = `keyrot-p1-${Date.now()}`;
+      const results = await Promise.allSettled(onlineDaemons.map((id: string) =>
+        wsHandlers.sendToDaemon(id, { type: 'key_rotate', reqId, newPubkey: newPubKey }, 20000)
+      ));
+      results.forEach((r: PromiseSettledResult<unknown>, i: number) => {
+        if (r.status === 'rejected') log.warn(`Phase1 daemon ${onlineDaemons[i]} 失败: ${(r as PromiseRejectedResult).reason?.message}`);
+      });
+    }
+
+    // 离线节点标记 pending（等待重连后补发）
+    const offlineIds = allApproved
+      .filter((n: any) => !wsHandlers.daemonConns.has(n.id))
+      .map((n: any) => n.id);
+    for (const id of offlineIds) {
+      this.store.update(id, { pubkeyRotationPending: 1 });
+    }
+    if (offlineIds.length > 0) log.info(`${offlineIds.length} 个离线节点已标记 pending`);
+
+    // 切换 Console 密钥（原子重命名）
+    fs.renameSync(newKeyPath, this.privateKeyPath);
+    fs.renameSync(newPubKeyPath, this.publicKeyPath);
+    sshManager.disconnectAll();
+    log.info('Console 已切换到新私钥，SSH 连接池已重置');
+
+    // Phase 2: 删除旧公钥
+    if (onlineDaemons.length > 0) {
+      const reqId = `keyrot-p2-${Date.now()}`;
+      await Promise.allSettled(onlineDaemons.map((id: string) =>
+        wsHandlers.sendToDaemon(id, {
+          type: 'key_rotate', reqId,
+          newPubkey: newPubKey,
+          removeOldPubkey: oldPubKey,
+        }, 20000)
+      ));
+    }
+
+    log.info(`密钥轮换完成: ${onlineDaemons.length} 在线已同步, ${offlineIds.length} 离线待同步`);
+    return { onlineCount: onlineDaemons.length, pendingCount: offlineIds.length };
+  }
+
+  /** 标记节点密钥已同步（daemon 重连后补发成功时调用） */
+  markKeyRotationSynced(nodeId: string) {
+    this.store.update(nodeId, { pubkeyRotationPending: 0 });
+  }
+
+  /** 获取需要补发新公钥的离线节点列表 */
+  getPendingRotationNodes(): string[] {
+    return (this.store.all() as any[])
+      .filter((n: any) => n.pubkeyRotationPending === 1)
+      .map((n: any) => n.id);
+  }
 }
 
 module.exports = KeyManager;

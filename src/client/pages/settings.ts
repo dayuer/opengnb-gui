@@ -142,6 +142,26 @@ export const Settings = {
           </button>
         </form>
       </div>
+
+      <!-- SSH 密钥轮换 -->
+      <div class="border-t border-border-subtle pt-8">
+        <h3 class="text-sm font-bold uppercase tracking-widest text-text-muted mb-2">SSH 密钥轮换</h3>
+        <p class="text-xs text-text-muted mb-6">生成新的 ED25519 密钥对，自动两阶段同步全部在线节点，离线节点重连后自动补发。操作不中断现有 SSH 连接。</p>
+        <div class="bg-elevated rounded-xl border border-border-default p-5 flex items-center justify-between">
+          <div class="flex items-center gap-4">
+            <div class="h-11 w-11 bg-warning/10 rounded-xl flex items-center justify-center text-warning [&_svg]:w-5 [&_svg]:h-5">${L('shield-alert')}</div>
+            <div>
+              <h4 class="text-sm font-bold">Console SSH Key</h4>
+              <p class="text-xs text-text-muted mt-0.5">ED25519 · 用于所有节点 SSH 连接</p>
+            </div>
+          </div>
+          <button id="rotate-key-btn" class="px-4 py-2 text-sm font-bold bg-warning/10 text-warning hover:bg-warning/20 rounded-xl transition-colors cursor-pointer flex items-center gap-2 [&_svg]:w-4 [&_svg]:h-4"
+            onclick="Settings.rotateKey()">
+            ${L('refresh-cw')} <span>轮换密钥</span>
+          </button>
+        </div>
+        <div id="rotate-key-result" class="hidden mt-3 p-3 rounded-lg text-xs font-mono"></div>
+      </div>
     </div>`;
   },
 
@@ -261,6 +281,33 @@ export const Settings = {
       </div>
       <div class="text-lg font-bold font-headline ${color}">${value}</div>
     </div>`;
+  },
+
+  async rotateKey() {
+    if (!confirm('确认轮换 SSH 密钥？\n\n操作将：\n1. 生成新 ED25519 密钥对\n2. 自动同步所有在线节点\n3. 离线节点重连时自动补发\n\n请确保已了解该操作的影响。')) return;
+
+    const btn = $('#rotate-key-btn') as HTMLButtonElement;
+    const result = $('#rotate-key-result');
+    if (btn) { btn.disabled = true; btn.innerHTML = `<span class="animate-spin inline-block w-4 h-4">⟳</span> 轮换中…`; }
+
+    try {
+      const res = await App.authFetch('/api/settings/rotate-key', { method: 'POST' });
+      const data = await res.json();
+      if (result) {
+        result.className = `mt-3 p-3 rounded-lg text-xs font-mono ${data.success ? 'bg-success/10 text-success' : 'bg-danger/10 text-danger'}`;
+        result.textContent = data.success
+          ? `✅ 密钥轮换完成 — ${data.onlineCount} 个节点已同步，${data.pendingCount} 个节点待重连补发`
+          : `❌ 轮换失败: ${data.message}`;
+        result.classList.remove('hidden');
+      }
+      if (data.success) showToast('SSH 密钥轮换成功');
+      else showToast(`密钥轮换失败: ${data.message}`, 'error');
+    } catch (e: any) {
+      if (result) { result.className = 'mt-3 p-3 rounded-lg text-xs font-mono bg-danger/10 text-danger'; result.textContent = `❌ 网络错误: ${e.message}`; result.classList.remove('hidden'); }
+      showToast(`密钥轮换失败: ${e.message}`, 'error');
+    } finally {
+      if (btn) { btn.disabled = false; btn.innerHTML = `${L('refresh-cw')} <span>轮换密钥</span>`; refreshIcons(); }
+    }
   },
 
   async changePwd(e) {
