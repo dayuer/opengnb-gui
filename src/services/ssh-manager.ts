@@ -165,6 +165,11 @@ class SSHManager {
 
   /**
    * 在远程节点执行命令
+   *
+   * @deprecated 对于已安装 synon-daemon 的节点，请改用 DaemonProxy.execCmd() 通过 WSS 通道执行命令。
+   *             SSH exec() 仅保留给旧版节点（无 daemonVersion）的兼容路径，将在 2025-12 EOL 后移除。
+   *             交互式终端仍使用 shell()。
+   *
    * @param {object} nodeConfig - 节点配置
    * @param {string} command - 要执行的命令
    * @param {number} [timeoutMs=15000] - 超时毫秒

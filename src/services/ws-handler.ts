@@ -501,11 +501,11 @@ function createWsHandlers(deps: {
             break;
 
           case 'cmd_result': {
-            // 匹配 pending req
+            // 匹配 pending req（兼容 Phase 3 exec_cmd 的 code/stdout/stderr 字段）
             const pending = daemonPending.get(String(frame.reqId || ''));
             if (pending) {
-              if (frame.ok) pending.resolve(frame.payload);
-              else pending.reject(new Error(String((frame.payload as Record<string, unknown>)?.error || '命令失败')));
+              if (frame.ok) pending.resolve(frame);
+              else pending.reject(new Error(String(frame.stderr || (frame.payload as Record<string, unknown>)?.error || '命令失败')));
             }
             break;
           }

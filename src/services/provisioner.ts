@@ -37,16 +37,24 @@ interface ProvisionOptions {
   gnbConf?: Record<string, unknown>;
 }
 
+/** DaemonProxy 接口（避免循环依赖）*/
+interface DaemonProxyLike {
+  execCmd(nodeId: string, command: string, allowedCmds?: string[]): Promise<{ ok: boolean; code: number; stdout: string; stderr: string }>;
+  deployFile(nodeId: string, path: string, content: Buffer): Promise<{ ok: boolean; stderr: string }>;
+}
+
 class Provisioner extends EventEmitter {
   sshManager: SshManagerLike;
   config: Record<string, unknown>;
   tasks: Map<string, Record<string, unknown>>;
+  daemonProxy: DaemonProxyLike | null;
 
-  constructor(options: { sshManager: SshManagerLike; provisionConfig?: Record<string, unknown> }) {
+  constructor(options: { sshManager: SshManagerLike; provisionConfig?: Record<string, unknown>; daemonProxy?: DaemonProxyLike }) {
     super();
     this.sshManager = options.sshManager;
     this.config = options.provisionConfig || {};
     this.tasks = new Map();
+    this.daemonProxy = options.daemonProxy || null;
   }
 
   /**
@@ -58,7 +66,7 @@ class Provisioner extends EventEmitter {
    * @param {object} [options.gnbConf] - GNB 配置参数
    * @returns {Promise<{success: boolean, logs: string[]}>}
    */
-  async provision(nodeConfig: NodeConfig, options: ProvisionOptions = {}) {
+  async provision(nodeConfig: NodeConfig & { daemonVersion?: string }, options: ProvisionOptions = {}) {
     const taskId = nodeConfig.id;
     const logs: string[] = [];
     const log = (msg: string) => {
@@ -69,8 +77,97 @@ class Provisioner extends EventEmitter {
 
     this.tasks.set(taskId, { status: 'running', logs, startedAt: new Date().toISOString() });
 
+    // Phase 3 分流：有 daemonVersion → 走 WSS 控制面，避免建立 SSH exec
+    if (nodeConfig.daemonVersion && this.daemonProxy) {
+      log(`[daemon] 节点已安装 synon-daemon v${nodeConfig.daemonVersion}，使用 WSS 控制面下发`);
+      return await this._provisionViaDaemon(nodeConfig, options, log, logs, taskId);
+    }
+
+    // 旧路径：无 daemon → 传统 SSH exec
+    log(`[ssh] 节点无 synon-daemon，使用 SSH 通道下发`);
+    return await this._provisionViaSsh(nodeConfig, options, log, logs, taskId);
+  }
+
+  /**
+   * 通过 synon-daemon WSS 控制面执行配置下发（Phase 3 新路径）
+   * @private
+   */
+  async _provisionViaDaemon(
+    nodeConfig: NodeConfig & { daemonVersion?: string },
+    options: ProvisionOptions,
+    log: (msg: string) => void,
+    logs: string[],
+    taskId: string,
+  ) {
+    const proxy = this.daemonProxy!;
+    const nodeId = nodeConfig.id;
+
+    try {
+      const exec = async (cmd: string, extraAllowed: string[] = []) => {
+        log(`  [exec] ${cmd}`);
+        const r = await proxy.execCmd(nodeId, cmd, extraAllowed);
+        if (r.stdout.trim()) log(`         ${r.stdout.trim().slice(0, 200)}`);
+        if (!r.ok) throw new Error(`命令失败 (code ${r.code}): ${r.stderr.slice(0, 200)}`);
+        return r;
+      };
+
+      log('[daemon 1/4] 系统准备...');
+      await exec('apt-get update -qq || yum check-update -q || true');
+      await exec('apt-get install -y -qq curl wget || yum install -y -q curl wget || true');
+
+      if (options.installGnb !== false) {
+        log('[daemon 2/4] 安装 GNB...');
+        const mirrorBase = (this.config.consoleApiBase as string | undefined) || '';
+        if (mirrorBase) {
+          // 从 Console mirror 下载 GNB 二进制
+          await exec(`curl -fsSL ${mirrorBase}/api/mirror/gnb/latest -o /usr/local/bin/gnb`, ['curl -fsSL']);
+          await exec('chmod +x /usr/local/bin/gnb');
+        }
+        // 写 GNB 配置
+        if (options.gnbConf) {
+          const confContent = Buffer.from(JSON.stringify(options.gnbConf, null, 2), 'utf8');
+          await proxy.deployFile(nodeId, '/opt/gnb/conf/node.conf', confContent);
+        }
+        await exec('systemctl enable gnb && systemctl restart gnb');
+      }
+
+      if (options.installClaw !== false) {
+        log('[daemon 3/4] 安装 OpenClaw...');
+        await exec('npm install -g openclaw 2>/dev/null || true');
+        await exec('systemctl enable openclaw-gateway && systemctl restart openclaw-gateway');
+      }
+
+      log('[daemon 4/4] 验证服务状态...');
+      const gnbStatus = await proxy.execCmd(nodeId, 'systemctl is-active gnb');
+      log(`  GNB 服务: ${gnbStatus.stdout.trim()}`);
+
+      this.tasks.set(taskId, { status: 'done', logs, completedAt: new Date().toISOString() });
+      log('✅ 配置下发完成 (via daemon)');
+      return { success: true, logs };
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : String(err);
+      log(`❌ daemon 下发失败: ${msg}`);
+      this.tasks.set(taskId, { status: 'failed', logs, error: msg, completedAt: new Date().toISOString() });
+      this.emit('error', { nodeId: taskId, error: msg });
+      return { success: false, logs, error: msg };
+    }
+  }
+
+  /**
+   * 通过 SSH exec 执行配置下发（旧路径，保留至 EOL）
+   * @deprecated 使用 _provisionViaDaemon() 替代（节点安装 synon-daemon 后自动切换）
+   * @private
+   */
+  async _provisionViaSsh(
+    nodeConfig: NodeConfig,
+    options: ProvisionOptions,
+    log: (msg: string) => void,
+    logs: string[],
+    taskId: string,
+  ) {
     try {
       log(`开始配置下发: ${nodeConfig.name} (${nodeConfig.tunAddr})`);
+
 
       // --- Step 1: 系统准备 ---
       log('[1/5] 系统准备...');
