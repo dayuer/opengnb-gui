@@ -37,6 +37,7 @@ const { errorHandler } = require('./middleware/error-handler');
 const { resolvePaths, ensureDataDirs } = require('./services/data-paths');
 const { createOpsLog } = require('./services/ops-log');
 const { createWsHandlers } = require('./services/ws-handler');
+const DaemonProxy = require('./services/daemon-proxy');
 
 const PORT = process.env.PORT || 3000;
 const DATA_DIR = process.env.DATA_DIR || path.resolve(__dirname, '../data');
@@ -160,17 +161,20 @@ function initServices(store: any) {
     server, keyManager, monitor, aiOps, sshManager, audit, opsLog,
   });
 
+  // DaemonProxy: 优先 WSS claw_rpc，fallback 到 SSH ClawRPC
+  const daemonProxy = new DaemonProxy(wsHandlers, clawRPC);
+
   const skillsStore = new SkillsStore(store.db);
   skillsStore.init();
 
-  return { audit, approvedNodes, metricsStore, monitor, taskQueue, provisioner, mirrorUpdater, aiOps, clawRPC, wsHandlers, jobManager, skillsStore };
+  return { audit, approvedNodes, metricsStore, monitor, taskQueue, provisioner, mirrorUpdater, aiOps, clawRPC, daemonProxy, wsHandlers, jobManager, skillsStore };
 }
 
 /**
  * 注册所有 API 路由
  */
 function initRoutes(deps: any) {
-  const { store, audit, monitor, taskQueue, aiOps, wsHandlers, jobManager, metricsStore, clawRPC, provisioner, skillsStore } = deps;
+  const { store, audit, monitor, taskQueue, aiOps, wsHandlers, jobManager, metricsStore, clawRPC, daemonProxy, provisioner, skillsStore } = deps;
 
   const strictLimit = createRateLimit({ windowMs: 60000, max: 20, message: '敏感操作请求过于频繁' });
 
@@ -230,7 +234,7 @@ function initRoutes(deps: any) {
   // Playbook 编排路由
   const playbookEngine = new PlaybookEngine(store, taskQueue);
   app.use('/api/playbooks', requireAuth, createPlaybookRoutes(playbookEngine));
-  app.use('/api/claw', requireAuth, requireRole('admin', 'operator'), audit.middleware('claw'), createClawRouter({ clawRPC, getNodesConfig: () => keyManager.getApprovedNodesConfig() }));
+  app.use('/api/claw', requireAuth, requireRole('admin', 'operator'), audit.middleware('claw'), createClawRouter({ clawRPC: daemonProxy, getNodesConfig: () => keyManager.getApprovedNodesConfig() }));
 
   // Provision 路由 — 仅管理员
   app.post('/api/provision/:id', requireAuth, requireRole('admin'), strictLimit, audit.middleware('provision'), async (req: Request, res: Response) => {
@@ -292,6 +296,18 @@ function initEventHandlers(deps: any) {
       sshManager.disconnect(nodeId);
     }
     console.log(`[NodeUpdate] 节点 ${nodeId} 已更新 [${changedFields.join(', ')}]`);
+  };
+
+  // 节点审批 or IP 变更 → 广播 address.conf 到所有在线 daemon
+  keyManager.onRouteUpdate = (_nodeId: string, addressConf: string) => {
+    const onlineDaemons = Array.from((wsHandlers.daemonConns as Map<string, unknown>).keys());
+    if (onlineDaemons.length === 0) return;
+    const reqId = `route-${Date.now()}`;
+    for (const id of onlineDaemons) {
+      wsHandlers.sendToDaemon(id, { type: 'route_update', reqId, addressConf }, 15000)
+        .catch((e: Error) => console.warn(`[RouteUpdate] 广播到 ${id} 失败: ${e.message}`));
+    }
+    console.log(`[RouteUpdate] address.conf 已广播到 ${onlineDaemons.length} 个在线 daemon`);
   };
 
   monitor.on('update', (allStatus: any) => wsHandlers.broadcastMonitorUpdate(allStatus));

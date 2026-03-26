@@ -127,6 +127,7 @@ class KeyManager {
   onNodeReady: Function | null;
   onChange: Function | null;
   onNodeUpdate: Function | null;
+  onRouteUpdate: ((nodeId: string, addressConf: string) => void) | null;
 
   /**
    * @param {object} options
@@ -174,6 +175,11 @@ class KeyManager {
     this.onChange = null;
     /** @type {Function|null} 节点更新回调 */
     this.onNodeUpdate = null;
+    /**
+     * 节点审批或 IP 变更时回调——向 daemon 广播最新 address.conf
+     * 由 server.ts 接线 wsHandlers.sendToDaemon
+     */
+    this.onRouteUpdate = null;
   }
 
   /**
@@ -388,6 +394,12 @@ class KeyManager {
     if (this.onApproval) this.onApproval(this.getApprovedNodesConfig());
     if (this.onChange) this.onChange('approve', nodeId);
 
+    // 广播最新地址表到所有在线 daemon
+    if (this.onRouteUpdate) {
+      const addressConf = this._gnb.generateFullAddressConf();
+      this.onRouteUpdate(nodeId, addressConf);
+    }
+
     return { success: true, message: `节点 ${nodeId} 已通过审批`, tunAddr: updated.tunAddr, gnbNodeId: updated.gnbNodeId };
   }
 
@@ -473,10 +485,14 @@ class KeyManager {
     updateFields.updatedAt = new Date().toISOString();
     this.store.update(nodeId, updateFields);
 
-    // tunAddr 变更时同步 GNB 配置
+    // tunAddr 变更时同步 GNB 配置 + 广播 route_update
     if (changedFields.includes('tunAddr')) {
       const updatedNode = this.store.findById(nodeId);
       if (updatedNode && updatedNode.gnbNodeId) this._gnb.updateGnbAddressConf(updatedNode);
+      if (this.onRouteUpdate) {
+        const addressConf = this._gnb.generateFullAddressConf();
+        this.onRouteUpdate(nodeId, addressConf);
+      }
     }
 
     // 触发更新回调

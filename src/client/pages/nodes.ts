@@ -245,6 +245,7 @@ export const Nodes = {
               <h3 class="font-bold font-headline text-sm">${escHtml(node.name || node.id)}</h3>
               <div class="flex items-center gap-2 mt-1">
                 ${statusBadge}
+                ${monitorNode?.daemonVersion ? `<span class="bg-blue-500/15 text-blue-400 text-xs font-bold px-2 py-0.5 rounded-full flex items-center gap-1" title="synon-daemon v${escHtml(monitorNode.daemonVersion)}"><span class="w-1.5 h-1.5 rounded-full bg-blue-400"></span>daemon</span>` : ''}
                 ${group ? `<span class="text-xs text-text-muted flex items-center gap-1"><span class="w-2 h-2 rounded-full" style="background:${escHtml(group.color)}"></span>${escHtml(group.name)}</span>` : ''}
               </div>
             </div>
