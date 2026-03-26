@@ -111,33 +111,85 @@ ln -sf /opt/gnb/bin/gnb_ctl /usr/local/bin/gnb_ctl
 echo "      ✅ GNB 编译安装完成"
 
 # ============================================
-# Step 2: 下载 synon-daemon 二进制
+# Step 2: 获取 synon-daemon（预编译 → 源码编译 → 跳过）
 # ============================================
-echo "[2/10] 下载 synon-daemon..."
+echo "[2/10] 获取 synon-daemon..."
 
 ARCH=$(uname -m)
 case "$ARCH" in
-    x86_64)         DAEMON_ARCH="x86_64-musl" ;;
-    aarch64|arm64)  DAEMON_ARCH="aarch64-musl" ;;
-    armv7l)         DAEMON_ARCH="armv7-musl" ;;
-    mips*)          DAEMON_ARCH="mips-musl" ;;
-    *)              DAEMON_ARCH="" ;;
+    x86_64)         DAEMON_ARCH="x86_64-musl"  ; RUST_TARGET="x86_64-unknown-linux-musl"  ;;
+    aarch64|arm64)  DAEMON_ARCH="aarch64-musl" ; RUST_TARGET="aarch64-unknown-linux-musl" ;;
+    armv7l)         DAEMON_ARCH="armv7-musl"   ; RUST_TARGET="armv7-unknown-linux-musleabihf" ;;
+    mips*)          DAEMON_ARCH="mips-musl"    ; RUST_TARGET="mips-unknown-linux-musl"    ;;
+    *)              DAEMON_ARCH=""             ; RUST_TARGET="" ;;
 esac
 
 DAEMON_INSTALLED=false
+
+# 优先：从 Console 镜像下载预编译二进制
 if [ -n "$DAEMON_ARCH" ]; then
     DAEMON_URL="$API_BASE/api/mirror/daemon/synon-daemon-${DAEMON_ARCH}"
-    echo "      架构: $ARCH → $DAEMON_URL"
+    echo "      架构: $ARCH → 尝试下载 $DAEMON_ARCH..."
     if curl -sf -m 60 "$DAEMON_URL" -o "$DAEMON_BIN" 2>/dev/null; then
         chmod +x "$DAEMON_BIN"
         DAEMON_INSTALLED=true
-        echo "      ✅ synon-daemon 二进制已下载"
+        echo "      ✅ synon-daemon 预编译包已下载"
     else
-        echo "      ⚠️ 下载失败（此架构暂无预编译包，节点将以 HTTP Agent 降级模式运行）"
+        echo "      ⚠️ 预编译包不可用，尝试源码编译..."
     fi
-else
-    echo "      ⚠️ 未识别架构 $ARCH，跳过"
 fi
+
+# 回退：源码编译（Rust musl 静态编译）
+if [ "$DAEMON_INSTALLED" != "true" ] && [ -n "$RUST_TARGET" ]; then
+    echo "      安装 Rust 工具链中（首次约 2-3 分钟）..."
+    if ! command -v cargo &>/dev/null; then
+        curl -sSf https://sh.rustup.rs | sh -s -- -y --no-modify-path --default-toolchain stable 2>&1 | tail -3
+        export PATH="$HOME/.cargo/bin:$PATH"
+    fi
+
+    # 安装 musl-tools（静态链接所需）
+    if command -v apt-get &>/dev/null; then
+        apt-get install -y -qq musl-tools musl-dev 2>/dev/null || true
+    elif command -v yum &>/dev/null; then
+        yum install -y -q musl-libc-static 2>/dev/null || true
+    fi
+
+    # 获取源代码（Console 镜像 → GitHub fallback）
+    DAEMON_SRC_URL="$API_BASE/api/mirror/daemon/synon-daemon-src.tar.gz"
+    cd /tmp && rm -rf synon-daemon-src
+    echo "      下载源码..."
+    if curl -sf -m 60 "$DAEMON_SRC_URL" -o /tmp/synon-daemon-src.tar.gz 2>/dev/null; then
+        mkdir -p synon-daemon-src
+        tar xzf synon-daemon-src.tar.gz -C synon-daemon-src --strip-components=1
+    else
+        GITHUB_SRC="https://github.com/dayuer/synon-daemon/archive/refs/heads/main.tar.gz"
+        if curl -sSL -m 120 "$GITHUB_SRC" -o /tmp/synon-daemon-src.tar.gz 2>/dev/null; then
+            mkdir -p synon-daemon-src
+            tar xzf synon-daemon-src.tar.gz -C synon-daemon-src --strip-components=1
+        else
+            echo "      ⚠️ 源码下载失败，跳过 daemon 安装（节点功能受限）"
+        fi
+    fi
+
+    if [ -d /tmp/synon-daemon-src ] && [ -f /tmp/synon-daemon-src/Cargo.toml ]; then
+        cd /tmp/synon-daemon-src
+        export PATH="$HOME/.cargo/bin:$PATH"
+        rustup target add "$RUST_TARGET" 2>/dev/null || true
+        echo "      编译中（约 3-5 分钟）..."
+        if RUSTFLAGS="-C target-feature=+crt-static" \
+           cargo build --release --target "$RUST_TARGET" 2>&1 | tail -3; then
+            cp "target/${RUST_TARGET}/release/synon-daemon" "$DAEMON_BIN"
+            chmod +x "$DAEMON_BIN"
+            DAEMON_INSTALLED=true
+            echo "      ✅ synon-daemon 源码编译完成"
+        else
+            echo "      ⚠️ 编译失败，节点将以受限模式运行"
+        fi
+        rm -rf /tmp/synon-daemon-src /tmp/synon-daemon-src.tar.gz
+    fi
+fi
+
+[ "$DAEMON_INSTALLED" != "true" ] && echo "      ⚠️ synon-daemon 未安装（节点将缺少 WSS 控制面）"
 
 # ============================================
 # Step 3: 获取 passcode 并提交注册

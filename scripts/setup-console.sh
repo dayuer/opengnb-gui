@@ -1,5 +1,5 @@
 #!/bin/bash
-# SynonClaw Console — 一键安装脚本 (多 OS 适配)
+# SynonClaw Console — 一键安装脚本 v0.3
 #
 # 支持: Debian/Ubuntu, CentOS/RHEL/Rocky/Alma, Fedora, Alpine, openSUSE, Arch, macOS
 #
@@ -15,7 +15,7 @@ IS_MAC=false
 if [ "$(uname)" = "Darwin" ]; then IS_MAC=true; fi
 APP_DIR="${APP_DIR:-$($IS_MAC && echo "$HOME/gnb-console" || echo "/opt/gnb-console")}"
 PORT="${PORT:-3000}"
-NODE_VER="${NODE_VER:-20}"
+NODE_VER="${NODE_VER:-22}"
 
 # ============================================
 # OS 检测
@@ -198,7 +198,7 @@ After=network.target
 Type=simple
 User=root
 WorkingDirectory=$APP_DIR
-ExecStart=$(which node) $APP_DIR/node_modules/.bin/tsx $APP_DIR/src/server.ts
+ExecStart=$(which node) $APP_DIR/dist/server.js
 Restart=always
 RestartSec=5
 Environment=NODE_ENV=production
@@ -303,8 +303,9 @@ else
     git clone --depth 1 "$REPO_URL" "$APP_DIR"
 fi
 cd "$APP_DIR"
-npm install --omit=dev
-mkdir -p data/mirror/gnb data/mirror/openclaw
+npm install
+npm run build
+mkdir -p data/mirror/gnb data/mirror/openclaw data/mirror/daemon
 
 # [4/7] 服务
 echo "[4/7] 配置系统服务..."

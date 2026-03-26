@@ -73,6 +73,27 @@ function createMirrorRouter(dataDir: any) {
     res.sendFile(path.resolve(filePath));
   });
 
+  // GET /api/mirror/daemon — daemon 文件列表（synon-daemon musl 预编译二进制）
+  router.get('/daemon', (req: Request, res: Response) => {
+    const verFile = path.join(mirrorDir, 'daemon', '.version');
+    const version = fs.existsSync(verFile) ? fs.readFileSync(verFile, 'utf-8').trim() : 'unknown';
+    res.json({ software: 'synon-daemon', version, files: listFiles('daemon') });
+  });
+
+  // GET /api/mirror/daemon/:file — 下载 daemon 二进制
+  router.get('/daemon/:file', (req: Request, res: Response) => {
+    const safeName = path.basename(req.params.file);
+    if (safeName !== req.params.file || safeName.includes('..')) {
+      return res.status(400).json({ error: '非法文件名' });
+    }
+    const filePath = path.join(mirrorDir, 'daemon', safeName);
+    if (!filePath.startsWith(path.join(mirrorDir, 'daemon'))) return res.status(403).json({ error: '禁止访问' });
+    if (!fs.existsSync(filePath)) return res.status(404).json({ error: '文件不存在' });
+    const stat = fs.statSync(filePath);
+    if (stat.size > MAX_FILE_SIZE) return res.status(413).json({ error: '文件过大' });
+    res.sendFile(path.resolve(filePath));
+  });
+
   return router;
 }
 
