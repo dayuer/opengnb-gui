@@ -198,7 +198,8 @@ After=network.target
 Type=simple
 User=root
 WorkingDirectory=$APP_DIR
-ExecStart=$(which node) $APP_DIR/dist/server.js
+ExecStartPre=$(which node) $APP_DIR/node_modules/.bin/tsx $APP_DIR/scripts/init-db.ts
+ExecStart=$(which node) $APP_DIR/node_modules/.bin/tsx $APP_DIR/src/server.ts
 Restart=always
 RestartSec=5
 Environment=NODE_ENV=production
