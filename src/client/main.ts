@@ -10,6 +10,7 @@ import { Users } from './pages/users';
 import { Groups } from './pages/groups';
 import { Settings } from './pages/settings';
 import { Skills } from './pages/skills';
+import { Topology } from './pages/topology';
 
 // --- window 全局挂载（兼容 HTML 内联 onclick 事件） ---
 const w = window as any;
@@ -37,6 +38,7 @@ w.Users = Users;
 w.Groups = Groups;
 w.Settings = Settings;
 w.Skills = Skills;
+w.Topology = Topology;
 
 // --- 启动 ---
 document.addEventListener('DOMContentLoaded', () => {

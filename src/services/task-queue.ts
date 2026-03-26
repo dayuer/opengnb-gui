@@ -39,13 +39,15 @@ interface IAuditLogger {
 }
 
 class TaskQueue extends EventEmitter {
-  private _store: { taskInsert: Function; taskPendingByNode: Function; taskMarkDispatched: Function; taskUpdateResult: Function; taskAllByNode: Function; taskFind: Function; taskDelete: Function } | null;
+  private _store: { taskInsert: Function; taskPendingByNode: Function; taskMarkDispatched: Function; taskUpdateResult: Function; taskAllByNode: Function; taskFind: Function; taskDelete: Function; taskFindStaleDispatched: Function } | null;
   private _audit: IAuditLogger | null;
+  private _orphanTimer: ReturnType<typeof setInterval> | null;
 
   constructor(store: unknown, audit: unknown) {
     super();
     this._store = store as typeof this._store;
     this._audit = audit as IAuditLogger | null;
+    this._orphanTimer = null;
   }
 
   /**
@@ -150,8 +152,74 @@ class TaskQueue extends EventEmitter {
     }
     return true;
   }
+
+  // ═══════════════════════════════════════
+  // 孤儿任务自愈（A + B 双保险）
+  // ═══════════════════════════════════════
+
+  /**
+   * A) 启动扫描 — 将所有超期 dispatched 任务标记为 timeout
+   * @returns 回收的任务数量
+   */
+  healOrphanTasks(): number {
+    return this._healStale();
+  }
+
+  /**
+   * B) 定时扫描 — 每 intervalMs 毫秒检查一次
+   */
+  startOrphanTimer(intervalMs = 60000): void {
+    this.stopOrphanTimer();
+    this._orphanTimer = setInterval(() => this._healStale(), intervalMs);
+    log.info(`孤儿任务定时扫描已启动 (${intervalMs / 1000}s 间隔)`);
+  }
+
+  /**
+   * 停止定时扫描
+   */
+  stopOrphanTimer(): void {
+    if (this._orphanTimer) {
+      clearInterval(this._orphanTimer);
+      this._orphanTimer = null;
+    }
+  }
+
+  /**
+   * 核心自愈逻辑 — 查找并回收超时的 dispatched 任务
+   * @private
+   */
+  private _healStale(): number {
+    if (!this._store) return 0;
+
+    // 使用保守的全局超时阈值：最大 timeoutMs 的 2 倍或至少 120 秒
+    const cutoff = new Date(Date.now() - 120000).toISOString();
+    const staleTasks: AgentTask[] = this._store.taskFindStaleDispatched(cutoff);
+
+    let healed = 0;
+    for (const task of staleTasks) {
+      // 逐任务检查各自的 timeoutMs
+      const dispatchedMs = new Date(task.dispatchedAt || task.queuedAt).getTime();
+      const elapsed = Date.now() - dispatchedMs;
+      if (elapsed < (task.timeoutMs || 60000)) continue;
+
+      this._store.taskUpdateResult({
+        taskId: task.taskId,
+        status: 'timeout',
+        resultCode: -1,
+        resultStdout: '',
+        resultStderr: `孤儿任务回收: dispatched 已超过 ${Math.round(elapsed / 1000)}s`,
+        completedAt: new Date().toISOString(),
+      });
+      this._audit?.log('task_orphan_healed', { taskId: task.taskId, nodeId: task.nodeId, elapsed });
+      healed++;
+    }
+
+    if (healed > 0) {
+      log.info(`孤儿回收完成: ${healed} 个超时任务`);
+    }
+    return healed;
+  }
 }
 
 module.exports = TaskQueue;
 export {};
-

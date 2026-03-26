@@ -29,7 +29,9 @@ const createAuthRouter = require('./routes/auth');
 const createJobsRouter = require('./routes/jobs');
 const createSkillsRouter = require('./routes/skills');
 const createClawHubRouter = require('./routes/clawhub');
-const { requireAuth, requireAdmin, initToken, getAdminToken, setJwtSecret, setStore, hashPassword, verifyJwt, resolveToken } = require('./middleware/auth');
+const { createPlaybookRoutes } = require('./routes/playbooks');
+const { PlaybookEngine } = require('./services/playbook-engine');
+const { requireAuth, requireAdmin, requireRole, initToken, getAdminToken, setJwtSecret, setStore, hashPassword, verifyJwt, resolveToken } = require('./middleware/auth');
 const { createRateLimit } = require('./middleware/rate-limit');
 const { errorHandler } = require('./middleware/error-handler');
 const { resolvePaths, ensureDataDirs } = require('./services/data-paths');
@@ -117,7 +119,12 @@ async function initDatabase() {
 function initServices(store: any) {
   const audit = new AuditLogger({ store });
   const approvedNodes = keyManager.getApprovedNodesConfig();
-  const metricsStore = new MetricsStore({ store });
+
+  // Sweeper — 挂载到 MetricsStore 维护周期
+  const Sweeper = require('./services/sweeper');
+  const sweeper = new Sweeper({ store });
+  const metricsStore = new MetricsStore({ store, sweeper });
+
   const jobManager = new JobManager({ store, timeoutMs: 60000 });
 
   const monitor = new GnbMonitor(approvedNodes, {
@@ -199,9 +206,9 @@ function initRoutes(deps: any) {
   app.post('/api/auth/login', loginLimit);
   app.use('/api/auth', express.json(), createAuthRouter(store));
 
-  // 管理路由
+  // 管理路由（RBAC 权限控制）
   app.use('/api/nodes', requireAuth, audit.middleware('nodes'), createNodesRouter(monitor, sshManager, keyManager, metricsStore, taskQueue));
-  app.use('/api/ai', requireAuth, strictLimit, audit.middleware('ai_ops'), createAiRouter(aiOps, opsLog.saveOpsLog));
+  app.use('/api/ai', requireAuth, requireRole('admin', 'operator'), strictLimit, audit.middleware('ai_ops'), createAiRouter(aiOps, opsLog.saveOpsLog));
   app.use('/api/jobs', createJobsRouter({ jobManager, sshManager, keyManager: { getNodeById: (id: any) => store.findById(id) }, requireAuth, broadcastWS: (msg: any) => { wsHandlers.broadcast(msg); } }));
 
   // 公开脚本下载
@@ -219,10 +226,14 @@ function initRoutes(deps: any) {
   app.use('/api/mirror', createMirrorRouter(DATA_DIR));
   app.use('/api/skills', requireAuth, createSkillsRouter(skillsStore));
   app.use('/api/clawhub', requireAuth, createClawHubRouter());
-  app.use('/api/claw', requireAuth, audit.middleware('claw'), createClawRouter({ clawRPC, getNodesConfig: () => keyManager.getApprovedNodesConfig() }));
 
-  // 配置下发
-  app.post('/api/provision/:id', requireAuth, strictLimit, audit.middleware('provision'), async (req: Request, res: Response) => {
+  // Playbook 编排路由
+  const playbookEngine = new PlaybookEngine(store, taskQueue);
+  app.use('/api/playbooks', requireAuth, createPlaybookRoutes(playbookEngine));
+  app.use('/api/claw', requireAuth, requireRole('admin', 'operator'), audit.middleware('claw'), createClawRouter({ clawRPC, getNodesConfig: () => keyManager.getApprovedNodesConfig() }));
+
+  // Provision 路由 — 仅管理员
+  app.post('/api/provision/:id', requireAuth, requireRole('admin'), strictLimit, audit.middleware('provision'), async (req: Request, res: Response) => {
     const nodeConfig = keyManager.getApprovedNodesConfig().find((n: any) => n.id === req.params.id);
     if (!nodeConfig) return res.status(404).json({ error: '节点未审批或不存在' });
     res.json({ status: 'started', message: `开始配置下发: ${nodeConfig.name}` });
@@ -322,7 +333,11 @@ async function boot() {
   initRoutes({ store, ...services });
   initEventHandlers(services);
 
-  const { approvedNodes, monitor, mirrorUpdater } = services;
+  const { approvedNodes, monitor, mirrorUpdater, taskQueue } = services;
+
+  // 孤儿任务自愈 — A) 启动扫描
+  const healedCount = taskQueue.healOrphanTasks();
+  if (healedCount > 0) console.log(`  🔧 启动时回收 ${healedCount} 个孤儿任务`);
 
   server.listen(PORT, () => {
     console.log(`\n  ╔═══════════════════════════════════════════╗`);
@@ -339,11 +354,14 @@ async function boot() {
 
     if (approvedNodes.length > 0) monitor.start();
     mirrorUpdater.start();
+    // 孤儿任务自愈 — B) 定时扫描
+    taskQueue.startOrphanTimer();
   });
 
   const shutdown = () => {
     console.log('\n[Server] 正在关闭...');
     monitor.stop();
+    taskQueue.stopOrphanTimer();
     mirrorUpdater.stop();
     sshManager.closeAll();
     services.wsHandlers.wss.clients.forEach((ws: any) => ws.terminate());

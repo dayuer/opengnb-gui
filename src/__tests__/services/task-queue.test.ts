@@ -14,11 +14,11 @@ describe('services/task-queue', () => {
   let mockAudit: any;
   let emittedEvents: any[];
 
+  let tasks: Record<string, any>;
+
   beforeEach(() => {
     emittedEvents = [];
-
-    // 模拟 NodeStore 的 task 相关 prepared statements
-    const tasks: Record<string, any> = {};
+    tasks = {};
     mockStore = {
       taskInsert: (row: any) => { tasks[row.taskId] = { ...row }; },
       taskPendingByNode: (nodeId: string) => Object.values(tasks)
@@ -175,6 +175,59 @@ describe('services/task-queue', () => {
     it('should return false when store is null', () => {
       const noStoreQueue = new TaskQueue(null, null);
       assert.equal(noStoreQueue.deleteTask('t'), false);
+    });
+  });
+
+  // ═══════════════════════════════════════
+  // T4: 孤儿任务自愈
+  // ═══════════════════════════════════════
+
+  describe('healOrphanTasks', () => {
+    it('should mark stale dispatched tasks as timeout', () => {
+      // 入队并下发
+      queue.enqueueTask('n1', { taskId: 'orphan-1', command: 'cmd', timeoutMs: 1000 });
+      queue.getPendingTasks('n1'); // 标记为 dispatched
+
+      // 模拟 dispatchedAt 为 200 秒前（超过 120s 全局 cutoff 和 1s taskTimeout）
+      const staleTime = new Date(Date.now() - 200000).toISOString();
+      tasks['orphan-1'].dispatchedAt = staleTime;
+      tasks['orphan-1'].status = 'dispatched';
+
+      // 添加 stale 查询到 mockStore
+      mockStore.taskFindStaleDispatched = (cutoff: string) => {
+        return Object.values(tasks).filter((t: any) =>
+          t.status === 'dispatched' && t.dispatchedAt && t.dispatchedAt < cutoff
+        );
+      };
+
+      const healed = queue.healOrphanTasks();
+      assert.equal(healed, 1);
+
+      // 验证任务被标记为 timeout
+      const task = mockStore.taskFind('orphan-1');
+      assert.equal(task.status, 'timeout');
+    });
+
+    it('should not touch recently dispatched tasks', () => {
+      queue.enqueueTask('n1', { taskId: 'fresh-1', command: 'cmd', timeoutMs: 60000 });
+      queue.getPendingTasks('n1');
+
+      mockStore.taskFindStaleDispatched = () => [];
+
+      const healed = queue.healOrphanTasks();
+      assert.equal(healed, 0);
+    });
+
+    it('should return 0 when store is null', () => {
+      const noStoreQueue = new TaskQueue(null, null);
+      assert.equal(noStoreQueue.healOrphanTasks(), 0);
+    });
+  });
+
+  describe('startOrphanTimer / stopOrphanTimer', () => {
+    it('should have startOrphanTimer and stopOrphanTimer methods', () => {
+      assert.equal(typeof queue.startOrphanTimer, 'function');
+      assert.equal(typeof queue.stopOrphanTimer, 'function');
     });
   });
 });

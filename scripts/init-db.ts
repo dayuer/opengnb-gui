@@ -162,6 +162,37 @@ db.exec(`
   CREATE INDEX IF NOT EXISTS idx_skills_category ON skills(category);
   CREATE INDEX IF NOT EXISTS idx_skills_source ON skills(source);
   CREATE INDEX IF NOT EXISTS idx_skills_isBuiltin ON skills(isBuiltin);
+
+  -- Playbook 编排
+  CREATE TABLE IF NOT EXISTS playbooks (
+    id TEXT PRIMARY KEY,
+    name TEXT NOT NULL,
+    description TEXT DEFAULT '',
+    status TEXT DEFAULT 'pending',
+    targetNodeIds TEXT DEFAULT '[]',
+    createdAt TEXT,
+    startedAt TEXT,
+    completedAt TEXT
+  );
+  CREATE INDEX IF NOT EXISTS idx_playbooks_status ON playbooks(status);
+  CREATE INDEX IF NOT EXISTS idx_playbooks_created ON playbooks(createdAt);
+
+  -- Playbook 步骤
+  CREATE TABLE IF NOT EXISTS playbook_steps (
+    id TEXT PRIMARY KEY,
+    playbookId TEXT NOT NULL,
+    seq INTEGER NOT NULL,
+    name TEXT NOT NULL,
+    command TEXT NOT NULL,
+    targetScope TEXT DEFAULT 'all',
+    dependsOn TEXT DEFAULT '[]',
+    status TEXT DEFAULT 'pending',
+    resultSummary TEXT DEFAULT '',
+    startedAt TEXT,
+    completedAt TEXT
+  );
+  CREATE INDEX IF NOT EXISTS idx_pb_steps_playbook ON playbook_steps(playbookId);
+  CREATE INDEX IF NOT EXISTS idx_pb_steps_status ON playbook_steps(playbookId, status);
 `);
 
 // ═══════════════════════════════════════

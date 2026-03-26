@@ -18,6 +18,7 @@ interface MetricsNodeStore {
 
 class MetricsStore {
   _store: MetricsNodeStore;
+  _sweeper: { sweep: () => void } | null;
   _maintenanceIntervalMs: number;
   _maxPoints: number;
   _thresholds: { cpu: number; memPct: number; diskPct: number; sshLatency: number };
@@ -26,8 +27,9 @@ class MetricsStore {
   _maxRetentionMs: number;
   _timer: ReturnType<typeof setInterval> | null;
 
-  constructor(options: { store: MetricsNodeStore; maintenanceIntervalMs?: number; maxPoints?: number } = {} as { store: MetricsNodeStore }) {
+  constructor(options: { store: MetricsNodeStore; sweeper?: { sweep: () => void }; maintenanceIntervalMs?: number; maxPoints?: number } = {} as { store: MetricsNodeStore }) {
     this._store = options.store;
+    this._sweeper = options.sweeper ?? null;
     this._maintenanceIntervalMs = options.maintenanceIntervalMs ?? 300000;
     this._maxPoints = options.maxPoints ?? 1000000;
 
@@ -138,13 +140,15 @@ class MetricsStore {
 
   // ─── 私有方法 ───
 
-  /** 定时维护：过期清理 + 降采样 */
+  /** 定时维护：过期清理 + 降采样 + Sweeper */
   _maintenance() {
     const now = Date.now();
     // 删除 7 天前的数据
     this._store.deleteMetricsBefore(now - this._maxRetentionMs);
     // 降采样 24h 前的数据（逐节点）
     this._downsampleAll();
+    // 委托 Sweeper 清理 audit_logs + agent_tasks
+    this._sweeper?.sweep();
   }
 
   /** 对所有有数据的节点执行降采样 */

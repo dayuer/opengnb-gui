@@ -33,6 +33,9 @@ function prepareTaskStatements(db: any) {
       `DELETE FROM agent_tasks WHERE completedAt IS NOT NULL AND completedAt < ?`
     ),
     deleteById: db.prepare('DELETE FROM agent_tasks WHERE taskId = ?'),
+    findStaleDispatched: db.prepare(
+      `SELECT * FROM agent_tasks WHERE status = 'dispatched' AND dispatchedAt < ?`
+    ),
   };
 }
 
@@ -69,6 +72,10 @@ const taskMethods = {
   // 删除单条任务
   taskDelete(taskId: string) {
     return this._stmts.deleteById.run(taskId);
+  },
+  // 查找超期未完成的 dispatched 任务（孤儿检测）
+  taskFindStaleDispatched(cutoff: string) {
+    return this._stmts.findStaleDispatched.all(cutoff);
   },
 };
 

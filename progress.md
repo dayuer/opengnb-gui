@@ -1,5 +1,9 @@
 # Progress
-- **Phase 1 (PM)**: 调研了 `server.ts` 与 `skills.ts`，功能评级为 M 级，目前已输出团队交接所需的第一套三件套（requirements, sprint, handoff）。下一步准备与用户校验“深入交互”中挖掘出来的一致性陷阱和入口反转倒排问题，再进入 BA 的工作。
-- **Phase 2 & 3 (BA & PM)**: 根据用户的交互设计确认（增加面板管理/卸载技能），重写了 `requirements.md` 的 AC。由 BA 撰写了完备的异常和边界测试场景（`ba-scenarios.md`），重点识别了长短链接口超时陷阱以及状态需要持久化到配置树等关键点。PM 二次校验确认全覆盖，发放了交到 Alpha 的同行通关卡。
-- **Phase 5 (Beta)**: 根据用户要求，跳出工序优先执行了前端（Beta）的 UI 架构。通过 Stitch MCP 拉取了位于 *SynonClaw AI Ops Terminal* 设计系统中的高保真组件代码（暗黑主题、纯玻璃态深度景深布局）。彻底重构了 `skills.ts` 的 `_installSkill` 模块，成功实装带有节点存活状态侦测和单选机制的炫酷模态框。并且在 `nodes.ts` 中完成了 Node Expand Panel (详情面板) 的 “技能” 标签页增强，嵌入了卸载功能并完成了 Typescript/Vite 的编译回归测试，前端 UI (Beta) 链路实现闭环。
-- **Phase 4 (Alpha)**: 根据 BA 拆解的场景要求进行了后端开发。首先由于存储层需具备记忆能力，我升级了 `NodeStore` (SQLite)，无缝 `ALTER TABLE` 原地增加 `skills` 字段及其序列化兼容，修改了 `KeyManager` 供状态读取。随后实装了 `POST/DELETE /api/nodes/:id/skills` API 端点，内置利用了 `sshManager` SSH Shell 下卷容错通信，确保通过安全管道静默部署或卸载技能包并落盘状态。最后，通过编写原生 NodeJS Test 用例 (node:test) ，确保包括节点鉴权、安全命令注入过滤、乐观缓存更新的链路逻辑 100% 跑通，所有 180 个测试用例全部绿灯。
+
+- **Phase 1 (Codebase Audit)**: 完成全量代码扫描。
+  - 后端：鉴权路由 (`auth.ts`, `middleware/`)、核心控制层 (`server.ts`, `services/`)、推模式的 Agent 监控拉起 (`gnb-monitor.ts` 和 `task-queue.ts`)。
+  - 存储层：以 `node-store.ts` 为核心的 SQLite DB，采用了轻量化 Mixin 聚集多个预编译语句 (`task-store`, `skills-store` 等)，利用 WAL 模式解决了并发。
+  - 脚本与初始化：`init-db.ts` 幂等创建表单处理老数据迁移。
+  - 前台：Vanilla JS + DOM 模板，挂载至 Vite 侧代理。依靠 `core.ts` 和 `ws.ts` 完成交互与监控下行。
+- **Phase 2 (Documentation Synthesis)**: 架构与数据流逻辑均与 `AGENTS.md` 描述完美吻合，无重大偏差。根据底层运行情况，总结出了系统的技术债与架构瓶颈点。
+- **Phase 3 (Roadmap & Next Steps)**: 根据技术债情况，输出了一份演进路线图，存放在 `docs/tech_debt_and_roadmap.md` 中。明确指出优先级最高的三大痛点：SQLite 增量无休止膨胀、孤儿任务缺失回收补偿，以及细粒度 RBAC 权限缺失。

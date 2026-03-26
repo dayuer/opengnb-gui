@@ -37,6 +37,7 @@ const { prepareAuditStatements, auditMethods } = require('../stores/audit-store'
 const { prepareUserStatements, userMethods } = require('../stores/user-store');
 const { prepareJobStatements } = require('../stores/job-store');
 const { prepareTaskStatements, taskMethods } = require('../stores/task-store');
+const { preparePlaybookStatements, playbookMethods } = require('../stores/playbook-store');
 
 /**
  * SQLite 节点存储层
@@ -48,10 +49,25 @@ const { prepareTaskStatements, taskMethods } = require('../stores/task-store');
  *   - 对外暴露与原 this.nodes 数组兼容的接口
  *   - V3: 通过 mixin 模式组合分组/指标/审计/用户/Job 子模块
  */
+// 轻量内联接口——避免依赖 @types/better-sqlite3
+interface SqliteStatement {
+  run: (...args: unknown[]) => { changes: number; lastInsertRowid: number | bigint };
+  get: (...args: unknown[]) => Record<string, unknown>;
+  all: (...args: unknown[]) => Record<string, unknown>[];
+}
+
+interface SqliteDb {
+  pragma: (stmt: string) => void;
+  exec: (sql: string) => void;
+  prepare: (sql: string) => SqliteStatement;
+  transaction: <T>(fn: (args?: T) => void) => (args?: T) => void;
+  close: () => void;
+}
+
 class NodeStore {
   dbPath: string;
-  db: unknown;
-  _stmts: Record<string, { run: (...args: unknown[]) => unknown; get: (...args: unknown[]) => unknown; all: (...args: unknown[]) => unknown[] }>;
+  db: SqliteDb | null;
+  _stmts: Record<string, SqliteStatement>;
 
   constructor(dbPath: string) {
     this.dbPath = dbPath;
@@ -178,6 +194,23 @@ class NodeStore {
     try {
       this.db.exec(AGENT_TASKS_DDL);
     } catch { /* 表已存在 */ }
+
+    // @v5: Playbook 编排表
+    try {
+      this.db.exec(`
+        CREATE TABLE IF NOT EXISTS playbooks (
+          id TEXT PRIMARY KEY, name TEXT NOT NULL, description TEXT DEFAULT '',
+          status TEXT DEFAULT 'pending', targetNodeIds TEXT DEFAULT '[]',
+          createdAt TEXT, startedAt TEXT, completedAt TEXT
+        );
+        CREATE TABLE IF NOT EXISTS playbook_steps (
+          id TEXT PRIMARY KEY, playbookId TEXT NOT NULL, seq INTEGER NOT NULL,
+          name TEXT NOT NULL, command TEXT NOT NULL, targetScope TEXT DEFAULT 'all',
+          dependsOn TEXT DEFAULT '[]', status TEXT DEFAULT 'pending',
+          resultSummary TEXT DEFAULT '', startedAt TEXT, completedAt TEXT
+        );
+      `);
+    } catch { /* 表已存在 */ }
   }
 
   /** @private 预编译常用语句（组合子模块的 statements） */
@@ -213,6 +246,7 @@ class NodeStore {
       ...prepareUserStatements(this.db),
       ...prepareJobStatements(this.db),
       ...prepareTaskStatements(this.db),
+      ...preparePlaybookStatements(this.db),
     };
   }
 
@@ -303,7 +337,7 @@ class NodeStore {
     return {
       ...row,
       ready: !!row.ready,
-      skills: row.skills ? JSON.parse(row.skills) : []
+      skills: row.skills ? JSON.parse(row.skills as string) : []
     };
   }
 
@@ -328,11 +362,11 @@ class NodeStore {
   }
 
   count() {
-    return this._stmts.count.get().cnt;
+    return (this._stmts.count.get() as { cnt: number }).cnt;
   }
 
   countByStatus(status: string) {
-    return this._stmts.countByStatus.get(status).cnt;
+    return (this._stmts.countByStatus.get(status) as { cnt: number }).cnt;
   }
 
   isTunAddrTaken(tunAddr: string, excludeNodeId = '') {
@@ -346,7 +380,7 @@ class NodeStore {
 
   filter({ status, groupId, keyword, page = 1, pageSize = 0 }: { status?: string; groupId?: string; keyword?: string; page?: number; pageSize?: number } = {}) {
     let sql = 'SELECT * FROM nodes WHERE 1=1';
-    const params: Record<string, string> = {};
+    const params: Record<string, string | number> = {};
     if (status) { sql += ' AND status = @status'; params.status = status; }
     if (groupId) { sql += ' AND groupId = @groupId'; params.groupId = groupId; }
     if (keyword) {
@@ -372,7 +406,7 @@ class NodeStore {
 
   update(id: string, fields: Partial<NodeRecord>) {
     const sets = [];
-    const params: Record<string, any> = { id };
+    const params: Record<string, string | number | bigint | Buffer | null> = { id };
     for (const [key, val] of Object.entries(fields)) {
       if (key === 'id') continue;
       sets.push(`${key} = @${key}`);
@@ -394,7 +428,7 @@ class NodeStore {
   }
 
   allTunAddrs() {
-    return new Set(this._stmts.allTunAddrs.all().map((r: Record<string, unknown>) => r.tunAddr));
+    return new Set(this._stmts.allTunAddrs.all().map((r: Record<string, unknown>) => r.tunAddr as string));
   }
 
   close() {
@@ -406,7 +440,7 @@ class NodeStore {
 // Mixin 混入 — 将子模块方法挂载到 NodeStore.prototype
 // ═══════════════════════════════════════
 
-Object.assign(NodeStore.prototype, groupMethods, metricsMethods, auditMethods, userMethods, taskMethods);
+Object.assign(NodeStore.prototype, groupMethods, metricsMethods, auditMethods, userMethods, taskMethods, playbookMethods);
 
 module.exports = NodeStore;
 export {}; // CJS 模块标记

@@ -14,16 +14,19 @@ opengnb-gui/
 │   │   ├── gnb-config.ts                # GNB 配置生成器（从 key-manager 提取）
 │   │   ├── node-store.ts                # SQLite 数据层（mixin 模式聚合子模块）
 │   │   ├── gnb-monitor.ts               # 推模式监控（仅监控，任务队列已提炼到 task-queue）
-│   │   ├── task-queue.ts                 # Agent 任务队列管理（从 gnb-monitor 独立）
+│   │   ├── task-queue.ts                 # Agent 任务队列 + 孤儿任务自愈（A+B 双保险）
+│   │   ├── sweeper.ts                    # 数据 TTL 清理（audit_logs 30天 + agent_tasks 7天）
 │   │   ├── skill-command.ts              # 技能安装/卸载命令策略注册表
 │   │   ├── gnb-parser.ts                # GNB gnb_ctl 输出解析器
+│   │   ├── command-filter.ts            # 命令安全过滤黑名单（ai-ops/ws-handler 共用）
 │   │   ├── skills-store.ts              # 技能注册表（共享 DB / 独立 DB 双模式）
-│   │   ├── metrics-store.ts             # 指标时序存储 + 趋势聚合
+│   │   ├── metrics-store.ts             # 指标时序存储 + 趋势聚合 + Sweeper 驱动
 │   │   ├── ssh-manager.ts               # SSH 连接池（通过 GNB TUN）
 │   │   ├── provisioner.ts               # 远程部署 OpenClaw + GNB
 │   │   ├── job-manager.ts               # 异步任务管理（投递 + 回调 + 超时）
 │   │   ├── claw-rpc.ts                  # OpenClaw JSON-RPC 客户端
-│   │   ├── ai-ops.ts                    # Claude Code 流式 Chat（安全门控）
+│   │   ├── ai-ops.ts                    # Claude Code 流式 Chat（委托 command-filter）
+│   │   ├── playbook-engine.ts           # Playbook 多步骤编排引擎（Kahn 拓扑排序）
 │   │   ├── mirror-updater.ts            # 软件镜像自动更新检查
 │   │   ├── audit-logger.ts              # 操作审计日志
 │   │   ├── ws-handler.ts                # WebSocket 处理（监控/终端/AI 三通道）
@@ -34,7 +37,8 @@ opengnb-gui/
 │   │   ├── audit-store.ts               # 审计日志预编译语句
 │   │   ├── user-store.ts                # 用户认证预编译语句
 │   │   ├── job-store.ts                 # Job 预编译语句
-│   │   └── task-store.ts                # Agent 任务队列预编译语句（agent_tasks 表）
+│   │   ├── task-store.ts                # Agent 任务队列预编译语句（agent_tasks 表）
+│   │   └── playbook-store.ts            # Playbook 预编译语句（playbooks + playbook_steps）
 │   ├── routes/
 │   │   ├── enroll.ts                    # 注册审批（enrollToken + flexAuth）
 │   │   ├── nodes.ts                     # 节点管理 + 技能安装/卸载（Agent 任务入队）
@@ -43,10 +47,11 @@ opengnb-gui/
 │   │   ├── claw.ts                      # OpenClaw 管理
 │   │   ├── groups.ts                    # 分组 CRUD 路由
 │   │   ├── skills.ts                    # 技能商店 API
+│   │   ├── playbooks.ts                 # Playbook 编排 API（CRUD + start/cancel）
 │   │   ├── mirror.ts                    # 软件镜像下载
 │   │   └── ai.ts                        # AI 运维终端
 │   ├── middleware/
-│   │   ├── auth.ts                      # JWT + apiToken 双模认证
+│   │   ├── auth.ts                      # JWT + apiToken 双模认证 + requireRole RBAC
 │   │   ├── error-handler.ts             # 全局错误处理
 │   │   └── rate-limit.ts                # 速率限制
 │   ├── client/                           # 前端 SPA（Vite ESM 构建）
@@ -58,6 +63,7 @@ opengnb-gui/
 │   │   ├── pages/                       # 页面路由
 │   │   │   ├── dashboard.ts             # 仪表盘
 │   │   │   ├── nodes.ts                 # 节点管理
+│   │   │   ├── topology.ts              # D3.js 网络拓扑可视化
 │   │   │   ├── users.ts                 # 团队管理
 │   │   │   ├── settings.ts              # 系统设置
 │   │   │   ├── groups.ts                # 分组管理
@@ -128,6 +134,8 @@ graph TD
 | `jobs` | 异步 SSH 任务 | `id TEXT` |
 | `agent_tasks` | Agent 任务队列 | `taskId TEXT` |
 | `skills` | 技能注册表 | `id TEXT` |
+| `playbooks` | Playbook 编排 | `id TEXT` |
+| `playbook_steps` | Playbook 步骤 | `id TEXT` |
 
 ## Agent 任务队列数据流
 
@@ -161,4 +169,7 @@ deploy.sh:
 | **NodeStore mixin 模式** | `stores/` 子模块提供 statements + methods，`Object.assign` 混入 prototype |
 | **SkillsStore 共享 DB** | 接受 `NodeStore.db` 实例，不再独立打开文件 |
 | **Agent piggyback 模式** | 任务随心跳响应下发，无需额外通道 |
-| **SIGTERM 优雅关闭** | 先 terminate WS → server.close → 5s 强制退出兜底 |
+| **RBAC 权限分级** | admin 不拦截 SSH，operator/viewer 全量黑名单拦截 |
+| **命令过滤共享模块** | command-filter.ts 被 ai-ops 和 ws-handler 共用 |
+| **D3.js CDN 懒加载** | 拓扑页面首次访问时按需加载 D3 v7 |
+| **Playbook Kahn 排序** | 步骤依赖拓扑排序，并行分发无依赖步骤 |

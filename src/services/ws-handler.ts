@@ -2,7 +2,8 @@
 
 const { WebSocketServer } = require('ws');
 const { createLogger } = require('./logger');
-const { resolveToken } = require('../middleware/auth');
+const { resolveToken, verifyJwt } = require('../middleware/auth');
+const { checkCommandSafety } = require('./command-filter');
 const log = createLogger('WsHandler');
 import type { Server } from 'http';
 import type { Duplex } from 'stream';
@@ -180,6 +181,12 @@ function createWsHandlers(deps: {
         return;
       }
 
+      // 提取用户角色用于命令拦截
+      const authResult = resolveToken(msg.token);
+      const userRole = authResult.role || 'viewer';
+      const authUserId = authResult.userId || 'unknown';
+      let lineBuf = ''; // 非 admin 的行缓冲区
+
       const targetNodeId = msg.nodeId || nodeId;
       if (!targetNodeId) {
         ws.close(4003, '缺少 nodeId');
@@ -226,7 +233,39 @@ function createWsHandlers(deps: {
             }
           } catch (_) { /* 不是 JSON，当作普通输入 */ }
         }
-        sshStream.write(msg);
+
+        // RBAC 命令拦截: 非 admin 用户启用行缓冲检查
+        if (userRole !== 'admin') {
+          const data = typeof msg === 'string' ? msg : msg.toString('utf-8');
+          for (let i = 0; i < data.length; i++) {
+            const ch = data[i];
+            if (ch === '\r' || ch === '\n') {
+              // 检查累积的命令行
+              const cmd = lineBuf.trim();
+              lineBuf = '';
+              if (cmd.length > 0) {
+                const blocked = checkCommandSafety(cmd);
+                if (blocked) {
+                  // 发送 Ctrl+U 清除远端行缓冲 + 红色告警
+                  sshStream.write('\x15');
+                  const warn = `\r\n\x1b[31m🚫 命令被拦截: ${blocked.reason}\x1b[0m\r\n\x1b[33m原始命令: ${cmd}\x1b[0m\r\n`;
+                  if (ws.readyState === 1) ws.send(warn);
+                  deps.audit.log('ssh_cmd_blocked', { nodeId: targetNodeId, command: cmd, reason: blocked.reason, userId: authUserId });
+                  continue;
+                }
+              }
+              // 安全命令或空行 → 转发回车
+              sshStream.write(ch);
+            } else {
+              // 普通字符: 累积到行缓冲 + 实时转发（保持回显）
+              lineBuf += ch;
+              sshStream.write(ch);
+            }
+          }
+        } else {
+          // admin: 零拦截直通
+          sshStream.write(msg);
+        }
       });
 
       ws.on('close', () => {

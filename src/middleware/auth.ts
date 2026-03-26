@@ -159,20 +159,20 @@ function resolveToken(token: string): TokenResult {
 
   // 1. adminToken 精确匹配
   if (_adminToken && timingSafeEqual(token, _adminToken)) {
-    return { valid: true, userId: 'admin', source: 'adminToken' };
+    return { valid: true, userId: 'admin', role: 'admin', source: 'adminToken' };
   }
 
   // 2. JWT
   const payload = verifyJwt(token);
   if (payload) {
-    return { valid: true, userId: payload.userId || '', source: 'jwt' };
+    return { valid: true, userId: payload.userId || '', role: payload.role || 'viewer', source: 'jwt' };
   }
 
   // 3. apiToken
   if (_store && token.length <= 64) {
     const user = _store._stmts.findUserByApiToken?.get(token);
     if (user) {
-      return { valid: true, userId: user.id, source: 'apiToken' };
+      return { valid: true, userId: user.id, role: (user as any).role || 'viewer', source: 'apiToken' };
     }
   }
 
@@ -180,7 +180,22 @@ function resolveToken(token: string): TokenResult {
 }
 
 /**
- * Express 中间件：要求管理员角色
+ * Express 中间件工厂：要求请求者角色在允许列表中
+ * 必须在 requireAuth 之后使用
+ *
+ * @example requireRole('admin', 'operator') → 允许 admin 和 operator
+ */
+function requireRole(...roles: string[]) {
+  return (req: Request, res: Response, next: NextFunction) => {
+    if (!req.user || !roles.includes(req.user.role || '')) {
+      return res.status(403).json({ error: `需要角色: ${roles.join(' | ')}` });
+    }
+    next();
+  };
+}
+
+/**
+ * Express 中间件：要求管理员角色（requireRole('admin') 的快捷方式）
  * 必须在 requireAuth 之后使用
  */
 function requireAdmin(req: Request, res: Response, next: NextFunction) {
@@ -200,7 +215,7 @@ function timingSafeEqual(a: string, b: string): boolean {
 }
 
 module.exports = {
-  requireAuth, requireAdmin, initToken, getAdminToken,
+  requireAuth, requireAdmin, requireRole, initToken, getAdminToken,
   setJwtSecret, setStore, signJwt, verifyJwt,
   hashPassword, verifyPassword, resolveToken,
 };
