@@ -455,6 +455,8 @@ function createWsHandlers(deps: {
 
   wssDaemon.on('connection', (ws: WsClient) => {
     let nodeId = '';
+    let pingTimer: ReturnType<typeof setInterval> | null = null;
+    let pendingPingTs = 0; // 用于 RTT 计算的 ping 发出时间
 
     // 等待第一帧 hello 鉴权
     ws.once('message', (raw: Buffer | string) => {
@@ -475,18 +477,46 @@ function createWsHandlers(deps: {
       daemonConns.set(nodeId, ws);
       log.info(`daemon 已上线: ${nodeId} (v${daemonVersion})`);
 
-      // 记录 daemonVersion（触发 update 推送给前端）
+      // ① 立即将节点标记为在线（不等下次心跳）
       if (monitor) {
         const existing = monitor.getAllStatus().find((s: WsStatusNode) => s.id === nodeId);
         if (existing) {
-          Object.assign(existing, { daemonVersion, daemonConnectedAt: new Date().toISOString() });
+          Object.assign(existing, {
+            daemonVersion,
+            daemonConnectedAt: new Date().toISOString(),
+            online: true,
+            wsConnected: true,
+            error: undefined,
+          });
         }
+        // 立即推送在线状态给前端
+        broadcastMonitorUpdate(monitor.getAllStatus());
       }
 
       ws.send(JSON.stringify({ type: 'hello-ack', ok: true }));
 
       // 密钥滚动补发：若该节点有待同步的新公钥，立即发送
       if (onDaemonConnect) onDaemonConnect(nodeId);
+
+      // ② 每 10s 发 WS Ping 帧，测量控制面 RTT
+      pingTimer = setInterval(() => {
+        if (ws.readyState !== 1) return;
+        pendingPingTs = Date.now();
+        (ws as unknown as { ping?: (data: Buffer, mask: boolean, cb?: () => void) => void }).ping?.(Buffer.alloc(0), true);
+      }, 10000);
+
+      // 接收 Pong — 记录 RTT 写入 monitor 状态
+      (ws as unknown as { on: (event: string, fn: (data: Buffer) => void) => void }).on('pong', () => {
+        if (!pendingPingTs) return;
+        const pingMs = Date.now() - pendingPingTs;
+        pendingPingTs = 0;
+        if (monitor) {
+          const existing = monitor.getAllStatus().find((s: WsStatusNode) => s.id === nodeId);
+          if (existing) (existing as Record<string, unknown>).pingMs = pingMs;
+          broadcastMonitorUpdate(monitor.getAllStatus());
+        }
+        log.debug(`ping RTT ${nodeId}: ${pingMs}ms`);
+      });
 
       // 注册后续消息处理器
       ws.on('message', (data: Buffer | string) => {
@@ -538,9 +568,23 @@ function createWsHandlers(deps: {
     });
 
     ws.on('close', () => {
+      if (pingTimer) { clearInterval(pingTimer); pingTimer = null; }
       if (nodeId) {
         daemonConns.delete(nodeId);
         log.info(`daemon 已下线: ${nodeId}`);
+        // ③ 立即将节点标记为离线，广播给前端
+        if (monitor) {
+          const existing = monitor.getAllStatus().find((s: WsStatusNode) => s.id === nodeId);
+          if (existing) {
+            Object.assign(existing, {
+              online: false,
+              wsConnected: false,
+              pingMs: null,
+              error: 'daemon WS 断开',
+            });
+          }
+          broadcastMonitorUpdate(monitor.getAllStatus());
+        }
       }
     });
   });

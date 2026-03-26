@@ -218,7 +218,12 @@ export const Nodes = {
       let statusBadge;
       if (isPending) statusBadge = `<span class="bg-warning/20 text-warning text-xs font-bold px-2.5 py-0.5 rounded-full uppercase tracking-tight">待审批</span>`;
       else if (isRejected) statusBadge = `<span class="bg-danger/20 text-danger text-xs font-bold px-2.5 py-0.5 rounded-full uppercase tracking-tight">已拒绝</span>`;
-      else if (isOnline) statusBadge = `<span class="bg-secondary-container text-success text-xs font-bold px-2.5 py-0.5 rounded-full uppercase tracking-tight flex items-center gap-1"><span class="w-1.5 h-1.5 rounded-full bg-success"></span>在线</span>`;
+      else if (isOnline) {
+        const pingMs = monitorNode?.pingMs;
+        const wsOk = monitorNode?.wsConnected;
+        const pingLabel = pingMs != null ? ` <span class="opacity-60 font-normal">${pingMs}ms</span>` : '';
+        statusBadge = `<span class="bg-secondary-container text-success text-xs font-bold px-2.5 py-0.5 rounded-full uppercase tracking-tight flex items-center gap-1"><span class="w-1.5 h-1.5 rounded-full bg-success${wsOk ? ' animate-pulse' : ''}"></span>${wsOk ? 'WS' : '在线'}${pingLabel}</span>`;
+      }
       else statusBadge = `<span class="bg-danger/20 text-danger text-xs font-bold px-2.5 py-0.5 rounded-full uppercase tracking-tight">离线</span>`;
 
       // 操作按钮
@@ -276,8 +281,10 @@ export const Nodes = {
               </div>
             </div>
             <div class="text-right">
-              <p class="text-xs font-bold text-text-muted uppercase tracking-widest mb-1.5">延迟</p>
-              <span data-latency class="text-sm font-bold ${(monitorNode?.sshLatencyMs || 0) > 500 ? 'text-danger' : ''}">${monitorNode?.sshLatencyMs || 0}ms</span>
+              <p class="text-xs font-bold text-text-muted uppercase tracking-widest mb-1.5">Ping</p>
+              ${monitorNode?.pingMs != null
+                ? `<span data-latency class="text-sm font-bold tabular-nums ${(monitorNode.pingMs) > 150 ? 'text-danger' : (monitorNode.pingMs) > 80 ? 'text-warning' : 'text-success'}">${monitorNode.pingMs}ms</span>`
+                : `<span data-latency class="text-sm font-bold text-text-muted">--</span>`}
             </div>` : `<div class="col-span-1 md:col-span-2 opacity-30 space-y-2">
               <div>
                 <div class="flex justify-between text-xs font-bold text-text-muted uppercase tracking-widest mb-1"><span>CPU</span><span>--</span></div>
