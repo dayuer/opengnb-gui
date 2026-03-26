@@ -359,29 +359,6 @@ async function boot() {
     taskQueue.startOrphanTimer();
   });
 
-  // WebSocket 路径路由：根据 URL 分发到对应 WS 服务器
-  server.on('upgrade', (request: any, socket: any, head: any) => {
-    const pathname = request.url?.split('?')[0];
-    const { wss, wssSsh, wssAi, wssDaemon } = services.wsHandlers;
-    if (pathname === '/ws/daemon' && wssDaemon) {
-      wssDaemon.handleUpgrade(request, socket, head, (ws: any) => {
-        wssDaemon.emit('connection', ws, request);
-      });
-    } else if (pathname === '/ws/ssh' && wssSsh) {
-      wssSsh.handleUpgrade(request, socket, head, (ws: any) => {
-        wssSsh.emit('connection', ws, request);
-      });
-    } else if (pathname === '/ws/ai' && wssAi) {
-      wssAi.handleUpgrade(request, socket, head, (ws: any) => {
-        wssAi.emit('connection', ws, request);
-      });
-    } else {
-      // 主监控 WS
-      wss.handleUpgrade(request, socket, head, (ws: any) => {
-        wss.emit('connection', ws, request);
-      });
-    }
-  });
 
   const shutdown = () => {
     console.log('\n[Server] 正在关闭...');

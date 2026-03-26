@@ -360,12 +360,14 @@ function createWsHandlers(deps: {
 
   server.on('upgrade', (req: { url: string }, socket: Duplex, head: Buffer) => {
     const { pathname } = new URL(req.url, 'http://localhost');
-    if (pathname === '/ws') {
-      wss.handleUpgrade(req, socket, head, (ws: WsClient) => { wss.emit('connection', ws, req); });
+    if (pathname === '/ws/daemon') {
+      wssDaemon.handleUpgrade(req, socket, head, (ws: WsClient) => { wssDaemon.emit('connection', ws, req); });
     } else if (pathname === '/ws/ssh') {
       wssSsh.handleUpgrade(req, socket, head, (ws: WsClient) => { wssSsh.emit('connection', ws, req); });
     } else if (pathname === '/ws/ai') {
       wssAi.handleUpgrade(req, socket, head, (ws: WsClient) => { wssAi.emit('connection', ws, req); });
+    } else if (pathname === '/ws') {
+      wss.handleUpgrade(req, socket, head, (ws: WsClient) => { wss.emit('connection', ws, req); });
     } else {
       socket.destroy();
     }
