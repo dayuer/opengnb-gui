@@ -43,7 +43,7 @@ const MAX_WS_CLIENTS = 10;
 function createWsHandlers(deps: {
   server: Server,
   keyManager: { getApprovedNodesConfig(): Record<string, unknown>[]; getPendingNodes(): Record<string, unknown>[]; getGroups(): unknown[]; getNodesByOwner(userId: string): unknown[] },
-  monitor: { getAllStatus(): WsStatusNode[] },
+  monitor: { getAllStatus(): WsStatusNode[]; ingestFromDaemon(nodeId: string, frame: Record<string, unknown>): void },
   aiOps: { _resolveNode(nodeId: string | null): Record<string, unknown> | undefined; streamChat(nc: Record<string, unknown> | null | undefined, prompt: string, cb: (chunk: Record<string, unknown>) => void): { kill(): void } },
   sshManager: { shell(nodeConfig: Record<string, unknown>, opts: { cols: number; rows: number }): Promise<unknown> },
   audit: { log(action: string, data: Record<string, unknown>, req?: unknown): void },
@@ -413,12 +413,126 @@ function createWsHandlers(deps: {
     }
   }
 
+  // ═══════════════════════════════════════
+  // Daemon WebSocket — synon-daemon 控制面通道 (/ws/daemon)
+  // ═══════════════════════════════════════
+
+  const wssDaemon = new WebSocketServer({ noServer: true });
+
+  /** nodeId → WsClient 映射（在线 daemon 注册表）*/
+  const daemonConns = new Map<string, WsClient>();
+
+  /** reqId → Promise resolve/reject（用于 req/res 配对）*/
+  const daemonPending = new Map<string, { resolve: (v: unknown) => void; reject: (e: Error) => void }>();
+
+  /** 向指定节点的 daemon 发送命令，等待响应（最多 10s）*/
+  function sendToDaemon(nodeId: string, cmd: Record<string, unknown>, timeout = 10000): Promise<unknown> {
+    const ws = daemonConns.get(nodeId);
+    if (!ws || ws.readyState !== 1) {
+      return Promise.reject(new Error(`节点 ${nodeId} daemon 未连接`));
+    }
+    const reqId = `${nodeId}-${Date.now()}-${Math.random().toString(36).slice(2)}`;
+    return new Promise((resolve, reject) => {
+      const timer = setTimeout(() => {
+        daemonPending.delete(reqId);
+        reject(new Error(`daemon 命令超时 (reqId=${reqId})`));
+      }, timeout);
+
+      daemonPending.set(reqId, {
+        resolve: (v) => { clearTimeout(timer); daemonPending.delete(reqId); resolve(v); },
+        reject: (e) => { clearTimeout(timer); daemonPending.delete(reqId); reject(e); },
+      });
+
+      ws.send(JSON.stringify({ ...cmd, reqId }));
+    });
+  }
+
+  wssDaemon.on('connection', (ws: WsClient) => {
+    let nodeId = '';
+
+    // 等待第一帧 hello 鉴权
+    ws.once('message', (raw: Buffer | string) => {
+      let msg: Record<string, unknown>;
+      try { msg = JSON.parse(raw.toString()); } catch { ws.close(4000, 'JSON 解析失败'); return; }
+
+      if (msg.type !== 'hello') { ws.close(4001, '非法首帧'); return; }
+
+      nodeId = String(msg.nodeId || '');
+      const token = String(msg.token || '');
+
+      // 复用 resolveToken 鉴权（验证节点的 apiToken）
+      const authResult = resolveToken({ headers: { authorization: `apiToken ${token}` } } as unknown as Record<string, unknown>);
+      if (!authResult) { ws.close(4003, '认证失败'); return; }
+
+      // 写入 daemonVersion 到内存状态
+      const daemonVersion = String(msg.version || '0.0.0');
+      daemonConns.set(nodeId, ws);
+      log.info(`daemon 已上线: ${nodeId} (v${daemonVersion})`);
+
+      // 记录 daemonVersion（触发 update 推送给前端）
+      if (monitor) {
+        const existing = monitor.getAllStatus().find((s: WsStatusNode) => s.id === nodeId);
+        if (existing) {
+          Object.assign(existing, { daemonVersion, daemonConnectedAt: new Date().toISOString() });
+        }
+      }
+
+      ws.send(JSON.stringify({ type: 'hello-ack', ok: true }));
+
+      // 注册后续消息处理器
+      ws.on('message', (data: Buffer | string) => {
+        let frame: Record<string, unknown>;
+        try { frame = JSON.parse(data.toString()); } catch { return; }
+
+        switch (frame.type) {
+          case 'heartbeat':
+            // 通知 monitor 更新节点状态
+            if (monitor && frame.sysInfo) {
+              monitor.ingestFromDaemon(nodeId, frame);
+            }
+            break;
+
+          case 'cmd_result': {
+            // 匹配 pending req
+            const pending = daemonPending.get(String(frame.reqId || ''));
+            if (pending) {
+              if (frame.ok) pending.resolve(frame.payload);
+              else pending.reject(new Error(String((frame.payload as Record<string, unknown>)?.error || '命令失败')));
+            }
+            break;
+          }
+
+          case 'watchdog_alert':
+            // 广播 watchdog 告警到前端监控 WS
+            broadcast(JSON.stringify({ type: 'watchdog_alert', data: frame }));
+            if (audit) {
+              audit.log('watchdog_alert', { nodeId, service: frame.service, reason: frame.reason });
+            }
+            break;
+
+          default:
+            log.debug(`daemon 未知帧 type=${frame.type}`);
+        }
+      });
+    });
+
+    ws.on('close', () => {
+      if (nodeId) {
+        daemonConns.delete(nodeId);
+        log.info(`daemon 已下线: ${nodeId}`);
+      }
+    });
+  });
+
   return {
     wss,
+    wssDaemon,
     broadcast,
     broadcastSnapshot,
     broadcastMonitorUpdate,
     enrichNodesData,
+    sendToDaemon,
+    daemonConns,
   };
 }
 
