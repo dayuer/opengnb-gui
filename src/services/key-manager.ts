@@ -522,6 +522,49 @@ class KeyManager {
   getAllNodes() { return this.store.all(); }
 
   /**
+   * 生成完整的 address.conf 供新节点 GNB 使用
+   *
+   * 格式：
+   *   i|0|<index_ip>|<index_port>   — 用于动态地址发现
+   *   <consoleNodeId>|<wanIp>|<wanPort>  — ★ Console GNB 公网静态地址（让节点能直接打洞）
+   *   <consoleNodeId>|<tunAddr>|255.0.0.0 — Console TUN 路由
+   *   <nodeId>|<tunAddr>|255.0.0.0       — 其他已批准节点
+   */
+  generateFullAddressConf(): string {
+    const consoleIp = process.env.CONSOLE_WAN_IP || process.env.GNB_WAN_IP || '';
+    const gnbWanPort = process.env.GNB_WAN_PORT || '9002';
+    const indexPort = process.env.GNB_INDEX_PORT || '9001';
+    const lines: string[] = [];
+
+    // Index 服务器（帮助发现动态 WAN 地址）
+    if (consoleIp) {
+      lines.push(`i|0|${consoleIp}|${indexPort}`);
+    }
+
+    // Console GNB 自身 — 公网静态 WAN 地址（★关键：让节点 GNB 能直接打洞连上 Console）
+    if (this.gnbNodeId && consoleIp) {
+      lines.push(`${this.gnbNodeId}|${consoleIp}|${gnbWanPort}`);
+    }
+
+    // Console GNB TUN 路由条目
+    if (this.gnbNodeId && this.gnbTunAddr) {
+      const tun = this.gnbTunAddr.replace(/\/\d+$/, ''); // 去掉子网掩码
+      lines.push(`${this.gnbNodeId}|${tun}|255.0.0.0`);
+    }
+
+    // 全部已批准节点
+    const approved = this.store.findByStatus('approved');
+    for (const node of approved) {
+      if (node.gnbNodeId && node.tunAddr) {
+        lines.push(`${node.gnbNodeId}|${node.tunAddr}|255.0.0.0`);
+      }
+    }
+
+    return lines.join('\n') + '\n';
+  }
+
+
+  /**
    * @alpha: 按 ownerId 获取节点（用户隔离）
    * @param {string} ownerId
    */

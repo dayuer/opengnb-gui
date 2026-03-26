@@ -321,7 +321,7 @@ CONSOLE_HOST=$(echo "$CONSOLE" | sed 's/:.*//')
 if echo "$CONSOLE_HOST" | grep -qE '^[0-9]+\.[0-9]+'; then
     CONSOLE_IP="$CONSOLE_HOST"
 else
-    CONSOLE_IP=$(dig +short "$CONSOLE_HOST" 2>/dev/null | head -1 || echo "$CONSOLE_HOST")
+    CONSOLE_IP=$(dig +short "$CONSOLE_HOST" 2>/dev/null | grep -v '#' | head -1 || nslookup "$CONSOLE_HOST" 2>/dev/null | grep 'Address:' | tail -1 | awk '{print $NF}' || echo "$CONSOLE_HOST")
 fi
 
 cat > "$GNB_CONF/node.conf" <<GNBEOF
@@ -334,8 +334,13 @@ GNBEOF
 if curl -sSf -H "$ENROLL_AUTH" "$API_BASE/api/enroll/address-conf" -o "$GNB_CONF/address.conf" 2>/dev/null; then
     echo "      address.conf 已从 Console 拉取（含全部节点）"
 else
+    # 回退写法：
+    #  i|0|... → Index 服务器（帮助发现动态地址）
+    #  静态条目写 Console GNB 公网 IP:9002，让节点 GNB 能直接打洞到 Console
+    CONSOLE_GNB_PORT="${CONSOLE_GNB_PORT:-9002}"
     cat > "$GNB_CONF/address.conf" <<GNBEOF
 i|0|${CONSOLE_IP}|9001
+${CONSOLE_GNB_NODE_ID}|${CONSOLE_IP}|${CONSOLE_GNB_PORT}
 ${CONSOLE_GNB_NODE_ID}|${CONSOLE_GNB_TUN_ADDR}|255.0.0.0
 ${GNB_NODE_ID}|${TUN_ADDR}|255.0.0.0
 GNBEOF
@@ -343,6 +348,8 @@ fi
 
 grep -v '^i|' "$GNB_CONF/address.conf" > "$GNB_CONF/route.conf"
 echo "      GNB 配置文件已写入"
+echo "      Console GNB WAN: ${CONSOLE_IP}:${CONSOLE_GNB_PORT:-9002} (node ${CONSOLE_GNB_NODE_ID})"
+echo "      Console TUN:     $CONSOLE_GNB_TUN_ADDR"
 
 # ============================================
 # Step 6: 启动 GNB + 配置并启动 synon-daemon
@@ -390,11 +397,16 @@ for i in $(seq 1 15); do
     sleep 2
 done
 
-if ip addr show gnb_tun 2>/dev/null | grep -q "inet " && [ -n "$CONSOLE_GNB_TUN_ADDR" ]; then
-    if ping -c 3 -W 5 "$CONSOLE_GNB_TUN_ADDR" >/dev/null 2>&1; then
+GNB_TUN_UP=false
+if ip addr show gnb_tun 2>/dev/null | grep -q "inet "; then
+    GNB_TUN_UP=true
+fi
+
+if [ "$GNB_TUN_UP" = "true" ] && [ -n "$CONSOLE_GNB_TUN_ADDR" ]; then
+    if ping -c 3 -W 5 "$CONSOLE_GNB_TUN_ADDR" > /dev/null 2>&1; then
         echo "      ✅ GNB 隧道已连通 ($TUN_ADDR → $CONSOLE_GNB_TUN_ADDR)"
     else
-        echo "      ⚠️ GNB 隧道 ping 不通，可能需要等待 peer 发现"
+        echo "      ⚠️ GNB 隧道 ping 不通（peer 发现需时间，daemon 将等待 TUN 就绪后再连）"
     fi
 fi
 
