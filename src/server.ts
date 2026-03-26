@@ -219,9 +219,7 @@ function initRoutes(deps: any) {
   app.get('/api/enroll/init.sh', (req: Request, res: Response) => {
     res.type('text/plain').sendFile(path.resolve(__dirname, '../scripts/initnode.sh'));
   });
-  app.get('/api/enroll/node-agent.sh', (req: Request, res: Response) => {
-    res.type('text/plain').sendFile(path.resolve(__dirname, '../scripts/node-agent.sh'));
-  });
+
   app.get('/api/enroll/setup.sh', (req: Request, res: Response) => {
     res.type('text/plain').sendFile(path.resolve(__dirname, '../scripts/setup-console.sh'));
   });
