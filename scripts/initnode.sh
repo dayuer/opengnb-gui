@@ -1,29 +1,33 @@
 #!/bin/bash
-# SynonClaw Console — 节点初始化脚本
+# SynonClaw Console — 节点初始化脚本 v0.7.0
+#
+# 架构说明（v0.7 新架构）：
+#   Console ↔ synon-daemon  使用 WSS 长连接（控制面）
+#   node-agent.sh 仅作兜底 Agent（无 daemon 时的 HTTP 轮询降级）
+#   SSH 运维已由 synon-daemon exec_cmd 白名单命令替代
 #
 # 流程：
-#   1. 安装 GNB（编译或已安装跳过）
-#   2. 获取 passcode 并提交注册
-#   3. 等待管理员审批（审批时分配 TUN 地址和 GNB 节点 ID）
-#   4. 配置 GNB（密钥生成 + 公钥交换 + 配置文件 + systemd）
-#   5. 启动 GNB 并验证 TUN 网络连通
-#   6. 创建 synon 用户（sudo 免密）
-#   7. 安装 Node.js v22
-#   8. 下载 Console SSH 公钥
-#   9. 安装 OpenClaw（Console 镜像优先 → npm 回退 + 配置 + systemd）
-#  10. 提交 OpenClaw Token 到 Console
-#  11. 安装监控 Agent（上报节点信息到 Console）
-#  12. 通知 Console 已就绪
+#   1.  安装 GNB（编译 + systemd）
+#   2.  获取 passcode 并提交注册
+#   3.  等待管理员审批（分配 TUN 地址 + GNB 节点 ID）
+#   4.  配置 GNB（密钥 + 公钥交换 + address.conf）
+#   5.  启动 GNB 并验证 TUN 网络连通
+#   6.  安装 Node.js v22（OpenClaw 运行时依赖）
+#   7.  安装 OpenClaw（Control 镜像优先 → npm 回退，含 Token 注册）
+#   8.  安装 synon-daemon（核心控制面，WSS 长连接到 Console）
+#   9.  安装 node-agent.sh（兜底 HTTP 上报，仅供无 daemon 旧节点）
+#  10.  通知 Console 已就绪
 #
 # 用法（在目标节点以 root 执行）：
 #   curl -sSL https://api.synonclaw.com/api/enroll/init.sh | bash
+#   curl -sSL ... | TOKEN=<token> bash
 
 set -euo pipefail
 
 # --- 参数（全部可通过环境变量覆盖）---
 CONSOLE="${CONSOLE:-api.synonclaw.com}"
-NODE_NAME="${NODE_ID:-$(hostname -s)}"  # @alpha: 用户提交的名称（hostname）
-SSH_USER="synon"
+NODE_NAME="${NODE_ID:-$(hostname -s)}"  # 用户提交的名称（hostname）
+DAEMON_BIN_DIR="/opt/gnb/bin"
 
 # 自动检测协议：域名用 https，IP 用 http
 if echo "$CONSOLE" | grep -qE '^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]'; then
@@ -37,7 +41,7 @@ json_val() { python3 -c "import sys,json; print(json.load(sys.stdin).get('$1',''
 
 echo ""
 echo "  ╔══════════════════════════════════════╗"
-echo "  ║  SynonClaw Console — 节点初始化 v0.6.0     ║"
+echo "  ║  SynonClaw Console — 节点初始化 v0.7.0     ║"
 echo "  ╚══════════════════════════════════════╝"
 echo ""
 echo "  Console:  $CONSOLE ($API_BASE)"
@@ -138,7 +142,6 @@ ENROLL_RESP=$(curl -sS -X POST "$API_BASE/api/enroll" \
 
 STATUS=$(echo "$ENROLL_RESP" | json_val status)
 ENROLL_TOKEN=$(echo "$ENROLL_RESP" | json_val enrollToken)
-# @alpha: 提取平台分配的唯一 NodeID
 PLATFORM_NODE_ID=$(echo "$ENROLL_RESP" | json_val nodeId)
 echo "      $(echo "$ENROLL_RESP" | json_val message)"
 
@@ -152,11 +155,8 @@ if [ -z "$ENROLL_TOKEN" ]; then
     exit 1
 fi
 
-if [ -n "$PLATFORM_NODE_ID" ]; then
-    echo "      平台分配 ID: $PLATFORM_NODE_ID"
-fi
+[ -n "$PLATFORM_NODE_ID" ] && echo "      平台分配 ID: $PLATFORM_NODE_ID"
 
-# @alpha: 后续 API 调用统一使用 enrollToken 认证
 ENROLL_AUTH="Authorization: Bearer $ENROLL_TOKEN"
 
 # ============================================
@@ -169,12 +169,10 @@ CONSOLE_GNB_TUN_ADDR=""
 
 fetch_status() {
     local resp
-    # 优先用 enrollToken，失败时用 ADMIN_TOKEN fallback（服务器重启后 enrollToken 可能丢失）
     local use_id="${PLATFORM_NODE_ID:-$NODE_NAME}"
     resp=$(curl -sS -H "$ENROLL_AUTH" "$API_BASE/api/enroll/status/$use_id" 2>/dev/null || echo '{}')
     STATUS=$(echo "$resp" | json_val status)
     if [ -z "$STATUS" ] || [ "$STATUS" = "null" ]; then
-        # enrollToken 可能失效，尝试 TOKEN
         if [ -n "${TOKEN:-}" ]; then
             resp=$(curl -sS -H "Authorization: Bearer $TOKEN" "$API_BASE/api/enroll/status/$use_id" 2>/dev/null || echo '{}')
             STATUS=$(echo "$resp" | json_val status)
@@ -200,7 +198,7 @@ else
             approved) echo "" && echo "      ✅ 审批通过！"; break ;;
             rejected|deleted) echo "" && echo "      ❌ 审批被拒绝"; exit 1 ;;
             pending)  printf "." ;;
-            *)        printf "?" ;;  # 未知状态（如认证失败），继续重试
+            *)        printf "?" ;;
         esac
     done
 fi
@@ -225,7 +223,7 @@ mkdir -p "$GNB_CONF"/{security,ed25519,scripts}
 if [ ! -f "$GNB_CONF/security/${GNB_NODE_ID}.private" ]; then
     cd "$GNB_CONF/security"
     /opt/gnb/bin/gnb_crypto -c -p "${GNB_NODE_ID}.private" -k "${GNB_NODE_ID}.public"
-    chmod 600 "${GNB_NODE_ID}.private"  # @alpha: 私钥权限加固
+    chmod 600 "${GNB_NODE_ID}.private"
     cp "${GNB_NODE_ID}.public" "$GNB_CONF/ed25519/${GNB_NODE_ID}.public"
     echo "      Ed25519 密钥已生成"
 fi
@@ -253,7 +251,7 @@ if [ -n "$LOCAL_PUBKEY" ]; then
 fi
 
 # 获取 Console 公网 IP
-CONSOLE_HOST=$(echo "$CONSOLE" | sed 's/:.*//') # 去掉端口
+CONSOLE_HOST=$(echo "$CONSOLE" | sed 's/:.*//')
 if echo "$CONSOLE_HOST" | grep -qE '^[0-9]+\.[0-9]+'; then
     CONSOLE_IP="$CONSOLE_HOST"
 else
@@ -261,37 +259,35 @@ else
 fi
 
 # 写入配置文件
-cat > "$GNB_CONF/node.conf" << GNBEOF
+cat > "$GNB_CONF/node.conf" <<GNBEOF
 nodeid $GNB_NODE_ID
 listen 9002
 multi-socket on
 unified-forwarding auto
 GNBEOF
 
-# address.conf — 从 Console API 拉取全量（包含所有已审批节点）
+# address.conf — 从 Console API 拉取全量
 if curl -sSf -H "$ENROLL_AUTH" "$API_BASE/api/enroll/address-conf" -o "$GNB_CONF/address.conf" 2>/dev/null; then
     echo "      address.conf 已从 Console 拉取（含全部节点）"
 else
     echo "      API 不可用，使用最小配置（仅 Console + 自身）"
-    cat > "$GNB_CONF/address.conf" << GNBEOF
+    cat > "$GNB_CONF/address.conf" <<GNBEOF
 i|0|${CONSOLE_IP}|9001
 ${CONSOLE_GNB_NODE_ID}|${CONSOLE_GNB_TUN_ADDR}|255.0.0.0
 ${GNB_NODE_ID}|${TUN_ADDR}|255.0.0.0
 GNBEOF
 fi
 
-# route.conf — 从 address.conf 生成（去掉 i| 行）
 grep -v '^i|' "$GNB_CONF/address.conf" > "$GNB_CONF/route.conf"
-
 echo "      GNB 配置文件已写入"
 
 # ============================================
-# Step 5: 启动 GNB 并等待 TUN 接口
+# Step 5: 启动 GNB 并验证 TUN 网络连通
 # ============================================
 echo "[5/10] 启动 GNB..."
 
 if command -v systemctl &>/dev/null; then
-    cat > /etc/systemd/system/gnb.service << SVCEOF
+    cat > /etc/systemd/system/gnb.service <<SVCEOF
 [Unit]
 Description=GNB P2P VPN Node
 After=network-online.target
@@ -300,12 +296,12 @@ Wants=network-online.target
 [Service]
 Type=simple
 ExecStartPre=/bin/mkdir -p /var/log/opengnb
-ExecStart=/opt/gnb/bin/gnb -c ${GNB_CONF} \\
-  -i gnb_tun \\
-  --crypto chacha20 \\
-  --crypto-key-update-interval hour \\
-  --address-secure=on \\
-  --console-log-level=3 \\
+ExecStart=/opt/gnb/bin/gnb -c ${GNB_CONF} \
+  -i gnb_tun \
+  --crypto chacha20 \
+  --crypto-key-update-interval hour \
+  --address-secure=on \
+  --console-log-level=3 \
   --log-file-path=/var/log/opengnb
 Restart=always
 RestartSec=5
@@ -334,42 +330,21 @@ done
 if ! ip addr show gnb_tun 2>/dev/null | grep -q "inet "; then
     echo "      ⚠️ TUN 接口未就绪，请检查 GNB 日志: journalctl -u gnb"
 else
-    # GNB 网络连通验证 — ping Console TUN 地址
     echo "      验证 GNB 隧道连通性..."
     if [ -n "$CONSOLE_GNB_TUN_ADDR" ]; then
         if ping -c 3 -W 5 "$CONSOLE_GNB_TUN_ADDR" >/dev/null 2>&1; then
             echo "      ✅ GNB 隧道已连通 ($TUN_ADDR → $CONSOLE_GNB_TUN_ADDR)"
         else
-            echo "      ⚠️ GNB 隧道 ping 不通 ($CONSOLE_GNB_TUN_ADDR)，可能需要等待 peer 发现"
+            echo "      ⚠️ GNB 隧道 ping 不通，可能需要等待 peer 发现"
         fi
     fi
 fi
 
 # ============================================
-# Step 6: 创建 synon 用户
+# Step 6: 安装 Node.js v22（OpenClaw 运行时依赖）
 # ============================================
-echo "[6/10] 创建运维用户 $SSH_USER..."
+echo "[6/10] 安装 Node.js v22..."
 
-if id "$SSH_USER" &>/dev/null; then
-    echo "      用户已存在"
-else
-    useradd -m -s /bin/bash "$SSH_USER"
-    echo "      用户已创建"
-fi
-
-SUDOERS_FILE="/etc/sudoers.d/$SSH_USER"
-if [ ! -f "$SUDOERS_FILE" ]; then
-    echo "$SSH_USER ALL=(ALL) NOPASSWD: ALL" > "$SUDOERS_FILE"
-    chmod 440 "$SUDOERS_FILE"
-    echo "      sudo 免密已配置"
-fi
-
-# ============================================
-# Step 7: 安装 Node.js v22（OpenClaw 由 Console 远程推送）
-# ============================================
-echo "[7/10] 安装 Node.js v22..."
-
-# 检测当前 Node.js 版本
 NODE_VER=$(node --version 2>/dev/null | sed 's/v//' || echo "0")
 NODE_MAJOR=$(echo "$NODE_VER" | cut -d. -f1)
 
@@ -379,13 +354,11 @@ if [ "$NODE_MAJOR" -lt 22 ] 2>/dev/null; then
     export PATH="/usr/local/bin:$PATH"
 
     if ! command -v npm &>/dev/null; then
-        # npm 不存在 — 先用 n 自举安装 Node.js 22（自带 npm）
         echo "      npm 未安装，通过 n 自举安装 Node.js 22..."
         curl -fsSL https://raw.githubusercontent.com/tj/n/master/bin/n | bash -s 22
         hash -r 2>/dev/null
     fi
 
-    # 此时 npm 必定可用，用 npm 安装 n 版本管理器
     npm install -g n 2>/dev/null || true
     hash -r 2>/dev/null
     n 22 2>&1 | tail -3
@@ -396,35 +369,10 @@ else
 fi
 
 # ============================================
-# Step 8: 下载 Console SSH 公钥
+# Step 7: 安装 OpenClaw（Console 镜像优先 → npm 回退）
 # ============================================
-echo "[8/10] 下载 Console SSH 公钥..."
+echo "[7/10] 安装 OpenClaw..."
 
-PUBKEY=$(curl -sS "$API_BASE/api/enroll/pubkey" | json_val publicKey)
-if [ -z "$PUBKEY" ]; then
-    echo "      [失败] 无法获取 SSH 公钥"
-    exit 1
-fi
-
-SSH_DIR="/home/$SSH_USER/.ssh"
-AUTH_KEYS="$SSH_DIR/authorized_keys"
-mkdir -p "$SSH_DIR" && chmod 700 "$SSH_DIR"
-
-if grep -qF "$PUBKEY" "$AUTH_KEYS" 2>/dev/null; then
-    echo "      公钥已存在"
-else
-    echo "$PUBKEY" >> "$AUTH_KEYS"
-    echo "      公钥已写入"
-fi
-chmod 600 "$AUTH_KEYS"
-chown -R "$SSH_USER:$SSH_USER" "$SSH_DIR"
-
-# ============================================
-# Step 9: 安装 OpenClaw（版本检测 + Console 镜像优先 → npm 回退）
-# ============================================
-echo "[9/12] 安装 OpenClaw..."
-
-# 查询 Console 镜像获取最新版本
 MIRROR_LIST=$(curl -sf -m 5 "$API_BASE/api/mirror/openclaw" 2>/dev/null || echo "{}")
 LATEST_VER=$(echo "$MIRROR_LIST" | python3 -c "
 import sys,json
@@ -443,10 +391,7 @@ try:
 except: print('')
 " 2>/dev/null)
 
-# 检测本地已安装版本
-CLAW_VER=$(openclaw --version 2>/dev/null | head -1 | awk '{print $2}' || echo "NOT_FOUND")
-# 去掉可能的前导字符 (e.g. "OpenClaw 2026.3.13 (xxx)" → "2026.3.13")
-CLAW_VER=$(echo "$CLAW_VER" | grep -oE '[0-9]+\.[0-9]+\.[0-9]+' || echo "NOT_FOUND")
+CLAW_VER=$(openclaw --version 2>/dev/null | head -1 | grep -oE '[0-9]+\.[0-9]+\.[0-9]+' || echo "NOT_FOUND")
 
 NEED_INSTALL=false
 if [ "$CLAW_VER" = "NOT_FOUND" ] || [ -z "$CLAW_VER" ]; then
@@ -461,8 +406,10 @@ else
 fi
 
 CLAW_INSTALLED=false
+CLAW_TOKEN=""
+CLAW_PORT=18789
+
 if [ "$NEED_INSTALL" = "true" ]; then
-    # 策略 A: 从 Console 镜像下载 tarball
     if [ -n "$CLAW_TGZ" ]; then
         echo "      从 Console 镜像下载: $CLAW_TGZ"
         if curl -sf -m 120 "$API_BASE/api/mirror/openclaw/$CLAW_TGZ" -o "/tmp/$CLAW_TGZ"; then
@@ -471,7 +418,6 @@ if [ "$NEED_INSTALL" = "true" ]; then
         fi
     fi
 
-    # 策略 B: npm 在线安装（含国内镜像）
     if [ "$CLAW_INSTALLED" != "true" ]; then
         echo "      从 npm 在线安装..."
         npm install -g openclaw@latest --registry=https://registry.npmmirror.com \
@@ -479,7 +425,7 @@ if [ "$NEED_INSTALL" = "true" ]; then
     fi
 
     if [ "$CLAW_INSTALLED" != "true" ]; then
-        echo "      ⚠️ OpenClaw 安装失败，跳过（可稍后通过 Console 终端安装）"
+        echo "      ⚠️ OpenClaw 安装失败，跳过"
     else
         echo "      ✅ OpenClaw $(openclaw --version 2>/dev/null | head -1) 已安装"
     fi
@@ -487,27 +433,14 @@ else
     CLAW_INSTALLED=true
 fi
 
-# 安装 ClawHub CLI（技能商店包管理器，独立于 OpenClaw 安装流程）
-if [ "$CLAW_INSTALLED" = "true" ] && ! command -v clawhub >/dev/null 2>&1; then
-    echo "      📦 安装 ClawHub CLI..."
-    npm install -g clawhub --registry=https://registry.npmmirror.com > /tmp/clawhub-install.log 2>&1 \
-        && echo "      ✅ ClawHub $(clawhub --version 2>/dev/null | head -1) 已安装" \
-        || echo "      ⚠️ ClawHub CLI 安装失败（非必须，可稍后安装）"
-fi
-
-# 配置 OpenClaw + systemd + 生成 Token
-CLAW_TOKEN=""
-CLAW_PORT=18789
 if [ "$CLAW_INSTALLED" = "true" ]; then
     # 生成随机 Token
     CLAW_TOKEN=$(python3 -c "import secrets; print(secrets.token_hex(32))" 2>/dev/null \
-        || openssl rand -hex 32 2>/dev/null \
-        || cat /dev/urandom | tr -dc 'a-f0-9' | head -c 64)
+        || openssl rand -hex 32 2>/dev/null)
 
-    # 创建配置文件
     CLAW_CONFIG_DIR="/root/.openclaw"
     mkdir -p "$CLAW_CONFIG_DIR"
-    cat > "$CLAW_CONFIG_DIR/openclaw.json" << CLAWEOF
+    cat > "$CLAW_CONFIG_DIR/openclaw.json" <<CLAWEOF
 {
   "gateway": {
     "mode": "local",
@@ -530,9 +463,8 @@ CLAWEOF
     chmod 600 "$CLAW_CONFIG_DIR/openclaw.json"
     echo "      配置已写入 ($CLAW_CONFIG_DIR/openclaw.json)"
 
-    # 创建 systemd 服务
     if command -v systemctl &>/dev/null; then
-        cat > /etc/systemd/system/openclaw-gateway.service << SVCEOF
+        cat > /etc/systemd/system/openclaw-gateway.service <<SVCEOF
 [Unit]
 Description=OpenClaw Gateway
 After=network.target gnb.service
@@ -559,14 +491,8 @@ SVCEOF
             journalctl -u openclaw-gateway --no-pager -n 5 2>/dev/null || true
         fi
     fi
-fi
 
-# ============================================
-# Step 10: 提交 OpenClaw Token 到 Console
-# ============================================
-echo "[10/12] 提交 OpenClaw Token..."
-
-if [ -n "$CLAW_TOKEN" ]; then
+    # 提交 OpenClaw Token 到 Console
     TOKEN_RESP=$(curl -sS -X POST "$API_BASE/api/enroll/${PLATFORM_NODE_ID:-$NODE_NAME}/claw-token" \
       -H "$ENROLL_AUTH" \
       -H "Content-Type: application/json" \
@@ -577,22 +503,114 @@ if [ -n "$CLAW_TOKEN" ]; then
     else
         echo "      ⚠️ Token 提交失败: $TOKEN_RESP"
     fi
-else
-    echo "      跳过（OpenClaw 未安装）"
 fi
 
 # ============================================
-# Step 11: 安装监控 Agent（上报节点信息到 Console）
+# Step 8: 安装 synon-daemon（WSS 控制面）
 # ============================================
-echo "[11/12] 安装监控 Agent..."
+echo "[8/10] 安装 synon-daemon..."
 
-# 下载 agent 脚本
+# 尝试从 Console 镜像下载预编译二进制
+ARCH=$(uname -m)
+case "$ARCH" in
+    x86_64)         DAEMON_ARCH="x86_64-musl" ;;
+    aarch64|arm64)  DAEMON_ARCH="aarch64-musl" ;;
+    armv7l)         DAEMON_ARCH="armv7-musl" ;;
+    mips*)          DAEMON_ARCH="mips-musl" ;;
+    *)              DAEMON_ARCH="" ;;
+esac
+
+DAEMON_INSTALLED=false
+DAEMON_BIN="$DAEMON_BIN_DIR/synon-daemon"
+
+if [ -n "$DAEMON_ARCH" ]; then
+    DAEMON_URL="$API_BASE/api/mirror/daemon/synon-daemon-${DAEMON_ARCH}"
+    echo "      架构: $ARCH → 下载 synon-daemon-${DAEMON_ARCH}..."
+    if curl -sf -m 60 "$DAEMON_URL" -o "$DAEMON_BIN" 2>/dev/null; then
+        chmod +x "$DAEMON_BIN"
+        DAEMON_INSTALLED=true
+        echo "      ✅ synon-daemon 二进制已安装"
+    else
+        echo "      ⚠️ Console 镜像下载失败（镜像可能尚未推送此架构）"
+    fi
+fi
+
+if [ "$DAEMON_INSTALLED" = "true" ]; then
+    # 写入 daemon 配置
+    DAEMON_CONF_DIR="/etc/synon-daemon"
+    mkdir -p "$DAEMON_CONF_DIR"
+
+    # 生成 daemon API Token（与 Console 节点 apiToken 保持一致）
+    # Console 审批时已生成 apiToken，从 enroll status 接口获取
+    DAEMON_TOKEN=$(curl -sS -H "$ENROLL_AUTH" "$API_BASE/api/enroll/status/${PLATFORM_NODE_ID:-$NODE_NAME}" \
+        2>/dev/null | json_val apiToken)
+
+    if [ -z "$DAEMON_TOKEN" ]; then
+        echo "      ⚠️ 无法获取 apiToken，使用 enrollToken 做临时 token"
+        DAEMON_TOKEN="$ENROLL_TOKEN"
+    fi
+
+    # 构建 Console WSS 地址（始终 wss://）
+    CONSOLE_WSS="wss://${CONSOLE}/ws/daemon"
+
+    cat > "$DAEMON_CONF_DIR/config.toml" <<DAEMONEOF
+# synon-daemon 配置
+node_id       = "${PLATFORM_NODE_ID:-$NODE_NAME}"
+console_url   = "$CONSOLE_WSS"
+api_token     = "$DAEMON_TOKEN"
+claw_port     = $CLAW_PORT
+gnb_conf_dir  = "$GNB_CONF"
+DAEMONEOF
+    chmod 600 "$DAEMON_CONF_DIR/config.toml"
+    echo "      配置已写入: $DAEMON_CONF_DIR/config.toml"
+
+    # 注册 systemd 服务
+    if command -v systemctl &>/dev/null; then
+        cat > /etc/systemd/system/synon-daemon.service <<SVCEOF
+[Unit]
+Description=SynonClaw Daemon — WSS Control Plane Agent
+After=network-online.target gnb.service
+Wants=network-online.target
+
+[Service]
+Type=simple
+ExecStart=$DAEMON_BIN --config $DAEMON_CONF_DIR/config.toml
+Restart=always
+RestartSec=5
+Environment=RUST_LOG=info
+
+[Install]
+WantedBy=multi-user.target
+SVCEOF
+        systemctl daemon-reload
+        systemctl enable synon-daemon
+        systemctl start synon-daemon
+        sleep 5
+        if systemctl is-active synon-daemon >/dev/null 2>&1; then
+            echo "      ✅ synon-daemon 已启动并连接 Console ($CONSOLE_WSS)"
+        else
+            echo "      ⚠️ synon-daemon 启动失败"
+            journalctl -u synon-daemon --no-pager -n 8 2>/dev/null || true
+        fi
+    fi
+else
+    echo "      ⚠️ synon-daemon 未安装（此架构暂无预编译包）"
+    echo "      节点将以 HTTP 轮询 Agent 模式工作（功能受限）"
+fi
+
+# ============================================
+# Step 9: 安装 node-agent.sh（兜底 HTTP 上报）
+# ============================================
+# 设计说明：
+#   - synon-daemon 已安装时：agent 每 60s 补充上报一次系统指标（CPU/内存/磁盘）
+#   - synon-daemon 未安装时：agent 每 10s 上报，是唯一心跳来源
+echo "[9/10] 安装监控 Agent（兜底上报）..."
+
 curl -sSf "$API_BASE/api/enroll/node-agent.sh" -o /opt/gnb/bin/node-agent.sh 2>/dev/null \
   || echo "      ⚠️ 从 Console 下载 agent 失败，跳过"
 chmod +x /opt/gnb/bin/node-agent.sh 2>/dev/null || true
 
-# 创建 agent 环境配置（TOKEN 统一认证）
-cat > /opt/gnb/bin/agent.env << AGENTEOF
+cat > /opt/gnb/bin/agent.env <<AGENTEOF
 CONSOLE_URL=$API_BASE
 TOKEN=$TOKEN
 NODE_ID=${PLATFORM_NODE_ID:-$NODE_NAME}
@@ -603,13 +621,21 @@ CLAW_PORT=$CLAW_PORT
 AGENTEOF
 chmod 600 /opt/gnb/bin/agent.env
 
-# 清理旧命名的 agent 服务（如果存在）
+# 清理旧命名的 agent 服务
 systemctl stop gnb-agent.timer 2>/dev/null || true
 systemctl disable gnb-agent.timer 2>/dev/null || true
 rm -f /etc/systemd/system/gnb-agent.{service,timer} 2>/dev/null || true
 
+# 按 daemon 安装情况调整 agent 上报频率
+# daemon 已安装 → 60s 补充上报；未安装 → 10s 主动上报
+AGENT_INTERVAL="10s"
+if [ "$DAEMON_INSTALLED" = "true" ]; then
+    AGENT_INTERVAL="60s"
+    echo "      synon-daemon 已安装，agent 切换为 60s 补充上报模式"
+fi
+
 if command -v systemctl &>/dev/null; then
-  cat > /etc/systemd/system/node-agent.service << SVCEOF
+  cat > /etc/systemd/system/node-agent.service <<SVCEOF
 [Unit]
 Description=GNB Node Monitor Agent
 After=gnb.service
@@ -621,13 +647,13 @@ EnvironmentFile=/opt/gnb/bin/agent.env
 ExecStart=/opt/gnb/bin/node-agent.sh
 SVCEOF
 
-  cat > /etc/systemd/system/node-agent.timer << TMREOF
+  cat > /etc/systemd/system/node-agent.timer <<TMREOF
 [Unit]
 Description=GNB Agent Timer
 
 [Timer]
 OnBootSec=15s
-OnUnitActiveSec=10s
+OnUnitActiveSec=$AGENT_INTERVAL
 AccuracySec=1s
 
 [Install]
@@ -637,29 +663,30 @@ TMREOF
   systemctl daemon-reload
   systemctl enable node-agent.timer
   systemctl start node-agent.timer
-  echo "      ✅ Agent 已安装（systemd timer 每 10s）"
+  echo "      ✅ Agent 已安装（systemd timer ${AGENT_INTERVAL}）"
 else
   (crontab -l 2>/dev/null; echo "* * * * * /opt/gnb/bin/node-agent.sh") | sort -u | crontab -
   echo "      ✅ Agent 已安装（cron 每分钟）"
 fi
 
 # ============================================
-# Step 12: 通知 Console 已就绪
+# Step 10: 通知 Console 已就绪
 # ============================================
-echo "[12/12] 通知 Console 节点已就绪..."
+echo "[10/10] 通知 Console 节点已就绪..."
 
 READY_RESP=$(curl -sS -X POST "$API_BASE/api/enroll/${PLATFORM_NODE_ID:-$NODE_NAME}/ready" \
   -H "$ENROLL_AUTH" \
   -H "Content-Type: application/json" \
-  -d "{\"sshUser\":\"$SSH_USER\",\"sshPort\":22,\"tunAddr\":\"$TUN_ADDR\"}")
+  -d "{\"tunAddr\":\"$TUN_ADDR\",\"daemonInstalled\":$( [ \"$DAEMON_INSTALLED\" = \"true\" ] && echo true || echo false )}")
 
 echo "      $(echo "$READY_RESP" | json_val message)"
 
 echo ""
 echo "  ╔══════════════════════════════════════╗"
 echo "  ║  ✅ 初始化完成                        ║"
-echo "  ║  GNB TUN: $TUN_ADDR                  ║"
-echo "  ║  Agent: 推模式监控已启动              ║"
-echo "  ║  OpenClaw: $([ "$CLAW_INSTALLED" = "true" ] && echo "已安装 + Token 已注册" || echo "未安装")          ║"
+echo "  ║  GNB TUN:     $TUN_ADDR              ║"
+echo "  ║  Daemon:      $([ "$DAEMON_INSTALLED" = "true" ] && echo "✅ WSS 长连接控制面" || echo "⚠️ 未安装（功能受限）")  ║"
+echo "  ║  OpenClaw:    $([ "$CLAW_INSTALLED" = "true" ] && echo "✅ 已注册" || echo "⚠️ 未安装")        ║"
+echo "  ║  Agent:       ✅ 推模式监控已启动      ║"
 echo "  ╚══════════════════════════════════════╝"
 echo ""
