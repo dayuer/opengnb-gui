@@ -511,6 +511,16 @@ if [ "$CLAW_INSTALLED" = "true" ]; then
 CLAWEOF
     chmod 600 "$CLAW_CONFIG_DIR/openclaw.json"
 
+    # 动态检测 openclaw 实际路径（nvm/n 安装的 Node.js 不在 /usr/local/bin/）
+    OPENCLAW_BIN=$(command -v openclaw 2>/dev/null \
+        || find /root/.nvm /root/.n /usr/local -name openclaw -type f 2>/dev/null | head -1 \
+        || echo "/usr/local/bin/openclaw")
+    # 创建符号链接方便 PATH 查找
+    if [ "$OPENCLAW_BIN" != "/usr/local/bin/openclaw" ] && [ -f "$OPENCLAW_BIN" ]; then
+        ln -sf "$OPENCLAW_BIN" /usr/local/bin/openclaw 2>/dev/null || true
+    fi
+    echo "      openclaw 路径: $OPENCLAW_BIN"
+
     if command -v systemctl &>/dev/null; then
         cat > /etc/systemd/system/openclaw-gateway.service <<SVCEOF
 [Unit]
@@ -520,7 +530,7 @@ After=network.target gnb.service
 [Service]
 Type=simple
 Environment=PATH=/usr/local/bin:/usr/bin:/bin
-ExecStart=/usr/local/bin/openclaw gateway
+ExecStart=$OPENCLAW_BIN gateway
 Restart=always
 RestartSec=5
 WorkingDirectory=/root
