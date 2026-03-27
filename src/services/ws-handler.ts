@@ -502,7 +502,7 @@ function createWsHandlers(deps: {
       pingTimer = setInterval(() => {
         if (ws.readyState !== 1) return;
         pendingPingTs = Date.now();
-        (ws as unknown as { ping?: (data: Buffer, mask: boolean, cb?: () => void) => void }).ping?.(Buffer.alloc(0), true);
+        (ws as unknown as { ping?: (data: Buffer, mask: boolean, cb?: () => void) => void }).ping?.(Buffer.alloc(0), false);
       }, 10000);
 
       // 接收 Pong — 记录 RTT 写入 monitor 状态
