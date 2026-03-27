@@ -139,18 +139,30 @@ export const NodeDetailPanel = {
     } else {
       html += `<div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">`;
       for (const skill of installedSkills) {
+        const skillName  = skill.name || skill.id || '';
+        const skillId    = skill.name || skill.id || '';  // openclaw 用 name 作 ID
+        const isReady    = skill.eligible === true;
+        const isBundled  = skill.bundled === true;
+        const emoji      = skill.emoji || '';
         html += `
-          <div class="bg-elevated/40 border border-border-default/30 p-4 rounded-xl flex items-center justify-between group/chip transition-all hover:bg-elevated hover:border-primary/30">
+          <div class="bg-elevated/40 border ${isReady ? 'border-emerald-500/30' : 'border-border-default/30'} p-4 rounded-xl flex items-center justify-between group/chip transition-all hover:bg-elevated hover:border-primary/30">
             <div class="flex items-center gap-3">
-              <div class="w-10 h-10 rounded-lg bg-surface flex items-center justify-center text-primary shadow-sm">
-                <span class="[&_svg]:w-5 [&_svg]:h-5">${L(skill.icon || 'box')}</span>
+              <div class="relative w-10 h-10 rounded-lg bg-surface flex items-center justify-center text-primary shadow-sm">
+                ${emoji
+                  ? `<span class="text-lg leading-none">${escHtml(emoji)}</span>`
+                  : `<span class="[&_svg]:w-5 [&_svg]:h-5">${L(skill.icon || 'box')}</span>`
+                }
+                ${isReady
+                  ? `<span class="absolute -top-1 -right-1 w-3 h-3 rounded-full bg-emerald-500 border-2 border-surface" title="Ready — 依赖已就绪"></span>`
+                  : `<span class="absolute -top-1 -right-1 w-3 h-3 rounded-full bg-amber-400/80 border-2 border-surface" title="Not ready — 依赖未满足"></span>`
+                }
               </div>
               <div>
-                <p class="text-sm font-medium text-text-primary whitespace-nowrap overflow-hidden text-ellipsis w-24">${escHtml(skill.name || skill.id)}</p>
-                <p class="text-[10px] text-text-muted font-mono">${escHtml(skill.version || 'v1.0.0')}</p>
+                <p class="text-sm font-medium text-text-primary whitespace-nowrap overflow-hidden text-ellipsis w-24">${escHtml(skillName)}</p>
+                <p class="text-[10px] text-text-muted font-mono">${isReady ? '<span class="text-emerald-500 font-semibold">Ready</span>' : '<span class="text-amber-400">Not ready</span>'}${isBundled ? ' · 内置' : ''}</p>
               </div>
             </div>
-            <button class="w-8 h-8 rounded-lg flex items-center justify-center text-danger opacity-0 group-hover/chip:opacity-100 hover:bg-danger/10 transition-all cursor-pointer" title="卸载" onclick="event.stopPropagation();Nodes.uninstallSkill('${nid}', '${safeAttr(skill.id)}')">
+            <button class="w-8 h-8 rounded-lg flex items-center justify-center text-danger opacity-0 group-hover/chip:opacity-100 hover:bg-danger/10 transition-all cursor-pointer" title="卸载" onclick="event.stopPropagation();Nodes.uninstallSkill('${nid}', '${safeAttr(skillId)}')">
               <span class="[&_svg]:w-4 [&_svg]:h-4">${L('trash-2')}</span>
             </button>
           </div>
