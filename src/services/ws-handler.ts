@@ -204,10 +204,16 @@ function createWsHandlers(deps: {
 
       log.info(`SSH 连接: 节点 ${nodeConfig.name || targetNodeId}`);
 
+      // WS 层 ping 保活（防 Nginx/LB idle timeout 切断）
+      const sshPing = setInterval(() => {
+        if (ws.readyState === 1) (ws as any).ping?.(Buffer.alloc(0), false);
+      }, 30000);
+
       let sshStream = null;
       try {
         sshStream = await sshManager.shell(nodeConfig, { cols: msg.cols || cols, rows: msg.rows || rows });
       } catch (err: unknown) {
+        clearInterval(sshPing);
         log.error(`SSH Shell 创建失败: ${err instanceof Error ? err.message : String(err)}`);
         ws.send(`\r\n\x1b[31m连接失败: ${err instanceof Error ? err.message : String(err)}\x1b[0m\r\n`);
         ws.close(4005, 'SSH 连接失败');
@@ -272,6 +278,7 @@ function createWsHandlers(deps: {
       });
 
       ws.on('close', () => {
+        clearInterval(sshPing);
         log.debug(`WebSocket 断开: ${targetNodeId}`);
         if (sshStream && !sshStream.destroyed) {
           sshStream.end();
@@ -279,6 +286,7 @@ function createWsHandlers(deps: {
         }
       });
       ws.on('error', (err: Error) => {
+        clearInterval(sshPing);
         log.error(`WebSocket 错误: ${err.message}`);
         if (sshStream && !sshStream.destroyed) sshStream.destroy();
       });
@@ -321,6 +329,11 @@ function createWsHandlers(deps: {
       nodeId = msg.nodeId || null;
       log.info(`AI 连接: nodeId=${nodeId}, user=${authResult.userId}`);
 
+      // WS 层 ping 保活（防 Nginx/LB idle timeout 切断空闲 AI 会话）
+      const aiPing = setInterval(() => {
+        if (ws.readyState === 1) (ws as any).ping?.(Buffer.alloc(0), false);
+      }, 30000);
+
       const nodeConfig = aiOps._resolveNode(nodeId);
       let activeHandle: { kill(): void } | null = null;
 
@@ -346,11 +359,13 @@ function createWsHandlers(deps: {
       });
 
       ws.on('close', () => {
+        clearInterval(aiPing);
         log.debug('AI 会话断开');
         if (activeHandle) activeHandle.kill();
       });
 
       ws.on('error', (err: Error) => {
+        clearInterval(aiPing);
         log.error(`AI WebSocket 错误: ${err.message}`);
         if (activeHandle) activeHandle.kill();
       });
