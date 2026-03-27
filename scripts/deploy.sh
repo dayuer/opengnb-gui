@@ -194,7 +194,7 @@ fi
 
 # 获取证书（如已存在则跳过）
 if [ ! -d "/etc/letsencrypt/live/$DOMAIN" ]; then
-    certbot --nginx -d $DOMAIN --non-interactive --agree-tos --email "${CERTBOT_EMAIL:?'请设置 CERTBOT_EMAIL 环境变量'}" || echo "      证书获取失败（请确保 DNS 已指向此服务器）"
+    certbot --nginx -d $DOMAIN --non-interactive --agree-tos --email "${CERTBOT_EMAIL:-admin@synonclaw.com}" || echo "      证书获取失败（请确保 DNS 已指向此服务器）"
 else
     echo "      证书已存在"
 fi
