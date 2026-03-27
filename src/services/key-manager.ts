@@ -798,35 +798,37 @@ class KeyManager {
    */
   async rotateKeyPair(
     wsHandlers: { sendToDaemon: Function; daemonConns: Map<string, unknown> },
-    sshManager: { disconnectAll: () => void }
+    sshManager: { closeAll: () => void }
   ) {
     log.info('密钥轮换开始...');
 
     const oldPubKey = this.getPublicKey();
-    // ssh-keygen 规范：-f <path> 生成私钥=<path>，公钥=<path>.pub
-    // 用日期戳命名临时文件，便于审计溯源
-    const rotateTs   = new Date().toISOString().replace(/[-:T]/g, '').slice(0, 15); // YYYYMMDDHHMMSS
-    const newKeyPath    = path.join(this.keyDir, `console_ed25519_${rotateTs}`);
-    const newPubKeyPath = newKeyPath + '.pub';   // → console_ed25519_YYYYMMDDHHMMSS.pub
 
-    // 清理可能残留的旧临时文件
-    for (const f of [newKeyPath, newPubKeyPath]) {
-      try { fs.unlinkSync(f); } catch { /* ignore */ }
-    }
+    // 备份旧密钥（用于 Phase 2 识别 + 回滚）
+    const backupTs = new Date().toISOString().replace(/[-:T]/g, '').slice(0, 15);
+    const backupPrivate = `${this.privateKeyPath}.bak-${backupTs}`;
+    const backupPublic = `${this.publicKeyPath}.bak-${backupTs}`;
+    fs.copyFileSync(this.privateKeyPath, backupPrivate);
+    fs.copyFileSync(this.publicKeyPath, backupPublic);
 
-    // 生成新密钥对（ssh-keygen 优先 OpenSSH 格式，fallback crypto 模块）
+    // 直接覆盖原文件名生成新密钥对
     try {
-      execSync(`ssh-keygen -t ed25519 -f "${newKeyPath}" -N "" -C "gnb-console-rotated-${Date.now()}"`, { stdio: 'pipe' });
+      fs.unlinkSync(this.privateKeyPath);
+      fs.unlinkSync(this.publicKeyPath);
+    } catch { /* 忽略 */ }
+
+    try {
+      execSync(`ssh-keygen -t ed25519 -f "${this.privateKeyPath}" -N "" -C "gnb-console-rotated-${Date.now()}"`, { stdio: 'pipe' });
     } catch {
       const { generateKeyPairSync } = crypto;
       const { privateKey, publicKey } = generateKeyPairSync('ed25519', {
         publicKeyEncoding: { type: 'spki', format: 'pem' },
         privateKeyEncoding: { type: 'pkcs8', format: 'pem' },
       });
-      fs.writeFileSync(newKeyPath, privateKey, { mode: 0o600 });
-      fs.writeFileSync(newPubKeyPath, publicKey);
+      fs.writeFileSync(this.privateKeyPath, privateKey, { mode: 0o600 });
+      fs.writeFileSync(this.publicKeyPath, publicKey);
     }
-    const newPubKey = fs.readFileSync(newPubKeyPath, 'utf-8').trim();
+    const newPubKey = fs.readFileSync(this.publicKeyPath, 'utf-8').trim();
     log.info(`新公钥已生成: ${newPubKey.slice(0, 40)}...`);
 
     const onlineDaemons = Array.from(wsHandlers.daemonConns.keys() as IterableIterator<string>);
@@ -852,10 +854,8 @@ class KeyManager {
     }
     if (offlineIds.length > 0) log.info(`${offlineIds.length} 个离线节点已标记 pending`);
 
-    // 切换 Console 密钥（原子重命名）
-    fs.renameSync(newKeyPath, this.privateKeyPath);
-    fs.renameSync(newPubKeyPath, this.publicKeyPath);
-    sshManager.disconnectAll();
+    // Console 已切换到新私钥（文件已原地覆盖），重置 SSH 连接池
+    sshManager.closeAll();
     log.info('Console 已切换到新私钥，SSH 连接池已重置');
 
     // Phase 2: 删除旧公钥
@@ -869,6 +869,10 @@ class KeyManager {
         }, 20000)
       ));
     }
+
+    // 清理备份文件（轮换成功后）
+    try { fs.unlinkSync(backupPrivate); } catch { /* ignore */ }
+    try { fs.unlinkSync(backupPublic); } catch { /* ignore */ }
 
     log.info(`密钥轮换完成: ${onlineDaemons.length} 在线已同步, ${offlineIds.length} 离线待同步`);
     return { onlineCount: onlineDaemons.length, pendingCount: offlineIds.length };
