@@ -1,5 +1,5 @@
 #!/bin/bash
-# SynonClaw Console — 节点初始化脚本 v0.9.0
+# SynonClaw Console — 节点初始化脚本 v0.9.1
 #
 # 架构说明（v0.9 完全合并版）：
 #   Console ↔ synon-daemon  WSS 长连接（控制面）
@@ -41,7 +41,7 @@ json_val() { python3 -c "import sys,json; print(json.load(sys.stdin).get('$1',''
 
 echo ""
 echo "  ╔══════════════════════════════════════╗"
-echo "  ║  SynonClaw Console — 节点初始化 v0.9.0     ║"
+echo "  ║  SynonClaw Console — 节点初始化 v0.9.1     ║"
 echo "  ╚══════════════════════════════════════╝"
 echo ""
 echo "  Console:  $CONSOLE ($API_BASE)"
@@ -111,82 +111,36 @@ ln -sf /opt/gnb/bin/gnb_ctl /usr/local/bin/gnb_ctl
 echo "      ✅ GNB 编译安装完成"
 
 # ============================================
-# Step 2: 获取 synon-daemon（预编译 → 源码编译 → 跳过）
+# Step 2: 获取 synon-daemon（仅从 Console mirror 下载预编译包）
+# Console 预编译原则：节点不安装 Rust，也不做源码编译
 # ============================================
 echo "[2/10] 获取 synon-daemon..."
 
 ARCH=$(uname -m)
+# 架构标识与 synon-daemon self_updater.rs arch_tag() 保持一致（均带 -musl 后缀）
 case "$ARCH" in
-    x86_64)         DAEMON_ARCH="x86_64-musl"  ; RUST_TARGET="x86_64-unknown-linux-musl"  ;;
-    aarch64|arm64)  DAEMON_ARCH="aarch64-musl" ; RUST_TARGET="aarch64-unknown-linux-musl" ;;
-    armv7l)         DAEMON_ARCH="armv7-musl"   ; RUST_TARGET="armv7-unknown-linux-musleabihf" ;;
-    mips*)          DAEMON_ARCH="mips-musl"    ; RUST_TARGET="mips-unknown-linux-musl"    ;;
-    *)              DAEMON_ARCH=""             ; RUST_TARGET="" ;;
+    x86_64)         DAEMON_ARCH="x86_64-musl" ;;
+    aarch64|arm64)  DAEMON_ARCH="aarch64-musl" ;;
+    armv7l)         DAEMON_ARCH="armv7-musl" ;;
+    mips*)          DAEMON_ARCH="mips-musl" ;;
+    *)              DAEMON_ARCH="" ;;
 esac
 
 DAEMON_INSTALLED=false
 
-# 优先：从 Console 镜像下载预编译二进制
 if [ -n "$DAEMON_ARCH" ]; then
     DAEMON_URL="$API_BASE/api/mirror/daemon/synon-daemon-${DAEMON_ARCH}"
-    echo "      架构: $ARCH → 尝试下载 $DAEMON_ARCH..."
-    if curl -sf -m 60 "$DAEMON_URL" -o "$DAEMON_BIN" 2>/dev/null; then
+    echo "      架构: $ARCH → 下载 synon-daemon-${DAEMON_ARCH}..."
+    if curl -sf -m 120 "$DAEMON_URL" -o "$DAEMON_BIN" 2>/dev/null; then
         chmod +x "$DAEMON_BIN"
         DAEMON_INSTALLED=true
-        echo "      ✅ synon-daemon 预编译包已下载"
+        echo "      ✅ synon-daemon 已下载"
     else
-        echo "      ⚠️ 预编译包不可用，尝试源码编译..."
+        echo "      ❌ synon-daemon 下载失败: $DAEMON_URL"
+        echo "         Console 请先在 mirror 放置对应架构的预编译包"
     fi
-fi
-
-# 回退：源码编译（Rust musl 静态编译）
-if [ "$DAEMON_INSTALLED" != "true" ] && [ -n "$RUST_TARGET" ]; then
-    echo "      安装 Rust 工具链中（首次约 2-3 分钟）..."
-    if ! command -v cargo &>/dev/null; then
-        curl -sSf https://sh.rustup.rs | sh -s -- -y --no-modify-path --default-toolchain stable 2>&1 | tail -3
-        export PATH="$HOME/.cargo/bin:$PATH"
-    fi
-
-    # 安装 musl-tools（静态链接所需）
-    if command -v apt-get &>/dev/null; then
-        apt-get install -y -qq musl-tools musl-dev 2>/dev/null || true
-    elif command -v yum &>/dev/null; then
-        yum install -y -q musl-libc-static 2>/dev/null || true
-    fi
-
-    # 获取源代码（Console 镜像 → GitHub fallback）
-    DAEMON_SRC_URL="$API_BASE/api/mirror/daemon/synon-daemon-src.tar.gz"
-    cd /tmp && rm -rf synon-daemon-src
-    echo "      下载源码..."
-    if curl -sf -m 60 "$DAEMON_SRC_URL" -o /tmp/synon-daemon-src.tar.gz 2>/dev/null; then
-        mkdir -p synon-daemon-src
-        tar xzf synon-daemon-src.tar.gz -C synon-daemon-src --strip-components=1
-    else
-        GITHUB_SRC="https://github.com/dayuer/synon-daemon/archive/refs/heads/main.tar.gz"
-        if curl -sSL -m 120 "$GITHUB_SRC" -o /tmp/synon-daemon-src.tar.gz 2>/dev/null; then
-            mkdir -p synon-daemon-src
-            tar xzf synon-daemon-src.tar.gz -C synon-daemon-src --strip-components=1
-        else
-            echo "      ⚠️ 源码下载失败，跳过 daemon 安装（节点功能受限）"
-        fi
-    fi
-
-    if [ -d /tmp/synon-daemon-src ] && [ -f /tmp/synon-daemon-src/Cargo.toml ]; then
-        cd /tmp/synon-daemon-src
-        export PATH="$HOME/.cargo/bin:$PATH"
-        rustup target add "$RUST_TARGET" 2>/dev/null || true
-        echo "      编译中（约 3-5 分钟）..."
-        if RUSTFLAGS="-C target-feature=+crt-static" \
-           cargo build --release --target "$RUST_TARGET" 2>&1 | tail -3; then
-            cp "target/${RUST_TARGET}/release/synon-daemon" "$DAEMON_BIN"
-            chmod +x "$DAEMON_BIN"
-            DAEMON_INSTALLED=true
-            echo "      ✅ synon-daemon 源码编译完成"
-        else
-            echo "      ⚠️ 编译失败，节点将以受限模式运行"
-        fi
-        rm -rf /tmp/synon-daemon-src /tmp/synon-daemon-src.tar.gz
-    fi
+else
+    echo "      ⚠️ 不支持的架构: $ARCH，跳过 daemon 安装"
 fi
 
 [ "$DAEMON_INSTALLED" != "true" ] && echo "      ⚠️ synon-daemon 未安装（节点将缺少 WSS 控制面）"
@@ -377,9 +331,9 @@ else
 fi
 
 # ============================================
-# Step 6: 启动 GNB + 配置并启动 synon-daemon
+# Step 6a: 启动 GNB
 # ============================================
-echo "[6/10] 启动 GNB + synon-daemon..."
+echo "[6/10] 启动 GNB..."
 
 if command -v systemctl &>/dev/null; then
     cat > /etc/systemd/system/gnb.service <<SVCEOF
@@ -435,7 +389,8 @@ if [ "$GNB_TUN_UP" = "true" ] && [ -n "$CONSOLE_GNB_TUN_ADDR" ]; then
     fi
 fi
 
-# --- 配置并启动 synon-daemon（已有 TUN / node_id / api_token）---
+# --- Step 6b: 配置并启动 synon-daemon ---
+echo "      配置 synon-daemon..."
 if [ "$DAEMON_INSTALLED" = "true" ]; then
     DAEMON_CONF_DIR="/opt/gnb/bin"
     mkdir -p "$DAEMON_CONF_DIR"
@@ -456,6 +411,8 @@ CONSOLE_URL=$CONSOLE_BASE
 TOKEN=$DAEMON_TOKEN
 NODE_ID=${PLATFORM_NODE_ID:-$NODE_NAME}
 GNB_NODE_ID=$GNB_NODE_ID
+# GNB mmap 路径（gnb_ctl -b 参数，默认由 config.rs 推断，此处显式指定避免歧义）
+GNB_MAP_PATH=/opt/gnb/conf/${GNB_NODE_ID}/gnb.map
 CLAW_PORT=18789
 DAEMONEOF
     chmod 600 "$DAEMON_CONF_DIR/agent.conf"
