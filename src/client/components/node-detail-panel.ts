@@ -315,7 +315,6 @@ export const NodeDetailPanel = {
       <div class="flex items-center gap-2 text-text-muted text-sm py-8 justify-center">
         <span class="[&_svg]:w-4 [&_svg]:h-4 animate-spin">${L('loader-2')}</span> 加载技能列表…
       </div>
-      <div id="task-queue-${nid}" class="mt-6"></div>
     </div>`;
   },
 
@@ -371,10 +370,8 @@ export const NodeDetailPanel = {
         </button>
       </div>
       ${skillsHtml}
-      <div id="task-queue-${safeAttr(nid)}" class="mt-6"></div>
     `;
     refreshIcons();
-    this.loadTaskQueue(nid);
   },
 
   /** @private 渲染分类技能内容 */
