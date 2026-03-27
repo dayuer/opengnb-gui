@@ -232,7 +232,7 @@ function initRoutes(deps: any) {
   // Playbook 编排路由
   const playbookEngine = new PlaybookEngine(store, taskQueue);
   app.use('/api/playbooks', requireAuth, createPlaybookRoutes(playbookEngine));
-  app.use('/api/claw', requireAuth, requireRole('admin', 'operator'), audit.middleware('claw'), createClawRouter({ clawRPC: daemonProxy, getNodesConfig: () => keyManager.getApprovedNodesConfig() }));
+  app.use('/api/claw', requireAuth, requireRole('admin', 'operator'), audit.middleware('claw'), createClawRouter({ clawRPC: daemonProxy, getNodesConfig: () => keyManager.getApprovedNodesConfig(), taskQueue }));
 
   // Provision 路由 — 仅管理员
   app.post('/api/provision/:id', requireAuth, requireRole('admin'), strictLimit, audit.middleware('provision'), async (req: Request, res: Response) => {

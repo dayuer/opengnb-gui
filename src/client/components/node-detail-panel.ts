@@ -22,9 +22,11 @@ export const NodeDetailPanel = {
     const ts = tabState;
     const tabs = [
       { key: 'overview', icon: 'bar-chart-3', label: '概览' },
-      { key: 'claw', icon: 'bot', label: 'OpenClaw' },
-      { key: 'terminal', icon: 'terminal', label: '终端' },
-      { key: 'skills', icon: 'blocks', label: '技能' },
+      { key: 'claw',     icon: 'bot',          label: 'OpenClaw' },
+      { key: 'models',   icon: 'sparkles',      label: 'AI 模型' },
+      { key: 'channels', icon: 'radio',         label: '渠道' },
+      { key: 'terminal', icon: 'terminal',      label: '终端' },
+      { key: 'skills',   icon: 'blocks',        label: '技能' },
     ];
 
     let html = `<div>
@@ -35,16 +37,18 @@ export const NodeDetailPanel = {
 
     if (ts.tab === 'overview') html += this.renderOverview(node);
     else if (ts.tab === 'terminal') html += this.renderTerminal(node);
-    else if (ts.tab === 'skills') html += this.renderSkills(node);
-    else html += `<div class="text-text-muted text-sm">${L('loader')} 加载中…</div>`;
+    else if (ts.tab === 'skills') html += this.renderSkillsSkeleton(node.id);
+    else html += `<div class="flex items-center gap-2 text-text-muted text-sm py-8 justify-center"><span class="[&_svg]:w-4 [&_svg]:h-4 animate-spin">${L('loader-2')}</span> 加载中…</div>`;
 
     html += `</div></div>`;
     panel.innerHTML = html;
     refreshIcons();
 
-    if (ts.tab === 'claw') this.loadClawTab(node.id, ts.clawSubTab);
+    if (ts.tab === 'claw')     this.loadClawTab(node.id, ts.clawSubTab);
+    if (ts.tab === 'models')   this.loadModelsTab(node.id);
+    if (ts.tab === 'channels') this.loadChannelsTab(node.id);
     if (ts.tab === 'terminal') this.initChat(node.id);
-    if (ts.tab === 'skills') this.loadTaskQueue(node.id);
+    if (ts.tab === 'skills')   this.loadSkillsTab(node);
   },
 
   // ═══════════════════════════════════════
@@ -106,79 +110,248 @@ export const NodeDetailPanel = {
     return html;
   },
 
-  renderSkills(node: any) {
-    // 优先从监控数据（agent 上报）获取 skills，降级到 DB 记录
-    const monNode = App.nodesData.find((n: any) => n.id === node.id);
-    const installedSkills = monNode?.skills || node.skills || [];
-    const nid = safeAttr(node.id);
-
-    let html = `
-    <div class="px-6 pb-8 pt-4 bg-surface/30 rounded-xl border border-border-default/20">
-      <div class="flex items-center justify-between mb-8 border-b border-border-default/20 pb-4">
-        <h4 class="text-xl font-headline font-bold tracking-tight text-text-primary">Installed Skills</h4>
-        <div class="flex gap-2">
-          <button class="px-4 py-1.5 rounded-full bg-primary/10 text-primary hover:bg-primary hover:text-white text-xs font-bold uppercase tracking-wider flex items-center gap-2 transition-all cursor-pointer" onclick="App.switchPage('skills')">
-            <span class="[&_svg]:w-3.5 [&_svg]:h-3.5">${L('plus')}</span> 部署新技能
-          </button>
-        </div>
+  /** 技能 Tab 骨架（同步，立即展示 loading 状态） */
+  renderSkillsSkeleton(nodeId: string) {
+    const nid = safeAttr(nodeId);
+    return `
+    <div id="skills-panel-${nid}" class="px-6 pb-8 pt-4 bg-surface/30 rounded-xl border border-border-default/20">
+      <div class="flex items-center justify-between mb-6 border-b border-border-default/20 pb-4">
+        <h4 class="text-xl font-headline font-bold tracking-tight text-text-primary">技能管理</h4>
+        <button class="px-4 py-1.5 rounded-full bg-primary/10 text-primary hover:bg-primary hover:text-white text-xs font-bold uppercase tracking-wider flex items-center gap-2 transition-all cursor-pointer" onclick="App.switchPage('skills')">
+          <span class="[&_svg]:w-3.5 [&_svg]:h-3.5">${L('plus')}</span> 技能商店
+        </button>
       </div>
-    `;
+      <div class="flex items-center gap-2 text-text-muted text-sm py-8 justify-center">
+        <span class="[&_svg]:w-4 [&_svg]:h-4 animate-spin">${L('loader-2')}</span> 加载技能列表…
+      </div>
+      <div id="task-queue-${nid}" class="mt-6"></div>
+    </div>`;
+  },
 
-    if (installedSkills.length === 0) {
-      html += `
-        <div class="flex flex-col items-center justify-center py-12 text-text-muted">
-          <div class="w-16 h-16 rounded-full bg-surface mb-4 flex items-center justify-center border border-border-default/20">
-            <span class="[&_svg]:w-8 [&_svg]:h-8 opacity-50">${L('box')}</span>
-          </div>
-          <p class="text-sm">此节点暂未安装任何技能</p>
-          <button class="mt-4 px-4 py-1.5 rounded-full bg-primary/10 text-primary hover:bg-primary hover:text-white text-xs font-bold uppercase transition-all cursor-pointer" onclick="App.switchPage('skills')">
-            前往技能商店
-          </button>
-        </div>
-      `;
-    } else {
-      html += `<div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">`;
-      for (const skill of installedSkills) {
-        const skillName  = skill.name || skill.id || '';
-        const skillId    = skill.name || skill.id || '';  // openclaw 用 name 作 ID
-        const isReady    = skill.eligible === true;
-        const isBundled  = skill.bundled === true;
-        const emoji      = skill.emoji || '';
-        html += `
-          <div class="bg-elevated/40 border ${isReady ? 'border-emerald-500/30' : 'border-border-default/30'} p-4 rounded-xl flex items-center justify-between group/chip transition-all hover:bg-elevated hover:border-primary/30">
-            <div class="flex items-center gap-3">
-              <div class="relative w-10 h-10 rounded-lg bg-surface flex items-center justify-center text-primary shadow-sm">
-                ${emoji
-                  ? `<span class="text-lg leading-none">${escHtml(emoji)}</span>`
-                  : `<span class="[&_svg]:w-5 [&_svg]:h-5">${L(skill.icon || 'box')}</span>`
-                }
-                ${isReady
-                  ? `<span class="absolute -top-1 -right-1 w-3 h-3 rounded-full bg-emerald-500 border-2 border-surface" title="Ready — 依赖已就绪"></span>`
-                  : `<span class="absolute -top-1 -right-1 w-3 h-3 rounded-full bg-amber-400/80 border-2 border-surface" title="Not ready — 依赖未满足"></span>`
-                }
-              </div>
-              <div>
-                <p class="text-sm font-medium text-text-primary whitespace-nowrap overflow-hidden text-ellipsis w-24">${escHtml(skillName)}</p>
-                <p class="text-[10px] text-text-muted font-mono">${isReady ? '<span class="text-emerald-500 font-semibold">Ready</span>' : '<span class="text-amber-400">Not ready</span>'}${isBundled ? ' · 内置' : ''}</p>
-              </div>
-            </div>
-            <button class="w-8 h-8 rounded-lg flex items-center justify-center text-danger opacity-0 group-hover/chip:opacity-100 hover:bg-danger/10 transition-all cursor-pointer" title="卸载" onclick="event.stopPropagation();Nodes.uninstallSkill('${nid}', '${safeAttr(skillId)}')">
-              <span class="[&_svg]:w-4 [&_svg]:h-4">${L('trash-2')}</span>
-            </button>
-          </div>
-        `;
+  /** 技能 Tab 异步渲染入口：拉商店数据 + 分类渲染 */
+  async loadSkillsTab(node: any) {
+    const nid = node.id;
+    const panel = document.getElementById(`skills-panel-${safeAttr(nid)}`);
+    if (!panel) return;
+
+    // 拉商店全量技能
+    let storeSkills: any[] = [];
+    try {
+      const res = await App.authFetch('/api/skills');
+      if (res.ok) {
+        const data = await res.json();
+        storeSkills = data.skills || [];
+      }
+    } catch (_) { /* 商店不可用时降级 */ }
+
+    // 已安装：优先 agent 上报，降级 DB 记录
+    const monNode = App.nodesData.find((n: any) => n.id === nid);
+    const installedSkills: any[] = monNode?.skills || node.skills || [];
+
+    // 已安装 key 集合（openclawname 或 id 均可匹配）
+    const installedKeys = new Set(
+      installedSkills.flatMap((s: any) => [s.id, s.name].filter(Boolean))
+    );
+
+    // 分内置 / 自定义 × 已安装 / 未安装
+    const builtinInstalled   = installedSkills.filter((s: any) => s.bundled === true);
+    const customInstalled    = installedSkills.filter((s: any) => s.bundled !== true);
+    const builtinUninstalled = storeSkills.filter(
+      (s: any) => s.isBuiltin && !installedKeys.has(s.id) && !installedKeys.has(s.name)
+    );
+    const customUninstalled  = storeSkills.filter(
+      (s: any) => !s.isBuiltin && !installedKeys.has(s.id) && !installedKeys.has(s.name)
+    );
+
+    const skillsHtml = this._renderSkillsContent(
+      nid, builtinInstalled, builtinUninstalled, customInstalled, customUninstalled
+    );
+
+    panel.innerHTML = `
+      <div class="flex items-center justify-between mb-6 border-b border-border-default/20 pb-4">
+        <h4 class="text-xl font-headline font-bold tracking-tight text-text-primary">技能管理</h4>
+        <button class="px-4 py-1.5 rounded-full bg-primary/10 text-primary hover:bg-primary hover:text-white text-xs font-bold uppercase tracking-wider flex items-center gap-2 transition-all cursor-pointer" onclick="App.switchPage('skills')">
+          <span class="[&_svg]:w-3.5 [&_svg]:h-3.5">${L('plus')}</span> 技能商店
+        </button>
+      </div>
+      ${skillsHtml}
+      <div id="task-queue-${safeAttr(nid)}" class="mt-6"></div>
+    `;
+    refreshIcons();
+    this.loadTaskQueue(nid);
+  },
+
+  /** @private 渲染分类技能内容 */
+  _renderSkillsContent(
+    nodeId: string,
+    builtinInstalled: any[],
+    builtinUninstalled: any[],
+    customInstalled: any[],
+    customUninstalled: any[]
+  ) {
+    const nid = safeAttr(nodeId);
+    let html = '';
+
+    // ── 内置技能区 ──────────────────────────
+    html += `<div class="mb-8">
+      <div class="flex items-center gap-2 mb-3">
+        <span class="[&_svg]:w-3.5 [&_svg]:h-3.5 text-primary">${L('cpu')}</span>
+        <span class="text-xs font-bold text-primary uppercase tracking-widest">内置技能</span>
+        <span class="text-xs text-text-muted">(${builtinInstalled.length} 已安装)</span>
+      </div>`;
+
+    if (builtinInstalled.length > 0) {
+      html += `<div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-3 mb-3">`;
+      for (const skill of builtinInstalled) {
+        html += this._skillChip(nid, skill, true);
       }
       html += `</div>`;
     }
 
-    // 任务队列占位
-    html += `
-    <div id="task-queue-${nid}" class="mt-6">
-      <div class="text-xs text-text-muted"><span class="[&_svg]:w-3 [&_svg]:h-3 inline-block animate-spin">${L('loader-2')}</span> 加载任务队列...</div>
-    </div>`;
+    if (builtinUninstalled.length > 0) {
+      html += `
+      <details class="group">
+        <summary class="cursor-pointer flex items-center gap-1.5 text-xs text-text-muted hover:text-text-primary transition-colors py-1.5 select-none list-none">
+          <span class="[&_svg]:w-3 [&_svg]:h-3 group-open:rotate-90 transition-transform">${L('chevron-right')}</span>
+          未安装 (${builtinUninstalled.length})
+        </summary>
+        <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-3 mt-2">`;
+      for (const skill of builtinUninstalled) {
+        html += this._storeSkillChip(nid, skill, true);
+      }
+      html += `</div></details>`;
+    }
 
+    if (builtinInstalled.length === 0 && builtinUninstalled.length === 0) {
+      html += `<p class="text-xs text-text-muted py-2">暂无内置技能数据</p>`;
+    }
     html += `</div>`;
+
+    // ── 自定义技能区 ────────────────────────
+    html += `<div>
+      <div class="flex items-center gap-2 mb-3">
+        <span class="[&_svg]:w-3.5 [&_svg]:h-3.5 text-amber-400">${L('blocks')}</span>
+        <span class="text-xs font-bold text-amber-400 uppercase tracking-widest">自定义技能</span>
+        <span class="text-xs text-text-muted">(${customInstalled.length} 已安装)</span>
+      </div>`;
+
+    if (customInstalled.length > 0) {
+      html += `<div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-3 mb-3">`;
+      for (const skill of customInstalled) {
+        html += this._skillChip(nid, skill, false);
+      }
+      html += `</div>`;
+    }
+
+    if (customUninstalled.length > 0) {
+      html += `
+      <details class="group">
+        <summary class="cursor-pointer flex items-center gap-1.5 text-xs text-text-muted hover:text-text-primary transition-colors py-1.5 select-none list-none">
+          <span class="[&_svg]:w-3 [&_svg]:h-3 group-open:rotate-90 transition-transform">${L('chevron-right')}</span>
+          未安装 (${customUninstalled.length})
+        </summary>
+        <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-3 mt-2">`;
+      for (const skill of customUninstalled) {
+        html += this._storeSkillChip(nid, skill, false);
+      }
+      html += `</div></details>`;
+    }
+
+    if (customInstalled.length === 0 && customUninstalled.length === 0) {
+      html += `<p class="text-xs text-text-muted py-2">暂无自定义技能，前往技能商店添加</p>`;
+    }
+    html += `</div>`;
+
     return html;
+  },
+
+  /**
+   * @private 已安装技能卡片
+   * isBuiltin=true → 内置，禁止删除商店，只能 卸载
+   * isBuiltin=false → 自定义，可 卸载 + 删除商店
+   */
+  _skillChip(nid: string, skill: any, isBuiltin: boolean) {
+    const skillName   = skill.name || skill.id || '';
+    const skillId     = skill.name || skill.id || '';  // openclaw 用 name 作 ID
+    const storeId     = skill.storeId || skill.id || '';
+    const isReady     = skill.eligible === true;
+    const emoji       = skill.emoji || '';
+    const badgeColor  = isBuiltin
+      ? 'bg-primary/20 text-primary'
+      : 'bg-amber-400/20 text-amber-300';
+    const badgeLabel  = isBuiltin ? '内置' : '自定义';
+    const border      = isReady ? 'border-emerald-500/30' : 'border-border-default/30';
+    const dot         = isReady
+      ? 'bg-emerald-500" title="Ready — 依赖已就绪'
+      : 'bg-amber-400/80" title="Not ready — 依赖未满足';
+
+    return `
+      <div class="bg-elevated/40 border ${border} p-4 rounded-xl flex flex-col gap-3 transition-all hover:bg-elevated hover:border-primary/30">
+        <div class="flex items-center gap-3">
+          <div class="relative w-10 h-10 rounded-lg bg-surface flex items-center justify-center text-primary shadow-sm shrink-0">
+            ${emoji
+              ? `<span class="text-lg leading-none">${escHtml(emoji)}</span>`
+              : `<span class="[&_svg]:w-5 [&_svg]:h-5">${L(skill.icon || 'box')}</span>`
+            }
+            <span class="absolute -top-1 -right-1 w-3 h-3 rounded-full ${dot} border-2 border-surface"></span>
+          </div>
+          <div class="min-w-0">
+            <p class="text-sm font-medium text-text-primary truncate max-w-[110px]">${escHtml(skillName)}</p>
+            <span class="inline-block text-[9px] font-bold px-1.5 py-0.5 rounded-full ${badgeColor} uppercase tracking-wide mt-0.5">${badgeLabel}</span>
+          </div>
+        </div>
+        <div class="flex items-center gap-1.5 justify-end">
+          <button class="px-2.5 py-1 text-xs rounded-lg text-danger hover:bg-danger/10 border border-danger/20 hover:border-danger/40 transition-all cursor-pointer flex items-center gap-1"
+            title="卸载" onclick="event.stopPropagation();Nodes.uninstallSkill('${nid}','${safeAttr(skillId)}')">
+            <span class="[&_svg]:w-3 [&_svg]:h-3">${L('power-off')}</span> 卸载
+          </button>
+          ${!isBuiltin && storeId ? `
+          <button class="p-1.5 rounded-lg text-text-muted hover:text-danger hover:bg-danger/10 border border-border-default/20 hover:border-danger/30 transition-all cursor-pointer"
+            title="从商店删除" onclick="event.stopPropagation();Nodes.deleteSkillFromStore('${nid}','${safeAttr(storeId)}','${safeAttr(skillName)}')">
+            <span class="[&_svg]:w-3.5 [&_svg]:h-3.5">${L('trash-2')}</span>
+          </button>` : ''}
+        </div>
+      </div>
+    `;
+  },
+
+  /**
+   * @private 商店技能卡片（未安装状态）
+   * isBuiltin=true → 内置，点安装跳商店，无删除按钮
+   * isBuiltin=false → 自定义，可以从商店删除
+   */
+  _storeSkillChip(nid: string, skill: any, isBuiltin: boolean) {
+    const skillName  = skill.name || '';
+    const iconGrad   = skill.iconGradient || 'linear-gradient(135deg,#6366f1 0%,#a5b4fc 100%)';
+    const cat        = skill.category || '';
+    const badgeColor = isBuiltin
+      ? 'bg-primary/10 text-primary/60'
+      : 'bg-amber-400/10 text-amber-300/70';
+
+    return `
+      <div class="bg-surface/50 border border-border-default/20 p-3 rounded-xl flex flex-col gap-2 opacity-70 hover:opacity-100 transition-opacity">
+        <div class="flex items-center gap-2.5">
+          <div class="w-8 h-8 rounded-lg flex items-center justify-center shrink-0" style="background:${escHtml(iconGrad)}">
+            <span class="[&_svg]:w-4 [&_svg]:h-4 text-white">${L(skill.icon || 'box')}</span>
+          </div>
+          <div class="min-w-0">
+            <p class="text-xs font-medium text-text-secondary truncate max-w-[90px]">${escHtml(skillName)}</p>
+            <span class="inline-block text-[9px] px-1 py-0.5 rounded-full ${badgeColor} uppercase tracking-wide">${escHtml(cat)}</span>
+          </div>
+        </div>
+        <div class="flex items-center gap-1.5 justify-end">
+          <button class="px-2 py-0.5 text-[10px] rounded text-primary hover:bg-primary/10 border border-primary/20 hover:border-primary/40 transition-all cursor-pointer"
+            onclick="App.switchPage('skills')">
+            安装
+          </button>
+          ${!isBuiltin ? `
+          <button class="p-1 rounded text-text-muted hover:text-danger hover:bg-danger/10 border border-border-default/20 hover:border-danger/30 transition-all cursor-pointer"
+            title="从商店删除" onclick="event.stopPropagation();Nodes.deleteSkillFromStore('${nid}','${safeAttr(skill.id)}','${safeAttr(skillName)}')">
+            <span class="[&_svg]:w-3 [&_svg]:h-3">${L('trash-2')}</span>
+          </button>` : ''}
+        </div>
+      </div>
+    `;
   },
 
   renderTerminal(node: any) {
@@ -229,15 +402,45 @@ export const NodeDetailPanel = {
   async loadClawTab(nodeId: any, subTab: any) {
     const container = document.getElementById(`inline-tab-content-${nodeId}`);
     if (!container) return;
+    const nid = safeAttr(nodeId);
+
+    // 子 Tab：仅保留 status / config / sessions（models/channels 提升为主 Tab）
     const subTabs = [
-      { key: 'status', icon: 'activity', label: '状态' },
-      { key: 'models', icon: 'cpu', label: '模型' },
-      { key: 'config', icon: 'settings', label: '配置' },
-      { key: 'sessions', icon: 'message-square', label: '会话' },
-      { key: 'channels', icon: 'radio', label: '渠道' },
+      { key: 'status',   icon: 'activity',       label: '状态' },
+      { key: 'config',   icon: 'settings',        label: '配置' },
+      { key: 'sessions', icon: 'message-square',  label: '会话' },
     ];
-    let html = `<div class="flex gap-1 mb-3">${subTabs.map(st => `<button class="px-2.5 py-1 text-xs rounded transition cursor-pointer ${subTab === st.key ? 'bg-primary/10 text-primary' : 'text-text-muted hover:text-text-primary hover:bg-elevated'}" onclick="Nodes.switchClawSubTab('${safeAttr(nodeId)}','${st.key}')">${L(st.icon)} ${st.label}</button>`).join('')}</div>
-    <div id="claw-content-${safeAttr(nodeId)}" class="text-sm text-text-muted">${L('loader')} 加载中…</div>`;
+    const activeSubTab = subTab || 'status';
+
+    let html = `
+    <div class="px-6 pb-8 pt-4 bg-surface/30 rounded-xl border border-border-default/20">
+      <!-- 标题栏 + 操作按钮 -->
+      <div class="flex items-center justify-between mb-4 border-b border-border-default/20 pb-4">
+        <h4 class="text-xl font-headline font-bold tracking-tight text-text-primary flex items-center gap-2">
+          <span class="[&_svg]:w-5 [&_svg]:h-5 text-primary">${L('bot')}</span> OpenClaw Gateway
+        </h4>
+        <div class="flex items-center gap-2">
+          <button id="claw-restart-btn-${nid}"
+            class="px-3 py-1.5 text-xs font-bold rounded-lg border border-primary/30 text-primary hover:bg-primary hover:text-white hover:border-primary transition-all cursor-pointer flex items-center gap-1.5"
+            onclick="Nodes.restartOpenClaw('${nid}')">
+            <span class="[&_svg]:w-3.5 [&_svg]:h-3.5">${L('refresh-cw')}</span> 重启
+          </button>
+          <button id="claw-update-btn-${nid}"
+            class="px-3 py-1.5 text-xs font-bold rounded-lg border border-amber-400/30 text-amber-400 hover:bg-amber-400 hover:text-white hover:border-amber-400 transition-all cursor-pointer flex items-center gap-1.5"
+            onclick="Nodes.updateOpenClaw('${nid}')">
+            <span class="[&_svg]:w-3.5 [&_svg]:h-3.5">${L('arrow-up-circle')}</span> 更新
+          </button>
+        </div>
+      </div>
+      <!-- 子 Tab 导航 -->
+      <div class="flex gap-1 mb-4">
+        ${subTabs.map(st => `<button class="px-3 py-1.5 text-xs rounded-lg transition cursor-pointer flex items-center gap-1.5 [&_svg]:w-3.5 [&_svg]:h-3.5 ${activeSubTab === st.key ? 'bg-primary/10 text-primary font-medium' : 'text-text-muted hover:text-text-primary hover:bg-elevated'}" onclick="Nodes.switchClawSubTab('${nid}','${st.key}')">${L(st.icon)} ${st.label}</button>`).join('')}
+      </div>
+      <div id="claw-content-${nid}" class="text-sm text-text-muted flex items-center gap-2 py-4 justify-center">
+        <span class="[&_svg]:w-4 [&_svg]:h-4 animate-spin">${L('loader-2')}</span> 加载中…
+      </div>
+    </div>`;
+
     container.innerHTML = html;
     refreshIcons();
 
@@ -277,10 +480,165 @@ export const NodeDetailPanel = {
     }
 
     try {
-      const res = await App.authFetch(`/api/claw/${encodeURIComponent(nodeId)}/${subTab}`);
+      const res = await App.authFetch(`/api/claw/${encodeURIComponent(nodeId)}/${activeSubTab}`);
       const data = await res.json();
       if (data.error) { detail.innerHTML = `<div class="text-danger text-sm">${escHtml(data.error)}</div>`; return; }
       detail.innerHTML = `<pre class="text-xs bg-base rounded-lg p-3 overflow-x-auto max-h-60">${escHtml(JSON.stringify(data, null, 2))}</pre>`;
+    } catch (err: any) {
+      detail.innerHTML = `<div class="text-danger text-sm">请求失败: ${escHtml(err.message)}</div>`;
+    }
+    refreshIcons();
+  },
+
+  /** AI 模型 Tab — 展示 /api/claw/:nodeId/models */
+  async loadModelsTab(nodeId: any) {
+    const container = document.getElementById(`inline-tab-content-${nodeId}`);
+    if (!container) return;
+    const nid = safeAttr(nodeId);
+
+    container.innerHTML = `
+    <div class="px-6 pb-8 pt-4 bg-surface/30 rounded-xl border border-border-default/20">
+      <div class="flex items-center justify-between mb-6 border-b border-border-default/20 pb-4">
+        <h4 class="text-xl font-headline font-bold tracking-tight text-text-primary flex items-center gap-2">
+          <span class="[&_svg]:w-5 [&_svg]:h-5 text-primary">${L('sparkles')}</span> AI 模型
+        </h4>
+        <button class="p-2 rounded-lg text-text-muted hover:text-primary hover:bg-primary/10 transition cursor-pointer [&_svg]:w-4 [&_svg]:h-4"
+          title="刷新" onclick="NodeDetailPanel.loadModelsTab('${nid}')">
+          ${L('refresh-cw')}
+        </button>
+      </div>
+      <div id="models-content-${nid}" class="flex items-center gap-2 text-text-muted text-sm py-8 justify-center">
+        <span class="[&_svg]:w-4 [&_svg]:h-4 animate-spin">${L('loader-2')}</span> 加载模型列表…
+      </div>
+    </div>`;
+    refreshIcons();
+
+    const detail = document.getElementById(`models-content-${nid}`);
+    if (!detail) return;
+
+    const nodeConfig = App.allNodesRaw.find((n: any) => n.id === nodeId);
+    if (!nodeConfig?.clawToken) {
+      detail.innerHTML = `<div class="text-text-muted text-sm flex items-center gap-2">${L('info')} 节点未配置 OpenClaw Token，无法查看模型列表</div>`;
+      refreshIcons();
+      return;
+    }
+
+    try {
+      const res = await App.authFetch(`/api/claw/${encodeURIComponent(nodeId)}/models`);
+      const data = await res.json();
+      if (data.error) { detail.innerHTML = `<div class="text-danger text-sm">${escHtml(data.error)}</div>`; refreshIcons(); return; }
+
+      const models: any[] = data.data || data.models || [];
+      if (models.length === 0) {
+        detail.innerHTML = `<div class="text-text-muted text-sm">${L('box')} 暂无可用模型</div>`;
+        refreshIcons(); return;
+      }
+
+      let html = `<div class="grid grid-cols-1 md:grid-cols-2 gap-3">`;
+      for (const m of models) {
+        const name = m.id || m.name || '';
+        const ctx  = m.context_length ? `上下文 ${m.context_length.toLocaleString()} tokens` : '';
+        const owned = m.owned_by || m.provider || '';
+        html += `
+          <div class="bg-elevated/50 border border-border-default/30 rounded-xl p-4 hover:bg-elevated transition-colors">
+            <div class="flex items-start gap-3">
+              <div class="w-9 h-9 rounded-lg bg-primary/10 flex items-center justify-center shrink-0 [&_svg]:w-4 [&_svg]:h-4 text-primary">
+                ${L('brain-circuit')}
+              </div>
+              <div class="min-w-0">
+                <p class="text-sm font-semibold text-text-primary truncate">${escHtml(name)}</p>
+                ${owned ? `<p class="text-[10px] text-text-muted mt-0.5">${escHtml(owned)}</p>` : ''}
+                ${ctx   ? `<p class="text-[10px] text-primary/70 mt-1 font-mono">${escHtml(ctx)}</p>` : ''}
+              </div>
+            </div>
+          </div>`;
+      }
+      html += `</div>`;
+      detail.innerHTML = html;
+    } catch (err: any) {
+      detail.innerHTML = `<div class="text-danger text-sm">请求失败: ${escHtml(err.message)}</div>`;
+    }
+    refreshIcons();
+  },
+
+  /** 渠道 Tab — 展示 /api/claw/:nodeId/channels */
+  async loadChannelsTab(nodeId: any) {
+    const container = document.getElementById(`inline-tab-content-${nodeId}`);
+    if (!container) return;
+    const nid = safeAttr(nodeId);
+
+    container.innerHTML = `
+    <div class="px-6 pb-8 pt-4 bg-surface/30 rounded-xl border border-border-default/20">
+      <div class="flex items-center justify-between mb-6 border-b border-border-default/20 pb-4">
+        <h4 class="text-xl font-headline font-bold tracking-tight text-text-primary flex items-center gap-2">
+          <span class="[&_svg]:w-5 [&_svg]:h-5 text-primary">${L('radio')}</span> 渠道管理
+        </h4>
+        <button class="p-2 rounded-lg text-text-muted hover:text-primary hover:bg-primary/10 transition cursor-pointer [&_svg]:w-4 [&_svg]:h-4"
+          title="刷新" onclick="NodeDetailPanel.loadChannelsTab('${nid}')">
+          ${L('refresh-cw')}
+        </button>
+      </div>
+      <div id="channels-content-${nid}" class="flex items-center gap-2 text-text-muted text-sm py-8 justify-center">
+        <span class="[&_svg]:w-4 [&_svg]:h-4 animate-spin">${L('loader-2')}</span> 加载渠道状态…
+      </div>
+    </div>`;
+    refreshIcons();
+
+    const detail = document.getElementById(`channels-content-${nid}`);
+    if (!detail) return;
+
+    const nodeConfig = App.allNodesRaw.find((n: any) => n.id === nodeId);
+    if (!nodeConfig?.clawToken) {
+      detail.innerHTML = `<div class="text-text-muted text-sm flex items-center gap-2">${L('info')} 节点未配置 OpenClaw Token，无法查看渠道信息</div>`;
+      refreshIcons();
+      return;
+    }
+
+    try {
+      const res = await App.authFetch(`/api/claw/${encodeURIComponent(nodeId)}/channels`);
+      const data = await res.json();
+      if (data.error) { detail.innerHTML = `<div class="text-danger text-sm">${escHtml(data.error)}</div>`; refreshIcons(); return; }
+
+      // channels 结构可能是 { channels: [...] } 或直接数组或 RPC 原始返回
+      const channels: any[] = data.channels || (Array.isArray(data) ? data : []);
+      if (channels.length === 0) {
+        detail.innerHTML = `
+          <div class="flex flex-col items-center gap-2 text-text-muted text-sm py-4">
+            ${L('radio')}
+            <span>暂无配置渠道</span>
+            <pre class="text-xs bg-base rounded-lg p-3 mt-2 overflow-x-auto max-h-40 w-full">${escHtml(JSON.stringify(data, null, 2))}</pre>
+          </div>`;
+        refreshIcons(); return;
+      }
+
+      let html = `<div class="space-y-2">`;
+      for (const ch of channels) {
+        const name    = ch.name || ch.id || '未命名';
+        const type    = ch.type || ch.provider || '';
+        const enabled = ch.enabled !== false;
+        const health  = ch.healthy ?? ch.connected ?? null;
+        const statusColor = enabled
+          ? (health === false ? 'text-danger' : 'text-success')
+          : 'text-text-muted';
+        const statusLabel = !enabled ? '禁用'
+          : health === false ? '异常'
+          : health === true  ? '正常'
+          : '在线';
+
+        html += `
+          <div class="bg-elevated/50 border border-border-default/30 rounded-xl p-4 flex items-center justify-between hover:bg-elevated transition-colors">
+            <div class="flex items-center gap-3">
+              <span class="[&_svg]:w-4 [&_svg]:h-4 ${statusColor}">${L('radio')}</span>
+              <div>
+                <p class="text-sm font-semibold text-text-primary">${escHtml(name)}</p>
+                ${type ? `<p class="text-[10px] text-text-muted font-mono">${escHtml(type)}</p>` : ''}
+              </div>
+            </div>
+            <span class="text-xs font-bold px-2 py-0.5 rounded-full ${enabled ? 'bg-success/10 text-success' : 'bg-elevated text-text-muted'} border border-current/20">${statusLabel}</span>
+          </div>`;
+      }
+      html += `</div>`;
+      detail.innerHTML = html;
     } catch (err: any) {
       detail.innerHTML = `<div class="text-danger text-sm">请求失败: ${escHtml(err.message)}</div>`;
     }
@@ -654,18 +1012,71 @@ export const NodeDetailPanel = {
     try {
       await App.authFetch(`/api/nodes/${nodeId}/skills/${skillId}`, { method: 'DELETE' });
       showToast('技能卸载命令已下发', 'success');
-      const node = App.allNodesRaw.find((n: any) => n.id === nodeId);
-      if (node && node.skills) {
-        node.skills = node.skills.filter((s: any) => s.id !== skillId);
-      }
-      const wrap = document.getElementById(`inline-tab-content-${nodeId}`);
-      if (wrap) {
-        wrap.innerHTML = this.renderSkills(node || { id: nodeId, skills: [] });
-        refreshIcons();
-      }
+      // 刷新技能面板（异步重新拉取商店数据 + 重渲染）
+      const node = App.nodesData.find((n: any) => n.id === nodeId) || App.allNodesRaw.find((n: any) => n.id === nodeId) || { id: nodeId };
+      this.loadSkillsTab(node);
     } catch (e: any) {
       console.error(e);
       showToast(e.message || '技能卸载失败', 'error');
     }
   },
+
+  /** 从技能商店删除自定义技能（内置技能服务端已拦截 403） */
+  async deleteSkillFromStore(nodeId: any, storeSkillId: any, skillName: any) {
+    if (!confirm(`确认要从技能商店删除「${skillName}」吗？\n此操作不会从节点卸载，但会将该技能从商店移除。`)) return;
+    try {
+      const res = await App.authFetch(`/api/skills/${encodeURIComponent(storeSkillId)}`, { method: 'DELETE' });
+      if (!res.ok) {
+        const data = await res.json().catch(() => ({}));
+        // 内置技能服务端返回 403，给出友好提示
+        if (res.status === 403) {
+          showToast('内置技能不可从商店删除', 'info');
+          return;
+        }
+      showToast(data.error || '删除失败', 'error');
+      return;
+    }
+    showToast(`「${skillName}」已从商店删除`, 'success');
+    // 刷新技能面板
+    const node = App.nodesData.find((n: any) => n.id === nodeId) || App.allNodesRaw.find((n: any) => n.id === nodeId) || { id: nodeId };
+    this.loadSkillsTab(node);
+  } catch (e: any) {
+    showToast(e.message || '删除失败', 'error');
+  }
+},
+
+  /** 重启 OpenClaw（通过 Agent 任务队列） */
+  async restartOpenClaw(nodeId: any) {
+    const btn = document.getElementById(`claw-restart-btn-${nodeId}`);
+    if (!confirm('确认重启此节点上的 OpenClaw Gateway？服务将短暂中断。')) return;
+    if (btn) { (btn as HTMLButtonElement).disabled = true; btn.textContent = '下发中…'; }
+    try {
+      const res = await App.authFetch(`/api/claw/${encodeURIComponent(nodeId)}/restart`, { method: 'POST' });
+      const data = await res.json();
+      if (!res.ok) { showToast(data.error || '下发失败', 'error'); }
+      else { showToast('重启命令已入队，请稍后刷新状态', 'success'); }
+    } catch (e: any) {
+      showToast(e.message || '下发失败', 'error');
+    } finally {
+      if (btn) { (btn as HTMLButtonElement).disabled = false; btn.innerHTML = `<span class="[&_svg]:w-3.5 [&_svg]:h-3.5">${(window as any).lucide?.icons?.['refresh-cw']?.toSvg?.() || '⟳'}</span> 重启`; }
+    }
+  },
+
+  /** 更新 OpenClaw（通过 Agent 任务队列，超时 3min） */
+  async updateOpenClaw(nodeId: any) {
+    const btn = document.getElementById(`claw-update-btn-${nodeId}`);
+    if (!confirm('确认更新此节点上的 OpenClaw？更新期间服务将重启，可能需要 1~3 分钟。')) return;
+    if (btn) { (btn as HTMLButtonElement).disabled = true; btn.textContent = '下发中…'; }
+    try {
+      const res = await App.authFetch(`/api/claw/${encodeURIComponent(nodeId)}/update`, { method: 'POST' });
+      const data = await res.json();
+      if (!res.ok) { showToast(data.error || '下发失败', 'error'); }
+      else { showToast('更新任务已入队，请在任务队列中查看进度', 'success'); }
+    } catch (e: any) {
+      showToast(e.message || '下发失败', 'error');
+    } finally {
+      if (btn) { (btn as HTMLButtonElement).disabled = false; btn.innerHTML = `<span class="[&_svg]:w-3.5 [&_svg]:h-3.5">⇧</span> 更新`; }
+    }
+  },
 };
+

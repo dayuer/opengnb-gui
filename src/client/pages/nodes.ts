@@ -449,6 +449,9 @@ export const Nodes = {
   quickCmd(nodeId: any, prompt: any) { NodeDetailPanel.quickCmd(nodeId, prompt); },
   toggleTerminalSize(nodeId: any) { NodeDetailPanel.toggleTerminalSize(nodeId); },
   uninstallSkill(nodeId: any, skillId: any) { NodeDetailPanel.uninstallSkill(nodeId, skillId); },
+  deleteSkillFromStore(nodeId: any, storeSkillId: any, skillName: any) { NodeDetailPanel.deleteSkillFromStore(nodeId, storeSkillId, skillName); },
+  restartOpenClaw(nodeId: any) { NodeDetailPanel.restartOpenClaw(nodeId); },
+  updateOpenClaw(nodeId: any) { NodeDetailPanel.updateOpenClaw(nodeId); },
   reinstallTask(nodeId: any, skillId: any, skillName: any) { NodeDetailPanel.reinstallTask(nodeId, skillId, skillName); },
   deleteTask(nodeId: any, taskId: any) { NodeDetailPanel.deleteTask(nodeId, taskId); },
 

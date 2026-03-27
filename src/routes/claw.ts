@@ -2,34 +2,79 @@
 import type { Request, Response, NextFunction } from 'express';
 
 const express = require('express');
+const crypto = require('crypto');
 
 /**
  * OpenClaw RPC 代理路由
  *
  * 前端通过这些 API 间接访问终端节点上的 OpenClaw Gateway。
  *
- * GET  /api/claw/:nodeId/status  — Gateway 状态
- * GET  /api/claw/:nodeId/models  — 模型列表
- * GET  /api/claw/:nodeId/config  — 读取配置
- * POST /api/claw/:nodeId/config  — 修改配置 (body: { patch, baseHash })
+ * GET  /api/claw/:nodeId/status   — Gateway 状态
+ * GET  /api/claw/:nodeId/models   — 模型列表
+ * GET  /api/claw/:nodeId/config   — 读取配置
+ * POST /api/claw/:nodeId/config   — 修改配置 (body: { patch, baseHash })
  * GET  /api/claw/:nodeId/sessions — 会话列表
  * GET  /api/claw/:nodeId/channels — 渠道状态
+ * POST /api/claw/:nodeId/restart  — 重启 OpenClaw（Agent 任务队列）
+ * POST /api/claw/:nodeId/update   — 更新 OpenClaw（Agent 任务队列）
  */
-module.exports = function createClawRouter({ clawRPC, getNodesConfig }: any) {
+module.exports = function createClawRouter({ clawRPC, getNodesConfig, taskQueue }: any) {
   const router = express.Router();
 
-  // 中间件：解析 nodeId → nodeConfig
+  // 中间件：解析 nodeId → nodeConfig（restart/update 不需要 clawToken，单独处理）
   router.use('/:nodeId', (req: Request, res: Response, next: NextFunction) => {
     const nodes = getNodesConfig();
     const nodeConfig = nodes.find((n: any) => n.id === req.params.nodeId);
     if (!nodeConfig) return res.status(404).json({ error: `节点 ${req.params.nodeId} 不存在` });
-    if (!nodeConfig.clawToken) return res.status(400).json({ error: `节点 ${req.params.nodeId} 未配置 OpenClaw Token` });
     req.nodeConfig = nodeConfig;
     next();
   });
 
+  // ──── 无需 clawToken 的操作 ─────────────────────────
+
+  // POST /api/claw/:nodeId/restart — 重启 OpenClaw
+  router.post('/:nodeId/restart', (req: Request, res: Response) => {
+    if (!taskQueue) return res.status(503).json({ error: '任务队列不可用' });
+    const task = {
+      taskId: crypto.randomUUID(),
+      type: 'claw_restart',
+      command: 'sudo systemctl restart openclaw',
+      skillId: 'openclaw',
+      skillName: 'OpenClaw',
+      timeoutMs: 30000,
+    };
+    taskQueue.enqueueTask(req.params.nodeId, task);
+    res.json({ taskId: task.taskId, status: 'queued', message: '重启任务已入队' });
+  });
+
+  // POST /api/claw/:nodeId/update — 更新 OpenClaw
+  router.post('/:nodeId/update', (req: Request, res: Response) => {
+    if (!taskQueue) return res.status(503).json({ error: '任务队列不可用' });
+    const task = {
+      taskId: crypto.randomUUID(),
+      type: 'claw_update',
+      // 标准升级流程：停服 → 下载最新二进制 → 替换 → 重启
+      command: 'sudo openclaw update --yes 2>&1 || (sudo systemctl stop openclaw && sudo curl -fsSL https://release.openclaw.io/install.sh | sudo bash && sudo systemctl start openclaw)',
+      skillId: 'openclaw',
+      skillName: 'OpenClaw Update',
+      timeoutMs: 180000,
+    };
+    taskQueue.enqueueTask(req.params.nodeId, task);
+    res.json({ taskId: task.taskId, status: 'queued', message: '更新任务已入队' });
+  });
+
+  // ──── 需要 clawToken 的 RPC 操作 ───────────────────
+
+  // 子中间件：续验 clawToken
+  const requireClawToken = (req: Request, res: Response, next: NextFunction) => {
+    if (!(req.nodeConfig as any)?.clawToken) {
+      return res.status(400).json({ error: `节点 ${req.params.nodeId} 未配置 OpenClaw Token` });
+    }
+    next();
+  };
+
   // GET /api/claw/:nodeId/status
-  router.get('/:nodeId/status', async (req: Request, res: Response) => {
+  router.get('/:nodeId/status', requireClawToken, async (req: Request, res: Response) => {
     try {
       const result = await clawRPC.getStatus(req.nodeConfig);
       res.json(result);
@@ -40,7 +85,7 @@ module.exports = function createClawRouter({ clawRPC, getNodesConfig }: any) {
   });
 
   // GET /api/claw/:nodeId/models
-  router.get('/:nodeId/models', async (req: Request, res: Response) => {
+  router.get('/:nodeId/models', requireClawToken, async (req: Request, res: Response) => {
     try {
       const result = await clawRPC.getModels(req.nodeConfig);
       res.json(result);
@@ -51,7 +96,7 @@ module.exports = function createClawRouter({ clawRPC, getNodesConfig }: any) {
   });
 
   // GET /api/claw/:nodeId/config
-  router.get('/:nodeId/config', async (req: Request, res: Response) => {
+  router.get('/:nodeId/config', requireClawToken, async (req: Request, res: Response) => {
     try {
       const result = await clawRPC.getConfig(req.nodeConfig);
       res.json(result);
@@ -62,7 +107,7 @@ module.exports = function createClawRouter({ clawRPC, getNodesConfig }: any) {
   });
 
   // POST /api/claw/:nodeId/config  { patch: "...", baseHash: "..." }
-  router.post('/:nodeId/config', async (req: Request, res: Response) => {
+  router.post('/:nodeId/config', requireClawToken, async (req: Request, res: Response) => {
     try {
       const { patch, baseHash } = req.body;
       if (!patch) return res.status(400).json({ error: '缺少 patch 参数' });
@@ -75,7 +120,7 @@ module.exports = function createClawRouter({ clawRPC, getNodesConfig }: any) {
   });
 
   // GET /api/claw/:nodeId/sessions
-  router.get('/:nodeId/sessions', async (req: Request, res: Response) => {
+  router.get('/:nodeId/sessions', requireClawToken, async (req: Request, res: Response) => {
     try {
       const result = await clawRPC.getSessions(req.nodeConfig);
       res.json(result);
@@ -86,7 +131,7 @@ module.exports = function createClawRouter({ clawRPC, getNodesConfig }: any) {
   });
 
   // GET /api/claw/:nodeId/channels
-  router.get('/:nodeId/channels', async (req: Request, res: Response) => {
+  router.get('/:nodeId/channels', requireClawToken, async (req: Request, res: Response) => {
     try {
       const result = await clawRPC.getChannels(req.nodeConfig);
       res.json(result);
