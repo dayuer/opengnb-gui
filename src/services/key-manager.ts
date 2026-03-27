@@ -803,10 +803,17 @@ class KeyManager {
     log.info('密钥轮换开始...');
 
     const oldPubKey = this.getPublicKey();
-    const newKeyPath = this.privateKeyPath + '.new';
-    const newPubKeyPath = this.publicKeyPath + '.new';
+    // ssh-keygen 规范：-f <path> 生成私钥=<path>，公钥=<path>.pub
+    // 用 console_ed25519_new（不含点）作为临时私钥，公钥自然是 console_ed25519_new.pub
+    const newKeyPath    = path.join(this.keyDir, 'console_ed25519_new');
+    const newPubKeyPath = newKeyPath + '.pub';   // → console_ed25519_new.pub
 
-    // 生成新密钥对（ssh-keygen 优先，fallback crypto 模块）
+    // 清理可能残留的旧临时文件
+    for (const f of [newKeyPath, newPubKeyPath]) {
+      try { fs.unlinkSync(f); } catch { /* ignore */ }
+    }
+
+    // 生成新密钥对（ssh-keygen 优先 OpenSSH 格式，fallback crypto 模块）
     try {
       execSync(`ssh-keygen -t ed25519 -f "${newKeyPath}" -N "" -C "gnb-console-rotated-${Date.now()}"`, { stdio: 'pipe' });
     } catch {
