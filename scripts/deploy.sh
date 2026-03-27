@@ -86,6 +86,24 @@ if [ ! -f .env ]; then
     cp .env.example .env
     echo "      已创建 .env (请编辑填入实际值)"
 fi
+
+# ⚠️ GNB 配置保护：强制写入生产确认值，禁止 deploy 时被覆盖
+# 这些值是 Console GNB 的运行时状态，一旦错误会导致节点无法接入
+# 修改时必须同步修改服务器 /opt/gnb/conf/ 和 GNB systemd 服务
+sed -i "s/^GNB_NODE_ID=.*/GNB_NODE_ID=1001/"                       .env
+sed -i "s|^GNB_CONF_DIR=.*|GNB_CONF_DIR=/opt/gnb/conf/1001|"       .env
+sed -i "s/^GNB_TUN_ADDR=.*/GNB_TUN_ADDR=10.1.0.1/"                 .env
+sed -i "s/^CONSOLE_WAN_IP=.*/CONSOLE_WAN_IP=43.156.128.95/"         .env
+sed -i "s/^GNB_WAN_PORT=.*/GNB_WAN_PORT=9002/"                      .env
+sed -i "s/^GNB_INDEX_PORT=.*/GNB_INDEX_PORT=9001/"                  .env
+# 若变量不存在则追加（首次从 .env.example 创建时）
+grep -q "^GNB_NODE_ID="      .env || echo "GNB_NODE_ID=1001"              >> .env
+grep -q "^GNB_CONF_DIR="     .env || echo "GNB_CONF_DIR=/opt/gnb/conf/1001" >> .env
+grep -q "^GNB_TUN_ADDR="     .env || echo "GNB_TUN_ADDR=10.1.0.1"         >> .env
+grep -q "^CONSOLE_WAN_IP="   .env || echo "CONSOLE_WAN_IP=43.156.128.95"  >> .env
+grep -q "^GNB_WAN_PORT="     .env || echo "GNB_WAN_PORT=9002"             >> .env
+grep -q "^GNB_INDEX_PORT="   .env || echo "GNB_INDEX_PORT=9001"           >> .env
+echo "      GNB 配置已保护: node=1001 tun=10.1.0.1 wan=43.156.128.95:9002"
 REMOTE_DEPLOY
 
 # --- 4. 配置 systemd + nginx ---
