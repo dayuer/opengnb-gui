@@ -19,3 +19,13 @@
 - [x] Phase 3: 下一步功能规划 (Roadmap & Next Steps)
   - [x] 评估业务闭环中缺失的环节
   - [x] 拟定优先级最高的功能特性栈并撰写推荐 Next Steps (将写入 `docs/tech_debt_and_roadmap.md`)
+
+## [2026-03-27] OpenClaw 控制面扩展与 Daemon 长连接修缮
+
+- [x] Task 1: 扩展 UI 节点详情面板，将 OpenClaw 的 Models 和 Channels 提级为独立子 Tab，并增加 `重启`与`更新`操作按钮。
+- [x] Task 2: 新增 API `/api/claw/:nodeId/restart` 和 `/api/claw/:nodeId/update`，打通下发系统。
+- [x] Task 3: 优化前端 Skills Tab 中的 `已安装` 判断，精确按照 `status === 'ready'` 过滤状态机副作用。
+- [x] Task 4: 诊断并修复 Rust Daemon `synon-daemon` 由于 NAT 超时的断联问题。
+  - 引入了 `socket2` 以建立并配置内核级 TCP Keepalive。
+  - 实施了基于应用层的 Ping-Pong Watchdog 控制循环。
+- [x] Task 5: 验证并多机器部署最新二进制与重启控制流（TDD 闭环）。

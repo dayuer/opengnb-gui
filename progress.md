@@ -7,3 +7,14 @@
   - 前台：Vanilla JS + DOM 模板，挂载至 Vite 侧代理。依靠 `core.ts` 和 `ws.ts` 完成交互与监控下行。
 - **Phase 2 (Documentation Synthesis)**: 架构与数据流逻辑均与 `AGENTS.md` 描述完美吻合，无重大偏差。根据底层运行情况，总结出了系统的技术债与架构瓶颈点。
 - **Phase 3 (Roadmap & Next Steps)**: 根据技术债情况，输出了一份演进路线图，存放在 `docs/tech_debt_and_roadmap.md` 中。明确指出优先级最高的三大痛点：SQLite 增量无休止膨胀、孤儿任务缺失回收补偿，以及细粒度 RBAC 权限缺失。
+
+## [2026-03-27 18:05] ✅ Sprint 完成 — OpenClaw 管理扩展与 Daemon 长连接修复
+| 指标 | 值 | 信号含义 |
+|------|----|----------|
+| 总任务数 | 3 | UI 扩展 + API 新增 + Rust Daemon 网络修复 |
+| RED→GREEN 平均轮次 | 1.0 | 任务边界清晰，API 按约定执行 |
+| 静态检查拦截次数 | 2 | Rust `lookup_host` 编译报错在门控阶段拦截，避免部署污染 |
+| Review 回退次数 | 1 | skills tab "已安装" 状态过滤有盲区，通过 TDD 第 6 阶段纠偏 |
+| 高危操作拦截次数 | 0 | 安全合规 |
+| 熔断次数 | 0 | 开发与排障流转顺畅，根因明确 |
+| Git commit 总数 | 3 | 全链路闭环与自动分发 |

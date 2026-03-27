@@ -77,8 +77,8 @@ opengnb-gui/
 ├── scripts/
 │   ├── init-db.ts                       # 数据库 schema 幂等初始化 + 旧 DB 迁移
 │   ├── deploy.sh                        # 增量部署（git + init-db + systemd restart）
-│   ├── initnode.sh                      # 节点初始化（10 步）
-│   ├── node-agent.sh                    # 节点 Agent（10s 心跳 + 任务执行）
+│   ├── initnode.sh                      # 节点初始化（下载配置并启动 synon-daemon）
+│   ├── node-agent.sh                    # [已废弃] 旧版 Shell Agent（已被 synon-daemon 替代）
 │   ├── setup-console.sh                 # Console 一键部署
 │   ├── sync-mirror.sh                   # 镜像同步
 │   └── pack-openclaw.sh                 # OpenClaw 打包
@@ -137,14 +137,14 @@ graph TD
 | `playbooks` | Playbook 编排 | `id TEXT` |
 | `playbook_steps` | Playbook 步骤 | `id TEXT` |
 
-## Agent 任务队列数据流
+## Agent 任务队列数据流（synon-daemon）
 
 ```
 前端 POST /skills → nodes.ts 入队 → gnb-monitor.enqueueTask()
                                           ↓ SQLite INSERT
-Agent 心跳 POST /report → server.ts → gnb-monitor.getPendingTasks()
+synon-daemon 心跳 POST /report → server.ts → gnb-monitor.getPendingTasks()
                                           ↓ 响应体 tasks[]
-Agent 执行命令 → 下次心跳上报 taskResults → gnb-monitor.processTaskResults()
+synon-daemon 执行命令 → 下次心跳上报 taskResults → gnb-monitor.processTaskResults()
                                           ↓ SQLite UPDATE
 前端 GET /tasks → gnb-monitor.getNodeTasks() → 任务列表 UI
 ```
