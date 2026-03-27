@@ -425,10 +425,12 @@ After=network-online.target gnb.service
 Wants=network-online.target
 
 [Service]
-Type=simple
+Type=notify
 ExecStart=$DAEMON_BIN --config $DAEMON_CONF_DIR/agent.conf
 Restart=always
 RestartSec=5
+WatchdogSec=30
+TimeoutStopSec=10
 Environment=RUST_LOG=info
 
 [Install]
