@@ -15,6 +15,7 @@ opengnb-gui/
 │   │   ├── node-store.ts                # SQLite 数据层（mixin 模式聚合子模块）
 │   │   ├── gnb-monitor.ts               # 推模式监控（仅监控，任务队列已提炼到 task-queue）
 │   │   ├── task-queue.ts                 # Agent 任务队列 + 孤儿任务自愈（A+B 双保险）
+│   │   ├── task-dispatcher.ts            # 策略模式：task.type → Daemon WS 消息映射（Observer 桥接）
 │   │   ├── sweeper.ts                    # 数据 TTL 清理（audit_logs 30天 + agent_tasks 7天）
 │   │   ├── skill-command.ts              # 技能安装/卸载命令策略注册表
 │   │   ├── gnb-parser.ts                # GNB gnb_ctl 输出解析器
