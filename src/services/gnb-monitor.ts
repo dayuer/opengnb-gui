@@ -151,6 +151,9 @@ class GnbMonitor extends EventEmitter {
       ? frame.installedSkills as Record<string, unknown>[]
       : [];
 
+    // OpenClaw CPU 占用（daemon 心跳采集的 /proc/{pid}/stat 双采结果）
+    const clawCpuPercent = typeof frame.clawCpuPercent === 'number' ? frame.clawCpuPercent : 0;
+
     // load 从 sysInfo.load 读取（"1.23 0.45 0.67"）
     const loadAvgRaw = sysInfo?.load as string ?? sysInfo?.loadAvg as string ?? '0';
 
@@ -178,8 +181,10 @@ class GnbMonitor extends EventEmitter {
         loadAvg:    loadAvgRaw,
       } : {},
       openclaw: {
-        status: clawRunning ? 'running' : 'stopped',
-        rpcOk:  clawRpcOk,
+        status:         clawRunning ? 'running' : 'stopped',
+        running:        clawRunning,
+        rpcOk:          clawRpcOk,
+        cpuPercent:     clawCpuPercent,       // ← 新增 CPU 占用
       },
       skills: installedSkills,      // ← 真实 skills 数据（取代空数组）
       daemonHeartbeat: true,

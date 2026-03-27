@@ -61,14 +61,16 @@ export const NodeDetailPanel = {
     const totalIn = peers.reduce((s: any, n: any) => s + (n.inBytes || 0), 0);
     const totalOut = peers.reduce((s: any, n: any) => s + (n.outBytes || 0), 0);
     const oc = node.openclaw || {};
-    const clawRunning = oc.running === true;
+    const clawRunning = oc.running === true || oc.status === 'running';
+    const clawCpuPct  = typeof oc.cpuPercent === 'number' ? oc.cpuPercent : null;
 
     let html = `<div class="space-y-4">`;
     html += `<div><div class="text-xs font-bold text-primary uppercase tracking-widest mb-2">运行状态</div>
       <div class="grid grid-cols-2 md:grid-cols-4 gap-2">
         ${this.statCard(L('activity'), '采集延迟', `${node.sshLatencyMs||0}ms`, node.sshLatencyMs > 500 ? 'text-danger' : 'text-success')}
         ${this.statCard(L('clock'), '运行时长', escHtml(si.uptime || '—'), '')}
-        ${this.statCard(L('bot'), 'OpenClaw', clawRunning ? '运行中' : '未运行', clawRunning ? 'text-success' : 'text-warning')}
+        ${this.statCard(L('bot'), 'OpenClaw', clawRunning ? '运行中' : '未运行', clawRunning ? 'text-success' : 'text-warning',
+          clawRunning && clawCpuPct !== null ? `CPU ${clawCpuPct}%` : '')}
         ${this.statCard(L('monitor'), '系统', escHtml(si.hostname || '—'), 'text-primary', escHtml(si.os || '—'))}
       </div></div>`;
 
