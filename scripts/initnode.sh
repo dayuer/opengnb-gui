@@ -354,67 +354,59 @@ echo "      Console TUN:     $CONSOLE_GNB_TUN_ADDR"
 # ============================================
 # Step 6: 启动 GNB + 配置并启动 synon-daemon
 # ============================================
-echo "[6/10] 启    # 从 Console 获取 apiToken
-    DAEMON_TOKEN=$(curl -sS -H "$ENROLL_AUTH" \
-        "$API_BASE/api/enroll/status/${PLATFORM_NODE_ID:-$NODE_NAME}" \
-        2>/dev/null | json_val apiToken)
-    [ -z "$DAEMON_TOKEN" ] && DAEMON_TOKEN="$ENROLL_TOKEN"
+echo "[6/10] 启动 GNB + synon-daemon..."
 
-    # daemon 必须走 GNB TUN 连接 Console（而非公网）
-    # CONSOLE_GNB_TUN_ADDR 由 Step 4 从 enroll/status 获取（e.g. 10.1.0.1）
-    CONSOLE_PORT="${CONSOLE_PORT:-3000}"
-    if [ -n "$CONSOLE_GNB_TUN_ADDR" ]; then
-        CONSOLE_TUN_IP=$(echo "$CONSOLE_GNB_TUN_ADDR" | cut -d/ -f1)
-        CONSOLE_WSS="ws://${CONSOLE_TUN_IP}:${CONSOLE_PORT}/ws/daemon"
-        echo "      daemon 将使用 GNB TUN 连接 Console: $CONSOLE_WSS"
-    else
-        # 降级：公网（不推荐，TUN 无法建立时的应急路径）
-        CONSOLE_WSS="wss://${CONSOLE}/ws/daemon"
-        echo "      ⚠️ 未获得 Console TUN 地址，降级使用公网: $CONSOLE_WSS"
-    fi
-
-    cat > "$DAEMON_CONF_DIR/agent.conf" <<DAEMONEOF
-# synon-daemon 配置（KEY=VALUE 格式）
-# CONSOLE_URL 使用 GNB TUN 地址（节点与 Console 在同一 VPN 网络内）
-CONSOLE_URL=$CONSOLE_WSS
-TOKEN=$DAEMON_TOKEN
-NODE_ID=${PLATFORM_NODE_ID:-$NODE_NAME}
-GNB_NODE_ID=$GNB_NODE_ID
-CLAW_PORT=18789
-DAEMONEOF
-    chmod 600 "$DAEMON_CONF_DIR/agent.conf"
-
-    if command -v systemctl &>/dev/null; then
-        cat > /etc/systemd/system/synon-daemon.service <<SVCEOF
+if command -v systemctl &>/dev/null; then
+    cat > /etc/systemd/system/gnb.service <<SVCEOF
 [Unit]
-Description=SynonClaw Daemon — WSS Control Plane Agent
-# 必须在 GNB 建立 TUN 后启动（TUN 是 daemon 访问 Console 的通道）
-After=network-online.target gnb.service
-Wants=network-online.target gnb.service
+Description=GNB P2P VPN Node
+After=network-online.target
+Wants=network-online.target
 
 [Service]
 Type=simple
-ExecStart=$DAEMON_BIN --config $DAEMON_CONF_DIR/agent.conf
+ExecStartPre=/bin/mkdir -p /var/log/opengnb
+ExecStart=/opt/gnb/bin/gnb -c ${GNB_CONF} \
+  -i gnb_tun \
+  --crypto chacha20 \
+  --crypto-key-update-interval hour \
+  --address-secure=on \
+  --console-log-level=3 \
+  --log-file-path=/var/log/opengnb
 Restart=always
-RestartSec=10
-Environment=RUST_LOG=info
+RestartSec=5
 
 [Install]
 WantedBy=multi-user.target
 SVCEOF
-        systemctl daemon-reload
-        systemctl enable synon-daemon
-        systemctl restart synon-daemon
-        sleep 5
-        if systemctl is-active synon-daemon > /dev/null 2>&1; then
-            echo "      ✅ synon-daemon 已启动 ($CONSOLE_WSS)"
-        else
-            echo "      ⚠️ synon-daemon 启动失败"
-            journalctl -u synon-daemon --no-pager -n 8 2>/dev/null || true
-        fi
-    fi
+    systemctl daemon-reload
+    systemctl enable gnb
+    systemctl start gnb
+else
+    /opt/gnb/bin/gnb -c "$GNB_CONF" -i gnb_tun --crypto chacha20 --address-secure=on -d
 fi
-��️ GNB 隧道 ping 不通（peer 发现需时间，daemon 将等待 TUN 就绪后再连）"
+
+# 等待 TUN 接口
+echo "      等待 TUN 接口 (最多 30 秒)..."
+for i in $(seq 1 15); do
+    if ip addr show gnb_tun 2>/dev/null | grep -q "inet "; then
+        TUN_IP=$(ip addr show gnb_tun 2>/dev/null | grep 'inet ' | awk '{print $2}')
+        echo "      ✅ TUN 接口已就绪: $TUN_IP"
+        break
+    fi
+    sleep 2
+done
+
+GNB_TUN_UP=false
+if ip addr show gnb_tun 2>/dev/null | grep -q "inet "; then
+    GNB_TUN_UP=true
+fi
+
+if [ "$GNB_TUN_UP" = "true" ] && [ -n "$CONSOLE_GNB_TUN_ADDR" ]; then
+    if ping -c 3 -W 5 "$CONSOLE_GNB_TUN_ADDR" > /dev/null 2>&1; then
+        echo "      ✅ GNB 隧道已连通 ($TUN_ADDR → $CONSOLE_GNB_TUN_ADDR)"
+    else
+        echo "      ⚠️ GNB 隧道 ping 不通（peer 发现需时间，daemon 将等待 TUN 就绪后再连）"
     fi
 fi
 
@@ -432,7 +424,7 @@ if [ "$DAEMON_INSTALLED" = "true" ]; then
     CONSOLE_WSS="wss://${CONSOLE}/ws/daemon"
 
     cat > "$DAEMON_CONF_DIR/agent.conf" <<DAEMONEOF
-# synon-daemon 配置（KEY=VALUE 格式）
+# synon-daemon 配置
 CONSOLE_URL=$CONSOLE_WSS
 TOKEN=$DAEMON_TOKEN
 NODE_ID=${PLATFORM_NODE_ID:-$NODE_NAME}
