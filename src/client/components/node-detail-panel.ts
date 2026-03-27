@@ -148,14 +148,19 @@ export const NodeDetailPanel = {
     const monNode = App.nodesData.find((n: any) => n.id === nid);
     const installedSkills: any[] = monNode?.skills || node.skills || [];
 
-    // 已安装 key 集合（openclawname 或 id 均可匹配）
+    // 已安装：status === 'ready' 的才算真正安装
+    const readySkills: any[]    = installedSkills.filter((s: any) => s.status === 'ready');
+    // 已安装 key 集合（用于从 store 中排除）
     const installedKeys = new Set(
-      installedSkills.flatMap((s: any) => [s.id, s.name].filter(Boolean))
+      readySkills.flatMap((s: any) => [s.id, s.name].filter(Boolean))
     );
 
+    // 非 ready 的 Agent 上报技能 → 照样当「未安装」处理（status 可能是 installing/error 等）
+    // 这里不把它们单独展示，直接让它们落入 storeSkills 的未安装 bucket
+
     // 分内置 / 自定义 × 已安装 / 未安装
-    const builtinInstalled   = installedSkills.filter((s: any) => s.bundled === true);
-    const customInstalled    = installedSkills.filter((s: any) => s.bundled !== true);
+    const builtinInstalled   = readySkills.filter((s: any) => s.bundled === true);
+    const customInstalled    = readySkills.filter((s: any) => s.bundled !== true);
     const builtinUninstalled = storeSkills.filter(
       (s: any) => s.isBuiltin && !installedKeys.has(s.id) && !installedKeys.has(s.name)
     );
