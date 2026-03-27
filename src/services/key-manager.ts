@@ -804,9 +804,10 @@ class KeyManager {
 
     const oldPubKey = this.getPublicKey();
     // ssh-keygen 规范：-f <path> 生成私钥=<path>，公钥=<path>.pub
-    // 用 console_ed25519_new（不含点）作为临时私钥，公钥自然是 console_ed25519_new.pub
-    const newKeyPath    = path.join(this.keyDir, 'console_ed25519_new');
-    const newPubKeyPath = newKeyPath + '.pub';   // → console_ed25519_new.pub
+    // 用日期戳命名临时文件，便于审计溯源
+    const rotateTs   = new Date().toISOString().replace(/[-:T]/g, '').slice(0, 15); // YYYYMMDDHHMMSS
+    const newKeyPath    = path.join(this.keyDir, `console_ed25519_${rotateTs}`);
+    const newPubKeyPath = newKeyPath + '.pub';   // → console_ed25519_YYYYMMDDHHMMSS.pub
 
     // 清理可能残留的旧临时文件
     for (const f of [newKeyPath, newPubKeyPath]) {
