@@ -446,11 +446,13 @@ if [ "$DAEMON_INSTALLED" = "true" ]; then
         2>/dev/null | json_val apiToken)
     [ -z "$DAEMON_TOKEN" ] && DAEMON_TOKEN="$ENROLL_TOKEN"
 
-    CONSOLE_WSS="wss://${CONSOLE}/ws/daemon"
+    # CONSOLE_URL 写 https:// base URL，让 daemon config.rs 自动追加 /ws/daemon
+    # 注意：不能写 wss:// 完整路径，否则 daemon 会再追加一次 /ws/daemon 导致双重拼接
+    CONSOLE_BASE="${API_BASE}"
 
     cat > "$DAEMON_CONF_DIR/agent.conf" <<DAEMONEOF
 # synon-daemon 配置
-CONSOLE_URL=$CONSOLE_WSS
+CONSOLE_URL=$CONSOLE_BASE
 TOKEN=$DAEMON_TOKEN
 NODE_ID=${PLATFORM_NODE_ID:-$NODE_NAME}
 GNB_NODE_ID=$GNB_NODE_ID
@@ -480,7 +482,7 @@ SVCEOF
         systemctl start synon-daemon
         sleep 5
         if systemctl is-active synon-daemon >/dev/null 2>&1; then
-            echo "      ✅ synon-daemon 已启动并连接 Console ($CONSOLE_WSS)"
+            echo "      ✅ synon-daemon 已启动并连接 Console ($CONSOLE_BASE/ws/daemon)"
         else
             echo "      ⚠️ synon-daemon 启动失败"
             journalctl -u synon-daemon --no-pager -n 8 2>/dev/null || true
