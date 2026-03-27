@@ -22,7 +22,7 @@ PORT="${DEPLOY_PORT:-3000}"
 
 echo ""
 echo "  ╔══════════════════════════════════════╗"
-echo "  ║  SynonClaw Console — 部署到 $DOMAIN  ║"
+echo "  ║  SynonClaw Console — 部署到 $DOMAIN   ║"
 echo "  ╚══════════════════════════════════════╝"
 echo ""
 echo "  Server: $SSH_USER@$SERVER"
