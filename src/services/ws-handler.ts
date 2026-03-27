@@ -427,6 +427,12 @@ function createWsHandlers(deps: {
   /** nodeId → WsClient 映射（在线 daemon 注册表）*/
   const daemonConns = new Map<string, WsClient>();
 
+  /** per-node 待派发任务队列（串行 drain） */
+  const nodeDispatchQueue = new Map<string, Record<string, unknown>[]>();
+
+  /** 正在执行中的 nodeId 集合（串行锁） */
+  const nodeDispatching = new Set<string>();
+
   /** reqId → Promise resolve/reject（用于 req/res 配对）*/
   const daemonPending = new Map<string, { resolve: (v: unknown) => void; reject: (e: Error) => void }>();
 
@@ -500,36 +506,72 @@ function createWsHandlers(deps: {
       // 密钥滚动补发：若该节点有待同步的新公钥，立即发送
       if (onDaemonConnect) onDaemonConnect(nodeId);
 
-      // Observer 模式：订阅 TaskQueue 入队事件，实时推送给 daemon
+      // ═══════════════════════════════════════
+      // Serial Dispatch Pattern — per-node 串行队列
+      // 每个 node 独立一条串行链：入队 → drain → 发送 → 等回调 → drain 下一个
+      // 不同 node 之间互不阻塞
+      // ═══════════════════════════════════════
       if (taskQueue) {
-        const onTaskQueued = (evt: { nodeId: string; task: Record<string, unknown> }) => {
-          if (evt.nodeId !== nodeId) return;
-          if (!ws || ws.readyState !== 1) return;
-          const wsMsg = buildWsMessage(evt.task);
-          // 使用 sendToDaemon 统一走 reqId 配对机制，但对任务类命令用更长超时
-          const timeout = (evt.task.timeoutMs as number) || 120000;
+        /** per-node 待派发队列 */
+        if (!nodeDispatchQueue.has(nodeId)) nodeDispatchQueue.set(nodeId, []);
+
+        /** 串行 drain：取队首任务发送，完成后递归取下一个 */
+        const tryDrainQueue = () => {
+          if (nodeDispatching.has(nodeId)) return; // 已有任务执行中，等回调
+          const queue = nodeDispatchQueue.get(nodeId);
+          if (!queue || queue.length === 0) return;
+
+          const task = queue.shift()!;
+          nodeDispatching.add(nodeId);
+          const wsMsg = buildWsMessage(task);
+          const timeout = (task.timeoutMs as number) || 120000;
+
+          log.info(`串行派发 node=${nodeId} taskId=${task.taskId} type=${task.type} (剩余 ${queue.length})`);
+
           sendToDaemon(nodeId, wsMsg, timeout)
             .then((result: Record<string, unknown>) => {
-              // 闭环：daemon 执行完毕 → 更新 SQLite 任务状态
               taskQueue.processTaskResults(nodeId, [{
-                taskId: evt.task.taskId,
+                taskId: task.taskId,
                 code: result.ok ? 0 : (result.code ?? 1),
                 stdout: String(result.payload ?? result.stdout ?? ''),
                 stderr: String(result.stderr ?? ''),
               }]);
             })
             .catch((err: Error) => {
-              log.warn(`任务分发失败 node=${nodeId} taskId=${evt.task.taskId}: ${err.message}`);
-              // 分发失败也要闭环，标记为 failed
+              log.warn(`任务分发失败 node=${nodeId} taskId=${task.taskId}: ${err.message}`);
               taskQueue.processTaskResults(nodeId, [{
-                taskId: evt.task.taskId,
+                taskId: task.taskId,
                 code: -1,
                 stdout: '',
                 stderr: `分发失败: ${err.message}`,
               }]);
+            })
+            .finally(() => {
+              nodeDispatching.delete(nodeId);
+              tryDrainQueue(); // 递归：取下一个任务
             });
         };
+
+        /** 监听入队事件：追加到队列尾部 → 尝试 drain */
+        const onTaskQueued = (evt: { nodeId: string; task: Record<string, unknown> }) => {
+          if (evt.nodeId !== nodeId) return;
+          if (!ws || ws.readyState !== 1) return;
+          nodeDispatchQueue.get(nodeId)!.push(evt.task);
+          tryDrainQueue();
+        };
         taskQueue.on('taskQueued', onTaskQueued);
+
+        // daemon 断开时：将执行中任务标 failed + 清理 pending 队列
+        ws.on('close', () => {
+          if (nodeDispatching.has(nodeId)) {
+            nodeDispatching.delete(nodeId);
+          }
+          const pending = nodeDispatchQueue.get(nodeId) || [];
+          if (pending.length > 0) {
+            log.warn(`daemon 断开，丢弃 ${pending.length} 个待派发任务 node=${nodeId}`);
+            nodeDispatchQueue.set(nodeId, []);
+          }
+        });
       }
 
       // ② 每 10s 发 WS Ping 帧，测量控制面 RTT

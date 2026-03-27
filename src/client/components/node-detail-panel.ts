@@ -22,6 +22,7 @@ export const NodeDetailPanel = {
     const ts = tabState;
     const tabs = [
       { key: 'overview', icon: 'bar-chart-3', label: '概览' },
+      { key: 'tasks',    icon: 'list-todo',    label: '任务' },
       { key: 'claw',     icon: 'bot',          label: 'OpenClaw' },
       { key: 'models',   icon: 'sparkles',      label: 'AI 模型' },
       { key: 'channels', icon: 'radio',         label: '渠道' },
@@ -47,6 +48,7 @@ export const NodeDetailPanel = {
     if (ts.tab === 'claw')     this.loadClawTab(node.id, ts.clawSubTab);
     if (ts.tab === 'models')   this.loadModelsTab(node.id);
     if (ts.tab === 'channels') this.loadChannelsTab(node.id);
+    if (ts.tab === 'tasks')    this.loadTasksTab(node.id);
     if (ts.tab === 'terminal') this.initChat(node.id);
     if (ts.tab === 'skills')   this.loadSkillsTab(node);
   },
@@ -108,6 +110,195 @@ export const NodeDetailPanel = {
 
     html += `</div>`;
     return html;
+  },
+
+  // ═══════════════════════════════════════
+  // 任务队列 Tab — 与技能平级的独立管理界面
+  // ═══════════════════════════════════════
+
+  /** 任务类型 → 中文映射 */
+  _taskTypeLabel(type: string): string {
+    const map: Record<string, string> = {
+      skill_install: '安装技能',
+      skill_uninstall: '卸载技能',
+      claw_restart: '重启 OpenClaw',
+      claw_upgrade: '更新 OpenClaw',
+      exec_cmd: '执行命令',
+    };
+    return map[type] || type;
+  },
+
+  /** 任务类型 → 图标 */
+  _taskTypeIcon(type: string): string {
+    const map: Record<string, string> = {
+      skill_install: 'download',
+      skill_uninstall: 'trash-2',
+      claw_restart: 'refresh-cw',
+      claw_upgrade: 'arrow-up-circle',
+      exec_cmd: 'terminal',
+    };
+    return map[type] || 'circle';
+  },
+
+  /** 状态 → 徽章样式 */
+  _taskStatusBadge(status: string): string {
+    const styles: Record<string, [string, string]> = {
+      queued:     ['bg-text-muted/10 text-text-muted', '等待中'],
+      dispatched: ['bg-info/10 text-info', '执行中'],
+      completed:  ['bg-success/10 text-success', '成功'],
+      failed:     ['bg-danger/10 text-danger', '失败'],
+      timeout:    ['bg-warning/10 text-warning', '超时'],
+    };
+    const [cls, label] = styles[status] || ['bg-text-muted/10 text-text-muted', status];
+    return `<span class="px-2 py-0.5 rounded-full text-[10px] font-bold uppercase tracking-wider ${cls}">${label}</span>`;
+  },
+
+  /** 相对时间格式化 */
+  _relativeTime(iso: string): string {
+    if (!iso) return '—';
+    const diff = Date.now() - new Date(iso).getTime();
+    if (diff < 60000) return '刚刚';
+    if (diff < 3600000) return `${Math.floor(diff / 60000)} 分钟前`;
+    if (diff < 86400000) return `${Math.floor(diff / 3600000)} 小时前`;
+    return `${Math.floor(diff / 86400000)} 天前`;
+  },
+
+  /** 加载任务 Tab */
+  async loadTasksTab(nodeId: string) {
+    const nid = safeAttr(nodeId);
+    const container = document.getElementById(`inline-tab-content-${nid}`);
+    if (!container) return;
+
+    // 展示 loading
+    container.innerHTML = `<div class="px-6 pb-8 pt-4 bg-surface/30 rounded-xl border border-border-default/20">
+      <div class="flex items-center justify-between mb-6 border-b border-border-default/20 pb-4">
+        <h4 class="text-xl font-headline font-bold tracking-tight text-text-primary">任务队列</h4>
+        <button class="px-4 py-1.5 rounded-full bg-primary/10 text-primary hover:bg-primary hover:text-white text-xs font-bold uppercase tracking-wider flex items-center gap-2 transition-all cursor-pointer" onclick="NodeDetailPanel.loadTasksTab('${nid}')">
+          <span class="[&_svg]:w-3.5 [&_svg]:h-3.5">${L('refresh-cw')}</span> 刷新
+        </button>
+      </div>
+      <div class="flex items-center gap-2 text-text-muted text-sm py-8 justify-center">
+        <span class="[&_svg]:w-4 [&_svg]:h-4 animate-spin">${L('loader-2')}</span> 加载任务列表…
+      </div>
+    </div>`;
+    refreshIcons();
+
+    // 拉取任务数据
+    let tasks: any[] = [];
+    try {
+      const resp = await fetch(`/api/nodes/${encodeURIComponent(nodeId)}/tasks`, {
+        headers: { Authorization: `Bearer ${App.token}` },
+      });
+      const data = await resp.json();
+      tasks = data.tasks || [];
+    } catch (err) {
+      container.innerHTML = `<div class="text-danger text-sm py-4">加载任务列表失败</div>`;
+      return;
+    }
+
+    // 按入队时间倒序
+    tasks.sort((a: any, b: any) => new Date(b.queuedAt).getTime() - new Date(a.queuedAt).getTime());
+
+    let html = `<div class="px-6 pb-8 pt-4 bg-surface/30 rounded-xl border border-border-default/20">
+      <div class="flex items-center justify-between mb-6 border-b border-border-default/20 pb-4">
+        <div class="flex items-center gap-3">
+          <h4 class="text-xl font-headline font-bold tracking-tight text-text-primary">任务队列</h4>
+          <span class="text-xs text-text-muted">${tasks.length} 条记录</span>
+        </div>
+        <button class="px-4 py-1.5 rounded-full bg-primary/10 text-primary hover:bg-primary hover:text-white text-xs font-bold uppercase tracking-wider flex items-center gap-2 transition-all cursor-pointer" onclick="NodeDetailPanel.loadTasksTab('${nid}')">
+          <span class="[&_svg]:w-3.5 [&_svg]:h-3.5">${L('refresh-cw')}</span> 刷新
+        </button>
+      </div>`;
+
+    if (tasks.length === 0) {
+      html += `<div class="flex flex-col items-center gap-3 py-12 text-text-muted">
+        <span class="[&_svg]:w-10 [&_svg]:h-10 opacity-30">${L('inbox')}</span>
+        <p class="text-sm">暂无任务</p>
+        <p class="text-xs opacity-60">安装技能或管理 OpenClaw 时，任务会自动出现在这里</p>
+      </div>`;
+    } else {
+      html += `<div class="space-y-2">`;
+      for (const task of tasks) {
+        const icon = this._taskTypeIcon(task.type);
+        const label = this._taskTypeLabel(task.type);
+        const badge = this._taskStatusBadge(task.status);
+        const time = this._relativeTime(task.queuedAt);
+        const canDelete = ['completed', 'failed', 'timeout'].includes(task.status);
+        const hasResult = task.result && task.result.code != null;
+        const taskNid = safeAttr(task.taskId);
+
+        html += `<div class="bg-elevated/50 rounded-lg border border-border-subtle/50 overflow-hidden">
+          <div class="flex items-center gap-3 px-4 py-3">
+            <span class="[&_svg]:w-4 [&_svg]:h-4 text-text-muted shrink-0">${L(icon)}</span>
+            <div class="flex-1 min-w-0">
+              <div class="flex items-center gap-2">
+                <span class="text-sm font-medium text-text-primary truncate">${escHtml(task.skillName || label)}</span>
+                ${badge}
+              </div>
+              <div class="text-[10px] text-text-muted mt-0.5">${escHtml(label)} · ${time}</div>
+            </div>
+            <div class="flex items-center gap-1 shrink-0">`;
+
+        if (hasResult) {
+          html += `<button class="p-1.5 rounded-md hover:bg-surface text-text-muted hover:text-text-primary transition cursor-pointer" onclick="NodeDetailPanel._toggleTaskResult('${taskNid}')" title="查看结果">
+            <span class="[&_svg]:w-3.5 [&_svg]:h-3.5">${L('chevron-down')}</span>
+          </button>`;
+        }
+        if (canDelete) {
+          html += `<button class="p-1.5 rounded-md hover:bg-danger/10 text-text-muted hover:text-danger transition cursor-pointer" onclick="NodeDetailPanel._deleteTask('${nid}','${taskNid}')" title="删除">
+            <span class="[&_svg]:w-3.5 [&_svg]:h-3.5">${L('x')}</span>
+          </button>`;
+        }
+        if (task.status === 'dispatched') {
+          html += `<span class="[&_svg]:w-3.5 [&_svg]:h-3.5 text-info animate-spin">${L('loader-2')}</span>`;
+        }
+
+        html += `</div></div>`;
+
+        // 可展开的结果面板
+        if (hasResult) {
+          const isErr = task.result.code !== 0;
+          const output = task.result.stdout || task.result.stderr || '(无输出)';
+          html += `<div id="task-result-${taskNid}" class="hidden border-t border-border-subtle/50 px-4 py-3 bg-surface/50">
+            <div class="flex items-center gap-2 mb-2">
+              <span class="text-[10px] font-mono ${isErr ? 'text-danger' : 'text-success'}">exit code: ${task.result.code}</span>
+            </div>
+            <pre class="text-[11px] font-mono text-text-secondary bg-elevated rounded-md p-3 max-h-32 overflow-auto whitespace-pre-wrap break-all">${escHtml(output)}</pre>
+          </div>`;
+        }
+
+        html += `</div>`;
+      }
+      html += `</div>`;
+    }
+
+    html += `</div>`;
+    container.innerHTML = html;
+    refreshIcons();
+  },
+
+  /** 展开/折叠任务结果 */
+  _toggleTaskResult(taskId: string) {
+    const el = document.getElementById(`task-result-${taskId}`);
+    if (el) el.classList.toggle('hidden');
+  },
+
+  /** 删除指定任务 */
+  async _deleteTask(nodeId: string, taskId: string) {
+    try {
+      const resp = await fetch(`/api/nodes/${encodeURIComponent(nodeId)}/tasks/${encodeURIComponent(taskId)}`, {
+        method: 'DELETE',
+        headers: { Authorization: `Bearer ${App.token}` },
+      });
+      if (resp.ok) {
+        showToast('任务已删除', 'success');
+        this.loadTasksTab(nodeId);
+      } else {
+        showToast('删除失败', 'error');
+      }
+    } catch {
+      showToast('网络错误', 'error');
+    }
   },
 
   /** 技能 Tab 骨架（同步，立即展示 loading 状态） */

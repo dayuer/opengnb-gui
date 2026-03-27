@@ -12,6 +12,8 @@ import { Settings } from './pages/settings';
 import { Skills } from './pages/skills';
 import { Topology } from './pages/topology';
 
+import { NodeDetailPanel } from './components/node-detail-panel';
+
 // --- window 全局挂载（兼容 HTML 内联 onclick 事件） ---
 const w = window as any;
 w.$ = $;
@@ -39,6 +41,7 @@ w.Groups = Groups;
 w.Settings = Settings;
 w.Skills = Skills;
 w.Topology = Topology;
+w.NodeDetailPanel = NodeDetailPanel;
 
 // --- 启动 ---
 document.addEventListener('DOMContentLoaded', () => {
