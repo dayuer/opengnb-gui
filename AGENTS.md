@@ -174,3 +174,25 @@ deploy.sh:
 | **命令过滤共享模块** | command-filter.ts 被 ai-ops 和 ws-handler 共用 |
 | **D3.js CDN 懒加载** | 拓扑页面首次访问时按需加载 D3 v7 |
 | **Playbook Kahn 排序** | 步骤依赖拓扑排序，并行分发无依赖步骤 |
+| **synon SSH 用户** | 非 root 连接，sudoers NOPASSWD，安全边界在 Console RBAC 层 |
+| **串行任务执行器** | 耗时命令入队串行执行，reqId 防重入，防止任务风暴压垮节点 |
+
+## SSH 安全模型
+
+```
+Console (ssh-manager.ts)
+  │ ssh2 Client, user=synon, key=data/security/ssh/id_ed25519
+  ↓
+Node (sshd, port 22)
+  │ synon 用户 ← /home/synon/.ssh/authorized_keys
+  │ sudoers: synon ALL=(ALL) NOPASSWD: ALL
+  │ 安全边界: Console ws-handler.ts RBAC 命令拦截（非 SSH 层）
+  ↓
+/root/.ssh/authorized_keys ← 紧急后备通道（同一公钥）
+```
+
+**初始化流程** (`initnode.sh`):
+1. `useradd -r -m -s /bin/bash synon` — 创建系统用户
+2. Console 公钥 → `/home/synon/.ssh/authorized_keys`
+3. `/etc/sudoers.d/synon` → `NOPASSWD: ALL`
+4. 同步公钥到 root authorized_keys（后备）

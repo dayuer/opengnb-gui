@@ -305,7 +305,9 @@ echo "      GNB 配置文件已写入"
 echo "      Console GNB WAN: ${CONSOLE_IP}:${CONSOLE_GNB_PORT:-9002} (node ${CONSOLE_GNB_NODE_ID})"
 echo "      Console TUN:     $CONSOLE_GNB_TUN_ADDR"
 
-# --- 注入 Console SSH 公钥（用于远程管理）---
+# --- 创建 synon 运维用户 + 注入 Console SSH 公钥 ---
+# 安全模型：Console SSH 以 synon 用户连接（非 root），sudoers 授权运维命令
+# 安全边界在 Console RBAC 层（ws-handler 命令拦截），SSH 层为最小权限传输通道
 CONSOLE_SSH_PUBKEY=$(curl -sS "$API_BASE/api/enroll/pubkey" 2>/dev/null | python3 -c "
 import sys, json
 try:
@@ -314,17 +316,48 @@ try:
 except Exception:
     pass
 " 2>/dev/null)
+
 if [ -n "$CONSOLE_SSH_PUBKEY" ]; then
+    # 1. 创建 synon 系统用户（幂等）
+    if ! id synon &>/dev/null; then
+        useradd -r -m -s /bin/bash -c "SynonClaw Console Agent" synon
+        echo "      ✅ 已创建 synon 用户"
+    else
+        echo "      synon 用户已存在（跳过）"
+    fi
+
+    # 2. 部署 Console SSH 公钥到 synon 用户
+    SYNON_SSH_DIR="/home/synon/.ssh"
+    mkdir -p "$SYNON_SSH_DIR"
+    chmod 700 "$SYNON_SSH_DIR"
+    touch "$SYNON_SSH_DIR/authorized_keys"
+    chmod 600 "$SYNON_SSH_DIR/authorized_keys"
+    chown -R synon:synon "$SYNON_SSH_DIR"
+
+    if ! grep -qF "$CONSOLE_SSH_PUBKEY" "$SYNON_SSH_DIR/authorized_keys" 2>/dev/null; then
+        echo "$CONSOLE_SSH_PUBKEY" >> "$SYNON_SSH_DIR/authorized_keys"
+        chown synon:synon "$SYNON_SSH_DIR/authorized_keys"
+        echo "      ✅ Console SSH 公钥已写入 synon 用户 authorized_keys"
+    else
+        echo "      公钥已存在（跳过）"
+    fi
+
+    # 3. 配置 sudoers NOPASSWD（安全边界在 Console RBAC 层）
+    SUDOERS_FILE="/etc/sudoers.d/synon"
+    if [ ! -f "$SUDOERS_FILE" ]; then
+        echo "synon ALL=(ALL) NOPASSWD: ALL" > "$SUDOERS_FILE"
+        chmod 440 "$SUDOERS_FILE"
+        echo "      ✅ sudoers 已配置 (NOPASSWD)"
+    fi
+
+    # 4. 保留 root authorized_keys 作为紧急后备通道
     mkdir -p /root/.ssh
     chmod 700 /root/.ssh
     touch /root/.ssh/authorized_keys
     chmod 600 /root/.ssh/authorized_keys
-    # 幂等：如果公钥已存在则跳过
     if ! grep -qF "$CONSOLE_SSH_PUBKEY" /root/.ssh/authorized_keys 2>/dev/null; then
         echo "$CONSOLE_SSH_PUBKEY" >> /root/.ssh/authorized_keys
-        echo "      Console SSH 公钥已写入 authorized_keys"
-    else
-        echo "      Console SSH 公钥已存在（跳过）"
+        echo "      root authorized_keys 已同步（后备通道）"
     fi
 else
     echo "      ⚠️ 无法获取 Console SSH 公钥，跳过"
