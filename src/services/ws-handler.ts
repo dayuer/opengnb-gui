@@ -4,6 +4,7 @@ const { WebSocketServer } = require('ws');
 const { createLogger } = require('./logger');
 const { resolveToken, verifyJwt } = require('../middleware/auth');
 const { checkCommandSafety } = require('./command-filter');
+const { buildWsMessage } = require('./task-dispatcher');
 import alertingGateway from './alerting-gateway';
 const log = createLogger('WsHandler');
 import type { Server } from 'http';
@@ -49,8 +50,9 @@ function createWsHandlers(deps: {
   sshManager: { shell(nodeConfig: Record<string, unknown>, opts: { cols: number; rows: number }): Promise<unknown> },
   audit: { log(action: string, data: Record<string, unknown>, req?: unknown): void },
   opsLog: { loadAllOpsLogs: () => Record<string, unknown> },
+  taskQueue?: { on(event: string, fn: (...args: unknown[]) => void): void; processTaskResults(nodeId: string, results: unknown[]): void } | null,
 }) {
-  const { server, keyManager, monitor, aiOps, sshManager, audit, opsLog } = deps;
+  const { server, keyManager, monitor, aiOps, sshManager, audit, opsLog, taskQueue } = deps;
 
   // --- 辅助函数 ---
 
@@ -497,6 +499,38 @@ function createWsHandlers(deps: {
 
       // 密钥滚动补发：若该节点有待同步的新公钥，立即发送
       if (onDaemonConnect) onDaemonConnect(nodeId);
+
+      // Observer 模式：订阅 TaskQueue 入队事件，实时推送给 daemon
+      if (taskQueue) {
+        const onTaskQueued = (evt: { nodeId: string; task: Record<string, unknown> }) => {
+          if (evt.nodeId !== nodeId) return;
+          if (!ws || ws.readyState !== 1) return;
+          const wsMsg = buildWsMessage(evt.task);
+          // 使用 sendToDaemon 统一走 reqId 配对机制，但对任务类命令用更长超时
+          const timeout = (evt.task.timeoutMs as number) || 120000;
+          sendToDaemon(nodeId, wsMsg, timeout)
+            .then((result: Record<string, unknown>) => {
+              // 闭环：daemon 执行完毕 → 更新 SQLite 任务状态
+              taskQueue.processTaskResults(nodeId, [{
+                taskId: evt.task.taskId,
+                code: result.ok ? 0 : (result.code ?? 1),
+                stdout: String(result.payload ?? result.stdout ?? ''),
+                stderr: String(result.stderr ?? ''),
+              }]);
+            })
+            .catch((err: Error) => {
+              log.warn(`任务分发失败 node=${nodeId} taskId=${evt.task.taskId}: ${err.message}`);
+              // 分发失败也要闭环，标记为 failed
+              taskQueue.processTaskResults(nodeId, [{
+                taskId: evt.task.taskId,
+                code: -1,
+                stdout: '',
+                stderr: `分发失败: ${err.message}`,
+              }]);
+            });
+        };
+        taskQueue.on('taskQueued', onTaskQueued);
+      }
 
       // ② 每 10s 发 WS Ping 帧，测量控制面 RTT
       pingTimer = setInterval(() => {

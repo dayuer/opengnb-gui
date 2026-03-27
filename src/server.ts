@@ -158,7 +158,7 @@ function initServices(store: any) {
   const clawRPC = new ClawRPC(sshManager);
 
   const wsHandlers = createWsHandlers({
-    server, keyManager, monitor, aiOps, sshManager, audit, opsLog,
+    server, keyManager, monitor, aiOps, sshManager, audit, opsLog, taskQueue,
   });
 
   // DaemonProxy: 优先 WSS claw_rpc，fallback 到 SSH ClawRPC

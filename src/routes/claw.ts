@@ -38,7 +38,7 @@ module.exports = function createClawRouter({ clawRPC, getNodesConfig, taskQueue 
     const task = {
       taskId: crypto.randomUUID(),
       type: 'claw_restart',
-      command: 'sudo systemctl restart openclaw',
+      command: '',  // 语义化类型，无需 shell 命令（daemon 原生处理）
       skillId: 'openclaw',
       skillName: 'OpenClaw',
       timeoutMs: 30000,
@@ -52,9 +52,8 @@ module.exports = function createClawRouter({ clawRPC, getNodesConfig, taskQueue 
     if (!taskQueue) return res.status(503).json({ error: '任务队列不可用' });
     const task = {
       taskId: crypto.randomUUID(),
-      type: 'claw_update',
-      // 标准升级流程：停服 → 下载最新二进制 → 替换 → 重启
-      command: 'sudo openclaw update --yes 2>&1 || (sudo systemctl stop openclaw && sudo curl -fsSL https://release.openclaw.io/install.sh | sudo bash && sudo systemctl start openclaw)',
+      type: 'claw_upgrade',
+      command: '',  // 语义化类型，由 daemon claw_manager::upgrade() 原生执行
       skillId: 'openclaw',
       skillName: 'OpenClaw Update',
       timeoutMs: 180000,
