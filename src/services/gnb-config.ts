@@ -45,10 +45,15 @@ class GnbConfig {
   }
 
   /**
-   * 生成全量 address.conf（index + 所有已审批节点）
+   * 生成全量 address.conf（index + Console WAN + Console TUN + 所有已审批节点）
+   *
+   * ★ Console WAN 条目（consoleNodeId|wanIp|wanPort）必须在 TUN 条目之前，
+   *   这是节点 GNB 找到 Console 进行 UDP 打洞的关键路径。
    */
   generateFullAddressConf(): string {
     const addressConfPath = path.join(this.gnbConfDir, 'address.conf');
+
+    // 保留已有的 index 行（或使用 indexAddr 生成默认值）
     let indexLine = `i|0|${this.gnbIndexAddr || '0.0.0.0'}|9001`;
     try {
       if (fs.existsSync(addressConfPath)) {
@@ -58,8 +63,21 @@ class GnbConfig {
       }
     } catch (_e) { log.debug('配置解析失败，使用默认值', (_e as Error)?.message); }
 
+    // 读取 Console WAN IP + 端口（来自 .env）
+    const consoleWanIp = process.env.CONSOLE_WAN_IP || '';
+    const gnbWanPort = process.env.GNB_WAN_PORT || '9002';
+
     const lines = [indexLine];
+
+    // ★ Console WAN 静态地址（必须：节点 GNB 依赖此条目打洞到 Console）
+    if (this.gnbNodeId && consoleWanIp) {
+      lines.push(`${this.gnbNodeId}|${consoleWanIp}|${gnbWanPort}`);
+    }
+
+    // Console TUN 路由条目
     lines.push(`${this.gnbNodeId}|${this.gnbTunAddr}|255.0.0.0`);
+
+    // 全部已审批节点
     for (const node of this.store.approvedWithGnb()) {
       if (node.tunAddr) {
         lines.push(`${node.gnbNodeId}|${node.tunAddr}|${node.netmask || '255.0.0.0'}`);
