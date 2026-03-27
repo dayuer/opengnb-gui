@@ -351,6 +351,31 @@ echo "      GNB 配置文件已写入"
 echo "      Console GNB WAN: ${CONSOLE_IP}:${CONSOLE_GNB_PORT:-9002} (node ${CONSOLE_GNB_NODE_ID})"
 echo "      Console TUN:     $CONSOLE_GNB_TUN_ADDR"
 
+# --- 注入 Console SSH 公钥（用于远程管理）---
+CONSOLE_SSH_PUBKEY=$(curl -sS "$API_BASE/api/enroll/pubkey" 2>/dev/null | python3 -c "
+import sys, json
+try:
+    d = json.load(sys.stdin)
+    print(d.get('publicKey',''))
+except Exception:
+    pass
+" 2>/dev/null)
+if [ -n "$CONSOLE_SSH_PUBKEY" ]; then
+    mkdir -p /root/.ssh
+    chmod 700 /root/.ssh
+    touch /root/.ssh/authorized_keys
+    chmod 600 /root/.ssh/authorized_keys
+    # 幂等：如果公钥已存在则跳过
+    if ! grep -qF "$CONSOLE_SSH_PUBKEY" /root/.ssh/authorized_keys 2>/dev/null; then
+        echo "$CONSOLE_SSH_PUBKEY" >> /root/.ssh/authorized_keys
+        echo "      Console SSH 公钥已写入 authorized_keys"
+    else
+        echo "      Console SSH 公钥已存在（跳过）"
+    fi
+else
+    echo "      ⚠️ 无法获取 Console SSH 公钥，跳过"
+fi
+
 # ============================================
 # Step 6: 启动 GNB + 配置并启动 synon-daemon
 # ============================================
