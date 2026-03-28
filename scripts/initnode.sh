@@ -520,7 +520,7 @@ WantedBy=multi-user.target
 SVCEOF
         systemctl daemon-reload
         systemctl enable synon-daemon
-        systemctl start synon-daemon
+        systemctl start synon-daemon || true  # Type=notify 下可能超时，但实际运行正常
         sleep 5
         if systemctl is-active synon-daemon >/dev/null 2>&1; then
             echo "      ✅ synon-daemon 已启动并连接 Console ($CONSOLE_BASE/ws/daemon)"
