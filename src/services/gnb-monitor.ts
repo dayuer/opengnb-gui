@@ -3,6 +3,7 @@ import type { NodeConfig, AgentReport, GnbMonitorOptions, SysInfo, PeerNode } fr
 import alertingGateway from './alerting-gateway';
 
 const EventEmitter = require('events');
+const { exec } = require('child_process');
 const { createLogger } = require('./logger');
 const log = createLogger('GnbMonitor');
 
@@ -22,6 +23,8 @@ class GnbMonitor extends EventEmitter {
   _staleTimer: ReturnType<typeof setInterval> | null;
   _store: unknown;
   _audit: unknown;
+  _sshManager: { getConnection(cfg: Record<string, unknown>): Promise<unknown> } | null;
+  _probing: Set<string>;
 
   constructor(nodesConfig: NodeConfig[], options: GnbMonitorOptions = {}) {
     super();
@@ -32,6 +35,8 @@ class GnbMonitor extends EventEmitter {
     this._staleTimer = null;
     this._store = options.store ?? null;
     this._audit = options.audit ?? null;
+    this._sshManager = null;
+    this._probing = new Set();
   }
 
   /**
@@ -254,32 +259,152 @@ class GnbMonitor extends EventEmitter {
   }
 
   /**
-   * 立即将节点标记为离线（daemon WS 断开时调用）
-   * 直接操作 latestState 避免 getAllStatus() 返回临时对象的引用问题
+   * 注入 SSH 管理器（延迟注入，避免循环依赖）
+   */
+  setSshManager(mgr: { getConnection(cfg: Record<string, unknown>): Promise<unknown> }) {
+    this._sshManager = mgr;
+  }
+
+  /**
+   * daemon WSS 断开时调用 — 先标记 probing 状态，主动探测后再决定是否离线
+   *
+   * 流程：probing → ping TUN IP → SSH 连接 → 全失败才标记 offline
    *
    * @param {string} nodeId - 节点 ID
-   * @param {string} reason - 离线原因
+   * @param {string} reason - 触发原因
    */
   markOffline(nodeId: string, reason = 'daemon WS 断开') {
+    // 防重入：同一节点只允许一次探测
+    if (this._probing.has(nodeId)) {
+      log.debug(`probeNode 已在执行中，跳过: ${nodeId}`);
+      return;
+    }
+
+    const state = this.latestState.get(nodeId);
+    if (state) {
+      state.wsConnected = false;
+      state.pingMs = null;
+      state.error = `${reason} — 探测中...`;
+      // 保持 online: true，但标记 probing 状态让前端感知
+      state.probing = true;
+    } else {
+      this.latestState.set(nodeId, {
+        online: true,
+        wsConnected: false,
+        pingMs: null,
+        probing: true,
+        lastUpdate: new Date().toISOString(),
+        error: `${reason} — 探测中...`,
+      });
+    }
+    log.info(`WSS 断联，启动主动探测: ${nodeId}`);
+    this.emit('update', this.getAllStatus());
+
+    // 异步探测
+    this._probeNode(nodeId, reason);
+  }
+
+  /**
+   * 直接标记离线（探测失败时的最终动作）
+   * @private
+   */
+  _forceOffline(nodeId: string, reason: string) {
     const state = this.latestState.get(nodeId);
     if (state) {
       state.online = false;
       state.wsConnected = false;
+      state.probing = false;
       state.pingMs = null;
       state.error = reason;
-    } else {
-      // 节点从未上报过心跳，但 daemonConns 有记录（首次断开场景）
-      // 插入最小骨架以确保前端能收到离线状态
-      this.latestState.set(nodeId, {
-        online: false,
-        wsConnected: false,
-        pingMs: null,
-        lastUpdate: new Date().toISOString(),
-        error: reason,
-      });
     }
-    log.info(`markOffline: ${nodeId} (${reason})`);
+    log.info(`节点确认离线: ${nodeId} (${reason})`);
+    this.emit('stale', nodeId);
+    // 外部告警
+    const cfg = this.nodesConfig.find((n: NodeConfig) => n.id === nodeId);
+    alertingGateway.alertNodeOffline(nodeId, cfg?.name || nodeId);
     this.emit('update', this.getAllStatus());
+  }
+
+  /**
+   * 主动探测节点可达性（ping TUN IP + SSH 连接）
+   *
+   * 逻辑：
+   * 1. ping -c 2 -W 3 TUN_IP（3 秒超时）
+   * 2. SSH 连接测试（getConnection，5 秒超时）
+   * 3. 两项全失败 → 标记 offline
+   * 4. 任一成功 → 恢复 online（daemon 自身可能崩溃但节点活着）
+   *
+   * @private
+   */
+  async _probeNode(nodeId: string, triggerReason: string) {
+    this._probing.add(nodeId);
+    const nodeConfig = this.nodesConfig.find(n => n.id === nodeId);
+    const tunAddr = nodeConfig?.tunAddr;
+
+    if (!tunAddr) {
+      log.warn(`无 TUN 地址，直接标记离线: ${nodeId}`);
+      this._probing.delete(nodeId);
+      this._forceOffline(nodeId, `${triggerReason} — 无可探测地址`);
+      return;
+    }
+
+    log.info(`探测 ${nodeId}: ping ${tunAddr} + SSH...`);
+
+    // 并行执行 ping 和 SSH
+    const [pingOk, sshOk] = await Promise.all([
+      this._probePing(tunAddr),
+      this._probeSsh(nodeConfig),
+    ]);
+
+    this._probing.delete(nodeId);
+
+    if (pingOk || sshOk) {
+      // 节点活着，daemon 可能崩溃了
+      const state = this.latestState.get(nodeId);
+      if (state) {
+        state.online = true;
+        state.probing = false;
+        state.error = `daemon 断联，但节点可达 (ping=${pingOk ? '✓' : '✗'} ssh=${sshOk ? '✓' : '✗'})`;
+      }
+      log.info(`探测结果: ${nodeId} 可达 (ping=${pingOk}, ssh=${sshOk})，保持在线`);
+      this.emit('update', this.getAllStatus());
+    } else {
+      // 全部失败，确认离线
+      this._forceOffline(nodeId, `${triggerReason} — 探测失败 (ping=✗ ssh=✗)`);
+    }
+  }
+
+  /**
+   * Ping 探测
+   * @private
+   * @returns {Promise<boolean>} true=可达
+   */
+  _probePing(ip: string): Promise<boolean> {
+    return new Promise(resolve => {
+      // -c 2: 发两个包; -W 3: 每包 3 秒超时
+      exec(`ping -c 2 -W 3 ${ip}`, { timeout: 8000 }, (err: Error | null) => {
+        resolve(!err);
+      });
+    });
+  }
+
+  /**
+   * SSH 连接探测
+   * @private
+   * @returns {Promise<boolean>} true=可连接
+   */
+  async _probeSsh(nodeConfig: NodeConfig | undefined): Promise<boolean> {
+    if (!this._sshManager || !nodeConfig) return false;
+    try {
+      // getConnection 有 30s 内部超时，这里用 Promise.race 限制到 5s
+      await Promise.race([
+        this._sshManager.getConnection(nodeConfig as unknown as Record<string, unknown>),
+        new Promise((_, reject) => setTimeout(() => reject(new Error('SSH 探测超时')), 5000)),
+      ]);
+      return true;
+    } catch {
+      return false;
+    }
   }
 
   /**

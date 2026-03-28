@@ -134,6 +134,8 @@ function initServices(store: any) {
     store,
     audit,
   });
+  // 注入 SSH 管理器，用于 WSS 断联后的主动探测
+  monitor.setSshManager(sshManager);
 
   const taskQueue = new TaskQueue(store, audit);
 

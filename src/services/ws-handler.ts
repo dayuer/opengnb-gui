@@ -45,7 +45,12 @@ const MAX_WS_CLIENTS = 10;
 function createWsHandlers(deps: {
   server: Server,
   keyManager: { getApprovedNodesConfig(): Record<string, unknown>[]; getPendingNodes(): Record<string, unknown>[]; getGroups(): unknown[]; getNodesByOwner(userId: string): unknown[] },
-  monitor: { getAllStatus(): WsStatusNode[]; ingestFromDaemon(nodeId: string, frame: Record<string, unknown>): void },
+  monitor: {
+    getAllStatus(): WsStatusNode[];
+    ingestFromDaemon(nodeId: string, frame: Record<string, unknown>): void;
+    markOffline(nodeId: string, reason?: string): void;
+    latestState: Map<string, Record<string, unknown>>;
+  },
   aiOps: { _resolveNode(nodeId: string | null): Record<string, unknown> | undefined; streamChat(nc: Record<string, unknown> | null | undefined, prompt: string, cb: (chunk: Record<string, unknown>) => void): { kill(): void } },
   sshManager: { shell(nodeConfig: Record<string, unknown>, opts: { cols: number; rows: number }): Promise<unknown> },
   audit: { log(action: string, data: Record<string, unknown>, req?: unknown): void },
@@ -501,14 +506,26 @@ function createWsHandlers(deps: {
       log.info(`daemon 已上线: ${nodeId} (v${daemonVersion})`);
 
       // ① 立即将节点标记为在线（不等下次心跳）
+      // 直接操作 latestState 避免 getAllStatus() 返回临时对象的引用问题
       if (monitor) {
-        const existing = monitor.getAllStatus().find((s: WsStatusNode) => s.id === nodeId);
+        const existing = monitor.latestState.get(nodeId);
         if (existing) {
           Object.assign(existing, {
             daemonVersion,
             daemonConnectedAt: new Date().toISOString(),
             online: true,
             wsConnected: true,
+            probing: false,
+            error: undefined,
+          });
+        } else {
+          monitor.latestState.set(nodeId, {
+            daemonVersion,
+            daemonConnectedAt: new Date().toISOString(),
+            online: true,
+            wsConnected: true,
+            probing: false,
+            lastUpdate: new Date().toISOString(),
             error: undefined,
           });
         }
@@ -602,8 +619,8 @@ function createWsHandlers(deps: {
         const pingMs = Date.now() - pendingPingTs;
         pendingPingTs = 0;
         if (monitor) {
-          const existing = monitor.getAllStatus().find((s: WsStatusNode) => s.id === nodeId);
-          if (existing) (existing as Record<string, unknown>).pingMs = pingMs;
+          const existing = monitor.latestState.get(nodeId);
+          if (existing) existing.pingMs = pingMs;
           broadcastMonitorUpdate(monitor.getAllStatus());
         }
         log.debug(`ping RTT ${nodeId}: ${pingMs}ms`);
@@ -665,11 +682,9 @@ function createWsHandlers(deps: {
         log.info(`daemon 已下线: ${nodeId}`);
         // ③ 立即将节点标记为离线，广播给前端
         // 注意：monitor.getAllStatus() 返回的是临时对象，Object.assign 无效
-        // 必须通过 markOffline 直接操作 latestState
+        // markOffline 先标记 probing 状态，主动探测节点可达性后再决定离线
         if (monitor) {
-          (monitor as unknown as { markOffline(id: string, reason: string): void })
-            .markOffline(nodeId, 'daemon WS 断开');
-          // markOffline 内部已 emit('update')，broadcastMonitorUpdate 由 server.ts 监听触发
+          monitor.markOffline(nodeId, 'daemon WS 断开');
         }
       }
     });
