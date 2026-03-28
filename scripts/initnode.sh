@@ -170,9 +170,32 @@ if [ -z "${PASSCODE:-}" ]; then
     echo "      ✅ passcode 已自动生成"
 fi
 
+# 探测本地网段（排除 lo 和 gnb_tun）
+detect_local_subnets() {
+    local subnets=""
+    if command -v ip >/dev/null 2>&1; then
+        subnets=$(ip -4 addr show scope global 2>/dev/null | awk '/inet / { print $2 }' | grep -v '^127\.' | sort -u | head -20)
+    elif command -v ifconfig >/dev/null 2>&1; then
+        subnets=$(ifconfig 2>/dev/null | awk '/inet / && !/127\.0\.0/ { gsub(/addr:/, ""); print $2 }' | head -20)
+    fi
+    # 输出为 JSON 数组
+    local arr="["
+    local first=1
+    for s in $subnets; do
+        [ $first -eq 0 ] && arr="${arr},"
+        arr="${arr}\"${s}\""
+        first=0
+    done
+    arr="${arr}]"
+    echo "$arr"
+}
+
+LOCAL_SUBNETS=$(detect_local_subnets)
+echo "      本地网段: $LOCAL_SUBNETS"
+
 ENROLL_RESP=$(curl -sS -X POST "$API_BASE/api/enroll" \
   -H "Content-Type: application/json" \
-  -d "{\"passcode\":\"$PASSCODE\",\"id\":\"$NODE_NAME\",\"name\":\"$NODE_NAME\"}")
+  -d "{\"passcode\":\"$PASSCODE\",\"id\":\"$NODE_NAME\",\"name\":\"$NODE_NAME\",\"localSubnets\":$LOCAL_SUBNETS}")
 
 STATUS=$(echo "$ENROLL_RESP" | json_val status)
 ENROLL_TOKEN=$(echo "$ENROLL_RESP" | json_val enrollToken)
@@ -210,8 +233,10 @@ fetch_status() {
     CONSOLE_GNB_NODE_ID=$(echo "$resp" | json_val consoleGnbNodeId)
     CONSOLE_GNB_TUN_ADDR=$(echo "$resp" | json_val consoleGnbTunAddr)
     CONSOLE_GNB_NETMASK=$(echo "$resp" | json_val consoleGnbNetmask)
+    CONSOLE_GNB_TUN_SUBNET=$(echo "$resp" | json_val consoleGnbTunSubnet)
     # 安全回退：若 API 未返回 netmask（旧版 Console），使用 255.255.0.0
     CONSOLE_GNB_NETMASK="${CONSOLE_GNB_NETMASK:-255.255.0.0}"
+    CONSOLE_GNB_TUN_SUBNET="${CONSOLE_GNB_TUN_SUBNET:-}"
 }
 
 if [ "$STATUS" = "approved" ]; then
