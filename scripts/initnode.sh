@@ -316,29 +316,29 @@ GNBEOF
 
 if curl -sSf -H "$ENROLL_AUTH" "$API_BASE/api/enroll/address-conf" -o "$GNB_CONF/address.conf" 2>/dev/null; then
     echo "      address.conf 已从 Console 拉取（含全部节点）"
-else
-    # 回退写法：
-    #  i|0|... → Index 服务器（帮助发现动态地址）
-    #  if|… → Console 作为 index+forward 节点，属性格式正确
-    CONSOLE_GNB_PORT="${CONSOLE_GNB_PORT:-9002}"
-    cat > "$GNB_CONF/address.conf" <<GNBEOF
-i|0|${CONSOLE_IP}|9001
-if|${CONSOLE_GNB_NODE_ID}|${CONSOLE_IP}|${CONSOLE_GNB_PORT}
-GNBEOF
-
-    # route.conf: Console TUN + 本节点 TUN（掩码由 API 返回，无硬编码）
-    cat > "$GNB_CONF/route.conf" <<GNBEOF
-${CONSOLE_GNB_NODE_ID}|${CONSOLE_GNB_TUN_ADDR}|${CONSOLE_GNB_NETMASK:-255.255.0.0}
-${GNB_NODE_ID}|${TUN_ADDR}|${CONSOLE_GNB_NETMASK:-255.255.0.0}
-GNBEOF
-    echo "      GNB 配置文件已写入（回退模式）"
-else
     # 从 Console 拉取的 address.conf 只包含 address 条目，需单独生成 route.conf
     cat > "$GNB_CONF/route.conf" <<GNBEOF
 ${CONSOLE_GNB_NODE_ID}|${CONSOLE_GNB_TUN_ADDR}|${CONSOLE_GNB_NETMASK:-255.255.0.0}
 ${GNB_NODE_ID}|${TUN_ADDR}|${CONSOLE_GNB_NETMASK:-255.255.0.0}
 GNBEOF
-    echo "      address.conf 已从 Console 拉取，route.conf 已生成"
+    echo "      route.conf 已生成"
+else
+    # 回退写法：
+    #  i|0|... → Index 服务器（帮助发现动态地址）
+    #  if|… → Console 作为 index+forward 节点，属性格式正确
+    CONSOLE_GNB_PORT="${CONSOLE_GNB_PORT:-9002}"
+    cat > "$GNB_CONF/address.conf" <<'GNBEOF'
+i|0|${CONSOLE_IP}|9001
+if|${CONSOLE_GNB_NODE_ID}|${CONSOLE_IP}|${CONSOLE_GNB_PORT}
+GNBEOF
+    # 回退模式下 address.conf 中的变量需要手动展开（heredoc 用了单引号阻止展开来避免 if| 被解析）
+    sed -i "s|\${CONSOLE_IP}|${CONSOLE_IP}|g; s|\${CONSOLE_GNB_NODE_ID}|${CONSOLE_GNB_NODE_ID}|g; s|\${CONSOLE_GNB_PORT}|${CONSOLE_GNB_PORT}|g" "$GNB_CONF/address.conf"
+
+    cat > "$GNB_CONF/route.conf" <<GNBEOF
+${CONSOLE_GNB_NODE_ID}|${CONSOLE_GNB_TUN_ADDR}|${CONSOLE_GNB_NETMASK:-255.255.0.0}
+${GNB_NODE_ID}|${TUN_ADDR}|${CONSOLE_GNB_NETMASK:-255.255.0.0}
+GNBEOF
+    echo "      GNB 配置文件已写入（回退模式）"
 fi
 echo "      Console GNB WAN: ${CONSOLE_IP}:${CONSOLE_GNB_PORT:-9002} (node ${CONSOLE_GNB_NODE_ID})"
 echo "      Console TUN:     $CONSOLE_GNB_TUN_ADDR  Netmask: ${CONSOLE_GNB_NETMASK}"
