@@ -30,6 +30,7 @@ opengnb-gui/
 │   │   ├── playbook-engine.ts           # Playbook 多步骤编排引擎（Kahn 拓扑排序）
 │   │   ├── mirror-updater.ts            # 软件镜像自动更新检查
 │   │   ├── audit-logger.ts              # 操作审计日志
+│   │   ├── subnet-detector.ts           # 子网探测 + CIDR 冲突检测（弹性 TUN）
 │   │   ├── ws-handler.ts                # WebSocket 处理（监控/终端/AI 三通道）
 │   │   └── logger.ts                    # 日志工厂（带时间戳 + 模块名）
 │   ├── stores/                           # NodeStore mixin 子模块
