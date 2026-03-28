@@ -1,6 +1,13 @@
 #!/bin/bash
 # SynonClaw Console — 部署脚本
-# 将 opengnb-gui 部署到远程服务器
+# 将 opengnb-gui 和 synon-daemon 部署到远程服务器
+#
+# 用法:
+#   ./scripts/deploy.sh
+#
+# 前提:
+#   - 本地 SSH 可连接 root@远程服务器
+#   - 服务器已安装 git, node >= 20, npm, nginx, cargo
 #
 # 用法:
 #   ./scripts/deploy.sh
@@ -20,6 +27,11 @@ REPO_URL="$(git -C "$(dirname "$0")/.." remote get-url origin 2>/dev/null || ech
 BRANCH="${DEPLOY_BRANCH:-main}"
 PORT="${DEPLOY_PORT:-3000}"
 
+# synon-daemon 相关配置
+DAEMON_DIR="/opt/synon-daemon"
+DAEMON_REPO="${DAEMON_REPO_URL:-https://github.com/dayuer/synon-daemon.git}"
+DAEMON_LOG_DIR="/var/log/synon-daemon"
+
 echo ""
 echo "  ╔══════════════════════════════════════╗"
 echo "  ║  SynonClaw Console — 部署到 $DOMAIN   ║"
@@ -31,11 +43,11 @@ echo "  Domain: $DOMAIN"
 echo ""
 
 # --- 1. 推送代码 ---
-echo "[1/5] 推送代码到远程仓库..."
+echo "[1/6] 推送代码到远程仓库..."
 git -C "$(dirname "$0")/.." push origin "$BRANCH" 2>/dev/null || echo "      (跳过 push，手动推送或首次部署)"
 
 # --- 2. 远程安装 Node.js (如需要) ---
-echo "[2/5] 检查远程环境..."
+echo "[2/6] 检查远程环境..."
 ssh "$SSH_USER@$SERVER" << 'REMOTE_CHECK'
 set -e
 if ! command -v node &>/dev/null; then
@@ -53,8 +65,8 @@ if ! command -v nginx &>/dev/null; then
 fi
 REMOTE_CHECK
 
-# --- 3. 部署代码 ---
-echo "[3/5] 部署代码到 $APP_DIR ..."
+# --- 3. 部署 Console 代码 ---
+echo "[3/6] 部署代码到 $APP_DIR ..."
 ssh "$SSH_USER@$SERVER" << REMOTE_DEPLOY
 set -e
 if [ -d "$APP_DIR/.git" ]; then
@@ -108,8 +120,77 @@ grep -q "^GNB_INDEX_PORT="   .env || echo "GNB_INDEX_PORT=9001"           >> .en
 echo "      GNB 配置已保护: node=1001 tun=198.18.0.1/16 wan=43.156.128.95:9002"
 REMOTE_DEPLOY
 
-# --- 4. 配置 systemd + nginx ---
-echo "[4/5] 配置服务..."
+# --- 4. 部署 synon-daemon 服务 ---
+echo "[4/6] 部署 synon-daemon 到 $DAEMON_DIR ..."
+ssh "$SSH_USER@$SERVER" << REMOTE_DAEMON
+set -e
+
+mkdir -p $DAEMON_LOG_DIR
+
+# 克隆或更新代码库
+if [ -d "$DAEMON_DIR/.git" ]; then
+    echo "      拉取最新 synon-daemon..."
+    cd $DAEMON_DIR && git fetch origin && git reset --hard origin/master
+else
+    echo "      克隆 synon-daemon..."
+    git clone --depth 1 $DAEMON_REPO $DAEMON_DIR
+fi
+
+# 编译
+ echo "      编译 synon-daemon（release）..."
+cd $DAEMON_DIR
+cargo build --release 2>&1 | tail -5
+
+# 安装二进制
+cp target/release/synon-daemon $DAEMON_DIR/synon-daemon
+chmod +x $DAEMON_DIR/synon-daemon
+echo "      已安装: $DAEMON_DIR/synon-daemon — \$(file $DAEMON_DIR/synon-daemon | cut -d: -f2)"
+
+# 创建配置文件（如不存在）
+if [ ! -f $DAEMON_DIR/agent.conf ]; then
+    echo "      创建默认 agent.conf..."
+    cat > $DAEMON_DIR/agent.conf << 'CONF_EOF'
+# synon-daemon 配置文件
+# 运行于 Console 服务器，不连接 Console WSS。
+# 此文件是好 Console 上的展示用退出占位，实际节点配置由 initnode.sh 生成
+CONF_EOF
+fi
+
+# systemd 服务单元
+cat > /etc/systemd/system/synon-daemon.service << 'UNIT_EOF'
+[Unit]
+Description=SynonClaw Daemon — 节点控制面代理
+After=network.target
+
+[Service]
+Type=notify
+User=root
+WorkingDirectory=/opt/synon-daemon
+ExecStart=/opt/synon-daemon/synon-daemon --config /opt/synon-daemon/agent.conf
+Restart=on-failure
+RestartSec=5
+TimeoutStartSec=30
+TimeoutStopSec=10
+# 日志输出到文件
+StandardOutput=append:/var/log/synon-daemon/daemon.log
+StandardError=append:/var/log/synon-daemon/daemon.log
+
+[Install]
+WantedBy=multi-user.target
+UNIT_EOF
+
+systemctl daemon-reload
+# 注意：Console 服务器本身不需要运行 synon-daemon，套 disable 防止自启
+systemctl disable synon-daemon 2>/dev/null || true
+systemctl stop synon-daemon 2>/dev/null || true
+echo "      synon-daemon 已构建完成，服务单元已注册（Console 上不启动）"
+echo "      日志目录: $DAEMON_LOG_DIR"
+echo "      配置文件: $DAEMON_DIR/agent.conf"
+echo "      二进制：  $DAEMON_DIR/synon-daemon"
+REMOTE_DAEMON
+
+# --- 5. 配置 systemd + nginx ---
+echo "[5/6] 配置服务..."
 ssh "$SSH_USER@$SERVER" << REMOTE_CONFIG
 set -e
 
@@ -204,8 +285,8 @@ nginx -t && systemctl reload nginx
 echo "      nginx 配置完成"
 REMOTE_CONFIG
 
-# --- 5. 配置 HTTPS + 自动续期 ---
-echo "[5/5] 配置 HTTPS + 自动续期..."
+# --- 6. 配置 HTTPS + 自动续期 ---
+echo "[6/6] 配置 HTTPS + 自动续期..."
 ssh "$SSH_USER@$SERVER" << REMOTE_SSL
 set -e
 if ! command -v certbot &>/dev/null; then
