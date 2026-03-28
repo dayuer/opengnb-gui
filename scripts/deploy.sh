@@ -160,17 +160,19 @@ fi
 cat > /etc/systemd/system/synon-daemon.service << 'UNIT_EOF'
 [Unit]
 Description=SynonClaw Daemon — 节点控制面代理
-After=network.target
+After=network-online.target gnb.service
+Wants=network-online.target
 
 [Service]
-Type=notify
+Type=simple
 User=root
 WorkingDirectory=/opt/synon-daemon
 ExecStart=/opt/synon-daemon/synon-daemon --config /opt/synon-daemon/agent.conf
-Restart=on-failure
+Restart=always
 RestartSec=5
-TimeoutStartSec=30
+TimeoutStartSec=10
 TimeoutStopSec=10
+Environment=RUST_LOG=info
 # 日志输出到文件
 StandardOutput=append:/var/log/synon-daemon/daemon.log
 StandardError=append:/var/log/synon-daemon/daemon.log

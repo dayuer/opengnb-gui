@@ -507,26 +507,31 @@ After=network-online.target gnb.service
 Wants=network-online.target
 
 [Service]
-Type=notify
+Type=simple
 ExecStart=$DAEMON_BIN --config $DAEMON_CONF_DIR/agent.conf
 Restart=always
 RestartSec=5
-WatchdogSec=30
+TimeoutStartSec=10
 TimeoutStopSec=10
 Environment=RUST_LOG=info
+# 日志输出到文件（避免 journal 无权限时丢失）
+StandardOutput=append:/var/log/synon-daemon.log
+StandardError=append:/var/log/synon-daemon.log
 
 [Install]
 WantedBy=multi-user.target
 SVCEOF
         systemctl daemon-reload
         systemctl enable synon-daemon
-        systemctl start synon-daemon || true  # Type=notify 下可能超时，但实际运行正常
-        sleep 5
+        systemctl restart synon-daemon
+
+        # 等短暂时间后检查状态，给 daemon 连接 Console 留余量
+        sleep 3
         if systemctl is-active synon-daemon >/dev/null 2>&1; then
-            echo "      ✅ synon-daemon 已启动并连接 Console ($CONSOLE_BASE/ws/daemon)"
+            echo "      ✅ synon-daemon 已启动 → Console ($CONSOLE_BASE/ws/daemon)"
         else
-            echo "      ⚠️ synon-daemon 启动失败"
-            journalctl -u synon-daemon --no-pager -n 8 2>/dev/null || true
+            echo "      ⚠️ synon-daemon 首次启动中（Restart=always 将自动重试）"
+            journalctl -u synon-daemon --no-pager -n 5 2>/dev/null || tail -5 /var/log/synon-daemon.log 2>/dev/null || true
         fi
     fi
 fi
