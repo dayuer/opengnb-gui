@@ -204,6 +204,8 @@ const migrations = [
   `ALTER TABLE nodes ADD COLUMN skills TEXT DEFAULT '[]'`,
   // 密钥滚动：0=已同步；1=待同步新公钥（daemon 重连后补发）
   `ALTER TABLE nodes ADD COLUMN pubkeyRotationPending INTEGER DEFAULT 0`,
+  // 弹性 TUN：存储节点上报的本地网段 CIDR JSON 数组
+  `ALTER TABLE nodes ADD COLUMN localSubnets TEXT DEFAULT '[]'`,
 ];
 for (const sql of migrations) {
   try { db.exec(sql); } catch { /* 列已存在 */ }
