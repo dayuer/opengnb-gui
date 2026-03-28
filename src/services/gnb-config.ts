@@ -75,10 +75,11 @@ class GnbConfig {
   }
 
   /**
-   * 生成全量 address.conf（index + Console WAN + Console TUN + 所有已审批节点）
+   * 生成全量 address.conf（index + Console TUN + Console WAN + 所有已审批节点）
    *
-   * ★ Console WAN 条目（consoleNodeId|wanIp|wanPort）必须在 TUN 条目之前，
-   *   这是节点 GNB 找到 Console 进行 UDP 打洞的关键路径。
+   * ★ Console TUN 条目（consoleNodeId|tunIp|mask）必须在 WAN 条目之前！
+   *   OpenGNB 对同节点 ID 的多行解析中，首行 IP 被绑到 TUN 接口。
+   *   若 WAN 行在前，GNB 会把公网 IP 绑到 TUN → 隧道完全不通。
    */
   generateFullAddressConf(): string {
     const addressConfPath = path.join(this.gnbConfDir, 'address.conf');
@@ -99,13 +100,13 @@ class GnbConfig {
 
     const lines = [indexLine];
 
-    // ★ Console WAN 静态地址（必须：节点 GNB 依赖此条目打洞到 Console）
+    // ★ Console TUN 路由条目（必须在 WAN 之前！OpenGNB 首行 IP 绑 TUN 接口）
+    lines.push(`${this.gnbNodeId}|${this.gnbTunAddr}|${this._subnetMask}`);
+
+    // Console WAN 静态地址（节点 GNB 依赖此条目 UDP 打洞到 Console）
     if (this.gnbNodeId && consoleWanIp) {
       lines.push(`${this.gnbNodeId}|${consoleWanIp}|${gnbWanPort}`);
     }
-
-    // Console TUN 路由条目（掩码来自 subnet 配置）
-    lines.push(`${this.gnbNodeId}|${this.gnbTunAddr}|${this._subnetMask}`);
 
     // 全部已审批节点
     for (const node of this.store.approvedWithGnb()) {
