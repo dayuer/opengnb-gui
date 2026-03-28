@@ -254,6 +254,35 @@ class GnbMonitor extends EventEmitter {
   }
 
   /**
+   * 立即将节点标记为离线（daemon WS 断开时调用）
+   * 直接操作 latestState 避免 getAllStatus() 返回临时对象的引用问题
+   *
+   * @param {string} nodeId - 节点 ID
+   * @param {string} reason - 离线原因
+   */
+  markOffline(nodeId: string, reason = 'daemon WS 断开') {
+    const state = this.latestState.get(nodeId);
+    if (state) {
+      state.online = false;
+      state.wsConnected = false;
+      state.pingMs = null;
+      state.error = reason;
+    } else {
+      // 节点从未上报过心跳，但 daemonConns 有记录（首次断开场景）
+      // 插入最小骨架以确保前端能收到离线状态
+      this.latestState.set(nodeId, {
+        online: false,
+        wsConnected: false,
+        pingMs: null,
+        lastUpdate: new Date().toISOString(),
+        error: reason,
+      });
+    }
+    log.info(`markOffline: ${nodeId} (${reason})`);
+    this.emit('update', this.getAllStatus());
+  }
+
+  /**
    * 检查超时节点，标记为离线
    * @private
    */
@@ -261,10 +290,12 @@ class GnbMonitor extends EventEmitter {
     const now = Date.now();
     for (const [nodeId, state] of this.latestState) {
       if (!state.online) continue;
+      // daemon 节点由 WSS close 事件即时驱动离线，无需 stale 定时器介入
+      if (state.daemonHeartbeat) continue;
       const lastMs = new Date(state.lastUpdate).getTime();
       if (now - lastMs > this.staleTimeoutMs) {
         state.online = false;
-        state.error = `超过 ${Math.round(this.staleTimeoutMs / 1000)}s 无上报`;
+        state.error = `节点不可达 — 超过 ${Math.round(this.staleTimeoutMs / 1000)}s 无上报`;
         this.emit('stale', nodeId);
         // WH3: 节点离线外部告警
         const cfg = this.nodesConfig.find((n: NodeConfig) => n.id === nodeId);

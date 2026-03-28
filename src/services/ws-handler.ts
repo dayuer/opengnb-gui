@@ -664,17 +664,12 @@ function createWsHandlers(deps: {
         daemonConns.delete(nodeId);
         log.info(`daemon 已下线: ${nodeId}`);
         // ③ 立即将节点标记为离线，广播给前端
+        // 注意：monitor.getAllStatus() 返回的是临时对象，Object.assign 无效
+        // 必须通过 markOffline 直接操作 latestState
         if (monitor) {
-          const existing = monitor.getAllStatus().find((s: WsStatusNode) => s.id === nodeId);
-          if (existing) {
-            Object.assign(existing, {
-              online: false,
-              wsConnected: false,
-              pingMs: null,
-              error: 'daemon WS 断开',
-            });
-          }
-          broadcastMonitorUpdate(monitor.getAllStatus());
+          (monitor as unknown as { markOffline(id: string, reason: string): void })
+            .markOffline(nodeId, 'daemon WS 断开');
+          // markOffline 内部已 emit('update')，broadcastMonitorUpdate 由 server.ts 监听触发
         }
       }
     });
