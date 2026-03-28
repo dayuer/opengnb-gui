@@ -143,14 +143,13 @@ echo "      准备兼容性 GNU 编译环境 (Rocky Linux 8)..."
 echo "      编译 synon-daemon 节点兼容版..."
 cd $DAEMON_DIR
 docker run --rm --network host -v $PWD:/app -w /app rockylinux:8 sh -c '
-    dnf install -y gcc make openssl-devel curl &&
-    curl --proto "=https" --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y &&
-    source $HOME/.cargo/env &&
-    cargo build --release --target x86_64-unknown-linux-gnu
-' 2>&1 | tail -n 15
+    dnf install -y gcc make openssl-devel curl 2>/dev/null &&
+    curl --proto "=https" --tlsv1.2 -sSf https://sh.rustup.rs | RUSTUP_HOME=/opt/rustup CARGO_HOME=/opt/cargo sh -s -- -y --no-modify-path &&
+    CARGO_HOME=/opt/cargo PATH=/opt/cargo/bin:$PATH cargo build --release 2>&1 | tail -n 20
+'
 
-# 安装二进制
-cp target/x86_64-unknown-linux-gnu/release/synon-daemon $DAEMON_DIR/synon-daemon
+# 安装二进制（非 --target 交叉编译时产物在 target/release/）
+cp target/release/synon-daemon $DAEMON_DIR/synon-daemon
 chmod +x $DAEMON_DIR/synon-daemon
 echo "      已安装: $DAEMON_DIR/synon-daemon — \$(file $DAEMON_DIR/synon-daemon | cut -d: -f2)"
 
