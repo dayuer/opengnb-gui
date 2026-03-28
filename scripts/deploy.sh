@@ -137,14 +137,29 @@ else
 fi
 
 # 编译
- echo "      编译 synon-daemon（release）..."
+echo "      准备兼容性 GNU 编译环境 (Rocky Linux 8)..."
+
+echo "      编译 synon-daemon 节点兼容版..."
 cd $DAEMON_DIR
-cargo build --release 2>&1 | tail -5
+docker run --rm --network host -v $PWD:/app -w /app rockylinux:8 sh -c '
+    dnf install -y gcc make openssl-devel curl &&
+    curl --proto "=https" --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y &&
+    source $HOME/.cargo/env &&
+    cargo build --release --target x86_64-unknown-linux-gnu
+' 2>&1 | tail -n 15
 
 # 安装二进制
-cp target/release/synon-daemon $DAEMON_DIR/synon-daemon
+cp target/x86_64-unknown-linux-gnu/release/synon-daemon $DAEMON_DIR/synon-daemon
 chmod +x $DAEMON_DIR/synon-daemon
 echo "      已安装: $DAEMON_DIR/synon-daemon — \$(file $DAEMON_DIR/synon-daemon | cut -d: -f2)"
+
+# 推送到 Console 镜像目录供节点下载
+MIRROR_DIR="$APP_DIR/data/mirror/daemon"
+mkdir -p "$MIRROR_DIR"
+cp $DAEMON_DIR/synon-daemon "$MIRROR_DIR/synon-daemon-x86_64-linux-gnu"
+# 保留一个旧名字的镜像，兼容已经部署过且没有更新 initnode.sh 的老节点
+cp $DAEMON_DIR/synon-daemon "$MIRROR_DIR/synon-daemon-x86_64-musl"
+echo "      已将向下兼容 GNU 版本部署到镜像目录"
 
 # 创建配置文件（如不存在）
 if [ ! -f $DAEMON_DIR/agent.conf ]; then

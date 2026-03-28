@@ -1,4 +1,5 @@
 'use strict';
+import * as crypto from 'crypto';
 
 /**
  * OpenClaw RPC 代理
@@ -23,6 +24,11 @@ interface ClawNodeConfig {
 /** SSH 管理器接口 */
 interface ClawSshManager {
   exec(nodeConfig: ClawNodeConfig, command: string, timeout?: number): Promise<{ stdout: string; stderr: string; code: number }>;
+}
+
+/** 对原始文本计算 SHA-256（统一 trim 消除尾部换行差异） */
+function configHash(text: string): string {
+  return crypto.createHash('sha256').update(text.trim()).digest('hex');
 }
 
 class ClawRPC {
@@ -108,13 +114,26 @@ class ClawRPC {
     return this.httpCall(nodeConfig, '/v1/models');
   }
 
-  /** 获取 Gateway 配置 */
+  /** 获取 Gateway 配置并附带 SHA-256 ETag（单次 SSH） */
   async getConfig(nodeConfig: ClawNodeConfig) {
-    return this.rpcCall(nodeConfig, 'config.get');
+    const cmd = `export PATH=/usr/local/bin:$PATH; sudo openclaw config get --json 2>/dev/null`;
+    const result = await this.sshManager.exec(nodeConfig, cmd, 30000);
+    const text = result.stdout;
+    let data;
+    try { data = JSON.parse(text); } catch { data = { raw: text }; }
+    return { data, hash: configHash(text) };
   }
 
-  /** 增量修改配置 */
+  /** 增量修改配置（带 ETag 防脑裂校验） */
   async patchConfig(nodeConfig: ClawNodeConfig, rawPatch: string, baseHash: string) {
+    // ⚠️ TOCTOU: check 和 write 之间存在竞态窗口，目前无法原子化（需 OpenClaw 原生 CAS 支持）
+    if (baseHash) {
+      const getCmd = `export PATH=/usr/local/bin:$PATH; sudo openclaw config get --json 2>/dev/null`;
+      const currentRes = await this.sshManager.exec(nodeConfig, getCmd, 30000);
+      if (configHash(currentRes.stdout) !== baseHash) {
+        throw new Error('E_CONFLICT');
+      }
+    }
     return this.rpcCall(nodeConfig, 'config.patch', { raw: rawPatch, baseHash });
   }
 

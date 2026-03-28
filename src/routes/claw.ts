@@ -113,8 +113,11 @@ module.exports = function createClawRouter({ clawRPC, getNodesConfig, taskQueue 
       const result = await clawRPC.patchConfig(req.nodeConfig, patch, baseHash);
       res.json(result);
     } catch (err: unknown) {
-      const msg = process.env.NODE_ENV === 'production' ? '操作失败' : (err instanceof Error ? err.message : String(err));
-      res.status(500).json({ error: msg });
+      const msg = err instanceof Error ? err.message : String(err);
+      if (msg.includes('E_CONFLICT')) {
+        return res.status(409).json({ error: '配置已被修改，请刷新合并最新配置后再保存', type: 'E_CONFLICT' });
+      }
+      res.status(500).json({ error: process.env.NODE_ENV === 'production' ? '操作失败' : msg });
     }
   });
 

@@ -1,79 +1,65 @@
-# 弹性 TUN 子网探测 — TDD 任务清单
+# OpenClaw 集中控制台 — Sprint 1 任务清单
 
-## Sprint 目标
-实现 Console 侧的弹性子网探测 + 冲突避让，确保动态分配的 TUN IP 不与节点宿主机网段冲突。
+设计文档: docs/designs/openclaw-console-control.md
+分支: feature/openclaw-console-control
 
 ---
 
-## Task 1: 新增 `subnet-detector.ts` — CIDR 冲突检测核心模块
-- 文件: [NEW] `src/services/subnet-detector.ts`
-- 内容:
-  - `parseCidr(cidr)` — 解析 CIDR → {network, prefix, mask} (复用 gnb-config 已有逻辑)
-  - `cidrOverlaps(a, b)` — 两个 CIDR 是否冲突（位运算）
-  - `ipInCidr(ip, cidr)` — 单个 IP 是否落入 CIDR 范围
-  - `detectLocalSubnets()` — 扫描宿主机 UP 状态网卡，返回 CIDR 列表
-  - `findSafeSubnet(candidates, occupied)` — 从候选池选第一个无冲突子网
-- 验证: 单元测试覆盖所有边界用例
-- 复杂度: standard
-- 风险: 🟢 LOW
-
-## Task 2: 单元测试 `subnet-detector.test.ts`
-- 文件: [NEW] `src/__tests__/services/subnet-detector.test.ts`
-- 内容: 覆盖 cidrOverlaps、ipInCidr、findSafeSubnet 的正/负/边界用例
-- 验证: `npm test` 全部 PASS
-- 复杂度: standard
-- 风险: 🟢 LOW
-
-## Task 3: 增强 `gnb-config.ts` — nextAvailableIp 支持冲突检测
-- 文件: [MODIFY] `src/services/gnb-config.ts` L174-206
-- 内容:
-  - `nextAvailableIp()` 新增可选参数 `remoteSubnets?: string[]`
-  - 分配候选 IP 前，额外检查 `ipInCidr(candidate, remoteSubnet)` 是否冲突
-  - 冲突则跳过该 IP，继续尝试下一个
-- 验证: 新增测试用例验证 remoteSubnets 过滤行为
-- 复杂度: cheap
-- 风险: 🟢 LOW（参数可选，不传则行为不变）
-
-## Task 4: DB 迁移 — nodes 表新增 localSubnets 列
-- 文件: [MODIFY] `scripts/init-db.ts`
-- 内容: 幂等 `ALTER TABLE nodes ADD COLUMN localSubnets TEXT DEFAULT '[]'`
-- 验证: `npx tsx scripts/init-db.ts` 无报错
-- 复杂度: cheap
-- 风险: 🟢 LOW（幂等 ALTER + 默认值安全）
-
-## Task 5: `key-manager.ts` — 支持 auto 子网 + 审批时冲突检查
-- 文件: [MODIFY] `src/services/key-manager.ts`
-- 内容:
-  - constructor 中检测 `GNB_TUN_SUBNET=auto` → 调用 subnet-detector 自动选择
-  - `submitEnrollment()` 接受 `localSubnets` 字段并存入 DB
-  - `approveNode()` 调用 `nextAvailableIp(node.localSubnets)` 冲突检查
-- 验证: 集成测试覆盖 auto 模式 + 冲突场景
-- 复杂度: standard
-- 风险: 🟡 MED（修改审批核心路径，但 auto 为可选模式）
-
-## Task 6: `enroll.ts` — 注册 API 接受 localSubnets
-- 文件: [MODIFY] `src/routes/enroll.ts`
-- 内容:
-  - `POST /api/enroll` 请求体新增 `localSubnets` 字段（可选）
-  - `GET /api/enroll/status/:id` 响应新增 `consoleGnbTunSubnet` 返回子网信息
-- 验证: 集成测试
+## Task 1.1: Upgrade 自动回滚（Rust）
+- 文件: `/Users/liyuqing/sproot/synon-daemon/src/claw_manager.rs` `upgrade()` 函数
+- 改动:
+  - 升级前调用 `read_local_version().await` 记录 `prev_version`
+  - `npm install` 成功但 `restart()` 失败 → 回滚到 `prev_version`
+  - `npm install` 本身失败 → 直接返回错误（旧版本仍在，无需回滚）
+  - 回滚失败时日志警告，不 panic
+- 验证: `cargo test -p synon-daemon` 新增测试: `test_upgrade_rollback_on_restart_failure`
 - 复杂度: cheap
 - 风险: 🟢 LOW
 
-## Task 7: `initnode.sh` — 探测本地网段并上报
-- 文件: [MODIFY] `scripts/initnode.sh`
-- 内容:
-  - 新增 `detect_local_subnets()` Shell 函数
-  - 注册时将 localSubnets JSON 附带到 POST 请求体
-- 验证: 手动运行函数验证输出格式
+- [x] RED: 新增 `test_upgrade_rollback_on_restart_failure` 测试（必须 FAIL）
+- [x] GREEN: 修改 `upgrade()` 实现自动回滚
+- [x] REFACTOR: 检查错误消息格式、日志语言
+- [x] REVIEW: Spec + Quality
+
+---
+
+## Task 1.2: Config Tab 可编辑（TypeScript 前端）
+- 文件: `src/client/components/node-detail-panel.ts`
+  - `loadClawTab()` 的 config 子 Tab 渲染逻辑（L677-685 附近）
+- 改动:
+  - 将 `<pre>JSON.stringify(data)</pre>` 替换为:
+    - `<textarea id="claw-config-editor-{nid}">` 可编辑（等宽字体）
+    - 原始内容存入 `data-original` 属性（供 diff 对比）
+    - "保存" 按钮 → `Nodes.saveClawConfig(nodeId)`
+  - 新增方法 `saveClawConfig(nodeId)`:
+    - 读取 textarea 内容与 original 对比
+    - 调用 `POST /api/claw/:nodeId/config` with `{ patch: newContent, baseHash: "" }`
+    - Toast 成功/失败提示
+- 验证: `npm run build` 无报错（前端编译门控）
+- 复杂度: standard
+- 风险: 🟡 MED
+
+- [x] RED: `npm run build` 预检（基线）
+- [x] GREEN: 实现 textarea + 保存逻辑
+- [x] REFACTOR: UX 细节（loading 状态、按钮禁用）
+- [x] REVIEW: Spec + Quality
+
+---
+
+## Task 1.3: Channels Tab 可视化卡片（TypeScript 前端，只读）
+- 文件: `src/client/components/node-detail-panel.ts`
+  - `loadChannelsTab()` 渲染逻辑
+- 改动:
+  - 当前: `<pre>JSON.stringify(data)</pre>`
+  - 改为: 解析 `data.channels` / `data.data` 数组 → Provider 卡片列表
+  - 每张卡片: Provider 名称 + 类型 + 健康状态（running/error/unknown） + API Key 脱敏（前8位+...）
+  - 无 channels 数据时展示 "暂无渠道信息" 占位
+  - **一期不做增删改操作**
+- 验证: `npm run build` 无报错
 - 复杂度: cheap
 - 风险: 🟢 LOW
 
-## Task 8: `heartbeat.rs` — synon-daemon 心跳上报本地网段
-- 文件: [MODIFY] synon-daemon `src/heartbeat.rs`
-- 内容:
-  - SysInfo 新增 `local_subnets: Vec<String>`
-  - collect() 中扫描 `/proc/net/fib_trie` 或 `ip addr` 输出
-- 验证: `cargo build` 编译通过 + 手动测试
-- 复杂度: standard
-- 风险: 🟢 LOW
+- [x] RED: `npm run build` 预检
+- [x] GREEN: 实现卡片渲染逻辑
+- [x] REFACTOR: 检查 raw JSON 兜底展示逻辑
+- [x] REVIEW: Spec + Quality
