@@ -209,6 +209,16 @@ for (const sql of migrations) {
   try { db.exec(sql); } catch { /* 列已存在 */ }
 }
 
+// 把存量节点的 sshUser 统一刷成 synon（对齐新的隔离账户安全模型）
+try {
+  const info = db.prepare(`UPDATE nodes SET sshUser = 'synon' WHERE sshUser != 'synon' OR sshUser IS NULL`).run();
+  if (info.changes > 0) {
+    console.log(`[init-db] 已将 ${info.changes} 个存量节点的 sshUser 迁移为 'synon'`);
+  }
+} catch (e: any) {
+  console.warn(`[init-db] 迁移 sshUser 失败: ${e.message}`);
+}
+
 // ═══════════════════════════════════════
 // 数据迁移：旧 skills.db → nodes.db
 // ═══════════════════════════════════════
