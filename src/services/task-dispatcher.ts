@@ -46,16 +46,27 @@ type DispatchStrategy = (task: TaskContext, reqId: string) => WsMessage;
 // ═══════════════════════════════════════
 
 const STRATEGIES: Record<string, DispatchStrategy> = {
+  /**
+   * skill_install — 传结构化语义字段，Daemon 端根据 source 自决策安装命令
+   * 不传 Shell 命令字符串，保持 SkillInstall 消息的语义完整性
+   */
   skill_install: (task, reqId) => ({
     type: 'skill_install',
     reqId,
-    skillId: task.skillId || '',
+    skillId:    task.skillId    || '',
+    source:     task.source     || 'openclaw',
+    slug:       task.slug       || undefined,
+    githubRepo: task.githubRepo || undefined,
   }),
 
+  /**
+   * skill_uninstall — 传 skillId + source，Daemon 端根据 source 决定卸载方式
+   */
   skill_uninstall: (task, reqId) => ({
     type: 'skill_uninstall',
     reqId,
     skillId: task.skillId || '',
+    source:  task.source  || '',
   }),
 
   claw_restart: (_task, reqId) => ({

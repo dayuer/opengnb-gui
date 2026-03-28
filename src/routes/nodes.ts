@@ -249,17 +249,20 @@ function createNodesRouter(monitor: any, sshManager: any, keyManager: any, metri
       return res.status(404).json({ error: `节点 ${nodeId} 未找到或暂离线` });
     }
 
-    // 策略模式：查表生成安装命令
-    const result = buildInstallCommand({ skillId, source, slug: req.body.slug, githubRepo: req.body.githubRepo });
-    if (result.error) return res.status(400).json({ error: result.message });
-    if (result.skip) return res.json({ taskId: 'local', status: 'completed', message: result.message });
+    // 语义字段校验：console 源无需远程安装
+    if (source === 'console') {
+      return res.json({ taskId: 'local', status: 'completed', message: '平台内置技能，无需远程安装' });
+    }
 
+    // 将语义化字段入队，Daemon 端自决策安装策略（不传 Shell 命令字符串）
     const task = {
       taskId: crypto.randomUUID(),
       type: 'skill_install',
-      command: result.command,
       skillId,
       skillName: name || skillId,
+      source,
+      slug: req.body.slug,
+      githubRepo: req.body.githubRepo,
       timeoutMs: 120000,
     };
 
@@ -282,13 +285,12 @@ function createNodesRouter(monitor: any, sshManager: any, keyManager: any, metri
 
     const crypto = require('crypto');
     const uninstallSource = req.body?.source || req.query?.source || '';
-    // 策略模式：查表生成卸载命令
-    const uninstallCmd = buildUninstallCommand({ skillId, source: uninstallSource });
+    // 将语义化字段入队，Daemon 端自决策卸载策略（不传 Shell 命令字符串）
     const task = {
       taskId: crypto.randomUUID(),
       type: 'skill_uninstall',
-      command: uninstallCmd,
       skillId,
+      source: uninstallSource,
       timeoutMs: 60000,
     };
 
