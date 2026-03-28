@@ -190,6 +190,8 @@ class GnbMonitor extends EventEmitter {
         running:        clawRunning,
         rpcOk:          clawRpcOk,
         cpuPercent:     clawCpuPercent,       // ← 新增 CPU 占用
+        version:        sysInfo?.clawVersion || null,
+        hasUpdate:      sysInfo?.hasClawUpdate || false,
       },
       skills: installedSkills,      // ← 真实 skills 数据（取代空数组）
       daemonHeartbeat: true,

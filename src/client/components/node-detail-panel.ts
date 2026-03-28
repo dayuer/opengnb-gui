@@ -186,9 +186,7 @@ export const NodeDetailPanel = {
     // 拉取任务数据
     let tasks: any[] = [];
     try {
-      const resp = await fetch(`/api/nodes/${encodeURIComponent(nodeId)}/tasks`, {
-        headers: { Authorization: `Bearer ${App.token}` },
-      });
+      const resp = await App.authFetch(`/api/nodes/${encodeURIComponent(nodeId)}/tasks`);
       const data = await resp.json();
       tasks = data.tasks || [];
     } catch (err) {
@@ -286,9 +284,8 @@ export const NodeDetailPanel = {
   /** 删除指定任务 */
   async _deleteTask(nodeId: string, taskId: string) {
     try {
-      const resp = await fetch(`/api/nodes/${encodeURIComponent(nodeId)}/tasks/${encodeURIComponent(taskId)}`, {
+      const resp = await App.authFetch(`/api/nodes/${encodeURIComponent(nodeId)}/tasks/${encodeURIComponent(taskId)}`, {
         method: 'DELETE',
-        headers: { Authorization: `Bearer ${App.token}` },
       });
       if (resp.ok) {
         showToast('任务已删除', 'success');
@@ -641,33 +638,38 @@ export const NodeDetailPanel = {
     const detail = document.getElementById(`claw-content-${nodeId}`);
     if (!detail) return;
 
-    if (!nodeConfig?.clawToken) {
-      const monNode = App.nodesData.find((n: any) => n.id === nodeId);
-      const oc = monNode?.openclaw;
-      if (oc && oc.running && oc.config) {
-        const gw = oc.config.gateway || {};
-        const tokenPreview = gw.auth?.token ? gw.auth.token.substring(0, 12) + '…' : '无';
-        detail.innerHTML = `
-          <div class="space-y-3">
-            <div class="grid grid-cols-2 md:grid-cols-3 gap-3">
-              ${this.statCard(L('activity'), '状态', oc.running ? '运行中' : '未运行', oc.running ? 'text-success' : 'text-warning')}
-              ${this.statCard(L('hash'), 'PID', oc.pid || '-', '')}
-              ${this.statCard(L('radio'), '端口', gw.port || '-', '')}
-              ${this.statCard(L('key-round'), 'Token', tokenPreview, 'font-mono text-xs')}
-              ${this.statCard(L('folder'), '配置路径', oc.configPath || '-', 'text-xs')}
-              ${this.statCard(L('wifi'), 'RPC 健康', oc.rpcOk ? '正常' : '不可用', oc.rpcOk ? 'text-success' : 'text-warning')}
-            </div>
-            <details class="text-xs">
-              <summary class="cursor-pointer text-text-muted hover:text-text-primary transition">查看完整配置 JSON</summary>
-              <pre class="bg-base rounded-lg p-3 mt-2 overflow-x-auto">${escHtml(JSON.stringify(oc.config, null, 2))}</pre>
-            </details>
-            <div class="text-xs text-text-muted">${L('info')} Token 将在下次 Agent 上报时自动同步到配置表</div>
-          </div>`;
-      } else if (oc && !oc.running) {
-        detail.innerHTML = `<div class="text-warning text-sm">${L('alert-triangle')} OpenClaw 未运行 (进程未检测到)</div>`;
-      } else {
-        detail.innerHTML = `<div class="text-text-muted text-sm">${L('info')} 未检测到 OpenClaw 信息，等待 Agent 上报…</div>`;
+    const monNode = App.nodesData.find((n: any) => n.id === nodeId);
+    const oc = monNode?.openclaw;
+
+    if (activeSubTab === 'status') {
+      if (!oc) {
+        detail.innerHTML = `<div class="text-text-muted text-sm">${L('info')} 未检测到 OpenClaw 信息，等待终端上报…</div>`;
+        refreshIcons();
+        return;
       }
+      
+      const tokenPreview = nodeConfig?.clawToken ? nodeConfig.clawToken.substring(0, 12) + '…' : '无';
+      detail.innerHTML = `
+        <div class="space-y-3">
+          <div class="grid grid-cols-2 md:grid-cols-4 gap-3">
+            ${this.statCard(L('activity'), '状态', oc.running ? '运行中' : '未运行', oc.running ? 'text-success' : 'text-warning')}
+            ${this.statCard(L('info'), '版本', oc.version || '未知', '')}
+            ${this.statCard(L('cpu'), 'CPU占用', typeof oc.cpuPercent === 'number' ? oc.cpuPercent.toFixed(1) + '%' : '-', '')}
+            ${this.statCard(L('wifi'), 'RPC 可用性', oc.rpcOk ? '正常' : '不可用', oc.rpcOk ? 'text-success' : 'text-warning')}
+          </div>
+          <div class="grid grid-cols-2 md:grid-cols-4 gap-3">
+            ${this.statCard(L('key-round'), 'Token', tokenPreview, 'font-mono text-xs')}
+            ${this.statCard(L('radio'), 'RPC 端口', nodeConfig?.clawPort || 18789, '')}
+            ${oc.hasUpdate ? this.statCard(L('arrow-up-circle'), '更新可用', '有新版本', 'text-amber-400') : ''}
+          </div>
+          ${!nodeConfig?.clawToken && oc.running ? `<div class="text-xs text-text-muted mt-2">${L('info')} Token 正在通过隧道自动协商中...</div>` : ''}
+        </div>`;
+      refreshIcons();
+      return;
+    }
+
+    if (!nodeConfig?.clawToken) {
+      detail.innerHTML = `<div class="text-warning text-sm">${L('alert-triangle')} 等待 Token 协商完成才能查看详情</div>`;
       refreshIcons();
       return;
     }

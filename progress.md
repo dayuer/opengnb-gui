@@ -71,3 +71,6 @@
 | Git commit 总数 | 8（opengnb-gui 7 + synon-daemon 1） |
 | 最终测试通过 | 164/164 (全量回归) |
 | 未完成任务 | 无 |
+- [x] UI 增强: OpenClaw `status` 页签直读缓存，避免 HTTP 轮询导致的卡顿
+- [x] Core: 修复 `node-detail-panel.ts` 的 `App.token` 弃用属性 Type Error
+- [x] UI 增强: 状态页签额外展示 `version`、`cpuPercent`、`hasUpdate` 的指标卡片
