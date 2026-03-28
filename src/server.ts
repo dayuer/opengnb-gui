@@ -324,8 +324,16 @@ function initEventHandlers(deps: any) {
     console.log(`[RouteUpdate] address.conf 已广播到 ${onlineDaemons.length} 个在线 daemon`);
   };
 
-  // daemon 重连时补发密钥（处理离线节点的密钥滚动）
+  // daemon 重连时：1) 补发 address.conf（确保离线期间错过的节点审批能同步）2) 补发密钥轮换
   wsHandlers.setOnDaemonConnect((nodeId: string) => {
+    // ★ 无条件补发当前全量 address.conf（幂等，确保节点 GNB 路由始终最新）
+    const addressConf = keyManager.generateFullAddressConf();
+    const addrReqId = `route-reconnect-${Date.now()}`;
+    wsHandlers.sendToDaemon(nodeId, { type: 'route_update', reqId: addrReqId, addressConf }, 15000)
+      .then(() => console.log(`[RouteUpdate] 节点 ${nodeId} 重连，address.conf 已补发`))
+      .catch((e: Error) => console.warn(`[RouteUpdate] 补发 ${nodeId} 失败: ${e.message}`));
+
+    // 密钥轮换补发（原逻辑保留）
     const pendingNodes = keyManager.getPendingRotationNodes();
     if (!pendingNodes.includes(nodeId)) return;
 

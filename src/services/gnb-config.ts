@@ -108,6 +108,12 @@ class GnbConfig {
       lines.push(`${this.gnbNodeId}|${consoleWanIp}|${gnbWanPort}`);
     }
 
+    // ★ Console 作为 forward 中继节点（if| 行）
+    // 当两个终端节点之间 UDP 打洞失败时，通过 Console 中继，GNB 后台会持续尝试 P2P hole-punch
+    if (this.gnbNodeId && consoleWanIp) {
+      lines.push(`if|${this.gnbNodeId}|${consoleWanIp}|${gnbWanPort}`);
+    }
+
     // 全部已审批节点
     for (const node of this.store.approvedWithGnb()) {
       if (node.tunAddr) {
