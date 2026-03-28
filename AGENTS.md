@@ -71,7 +71,12 @@ opengnb-gui/
 │   │   │   ├── groups.ts                # 分组管理
 │   │   │   └── skills.ts                # 技能商店
 │   │   └── components/                  # UI 组件
-│   │       ├── node-detail-panel.ts     # 节点详情展开面板（含任务队列 UI）
+│   │       ├── node-detail-panel.ts     # 节点详情面板主路由（概览 + 技能 + Tab 调度）
+│   │       ├── panel-helpers.ts         # 通用工具层（nodeConfig 查找 + 错误渲染 + UI 原子）
+│   │       ├── claw-tab.ts              # OpenClaw Tab（status/config/models/channels + 防脑裂）
+│   │       ├── chat-tab.ts              # AI Chat WebSocket 终端
+│   │       ├── task-tab.ts              # 任务队列 + 技能操作
+│   │       ├── skill-card.ts            # 技能卡片三态组件库（chip/贴片/列表行）
 │   │       └── skill-modals.ts          # 技能安装/卸载弹窗
 │   └── types/
 │       ├── global.d.ts                  # 全局类型声明

@@ -74,3 +74,41 @@
 - [x] UI 增强: OpenClaw `status` 页签直读缓存，避免 HTTP 轮询导致的卡顿
 - [x] Core: 修复 `node-detail-panel.ts` 的 `App.token` 弃用属性 Type Error
 - [x] UI 增强: 状态页签额外展示 `version`、`cpuPercent`、`hasUpdate` 的指标卡片
+
+## [2026-03-28 17:18] Session 开始
+- 恢复任务：新任务 — OpenClaw 集中管控能力建设
+- 当前进度：设计讨论完成，审查完成，进入 TDD Brainstorming
+- 本次目标：整合讨论结论，产出设计文档 + 任务拆分
+- 语言/框架：TypeScript (Node.js) + Rust (synon-daemon)
+- 静态检查：node --test OK，cargo clippy OK
+- 前置验证：Channels CLI RPC 因 GNB 隧道不通暂无法远程验证，基于代码分析推进
+
+## [2026-03-28 17:44] Session 开始（TDD 执行）
+- 恢复任务：新 Sprint — OpenClaw 集中控制台 Sprint 1
+- 当前进度：设计审批通过，进入 TDD 执行
+- 本次目标：Task 1.1 (Rust 回滚) + Task 1.2 (Config 编辑) + Task 1.3 (Channels 卡片)
+- 语言/框架：Rust (synon-daemon) + TypeScript (前端)
+- 分支: feature/openclaw-console-control
+
+## [17:45] RED — Task 1.1 claw_manager rollback
+- 命令: `cargo test claw_manager`
+- 结果: FAIL ❌
+- 错误摘要: `rollback_pkg` 和 `format_upgrade_error` not found in scope
+- 预期: 符合 RED 要求，函数尚未实现
+
+## [17:47] GREEN — Task 1.1 claw_manager rollback
+- 命令: `cargo clippy -- -D warnings` & `cargo test claw_manager`
+- 结果: 10/10 PASS ✅，clippy 修复（dead_code/多余引用）
+- commit: 0aa1bd8
+
+## [17:48] RED — Task 1.2 & 1.3 Config/Channels UI
+- 命令: `npm run build`
+- 结果: Build passing ✅（采用无报错基线门控）
+- 预期: UI 层暂无单测，基线静态检查通过代表无降级
+
+## [17:50] GREEN — Task 1.2 & 1.3 Config/Channels UI
+- 命令: `npm run build`
+- 结果: Build passing ✅
+- 代码修改: Config 渲染更新为 textarea + Diff 校验；Channels 渲染为卡片列表。
+- 综合回归: Node --test 运行通过，无破坏性影响。
+- commit: 即将提交

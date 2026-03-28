@@ -5,6 +5,7 @@ interface ModalModule {
   show(html: string): void;
   close(): void;
   confirm(title: string, message: string): Promise<boolean>;
+  alert(title: string, messageHtml: string): void;
   pickedColor: string;
   COLORS: string[];
   renderColorPicker(selected?: string): string;
@@ -40,6 +41,19 @@ export const Modal: ModalModule = {
       `);
       this._resolve = resolve;
     });
+  },
+
+  alert(title: string, messageHtml: string): void {
+    this.show(`
+      <h3 class="text-base font-semibold mb-3 text-danger flex gap-2 items-center">
+        <svg class="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m21.73 18-8-14a2 2 0 0 0-3.48 0l-8 14A2 2 0 0 0 4 21h16a2 2 0 0 0 1.73-3Z"/><path d="M12 9v4"/><path d="M12 17h.01"/></svg>
+        ${escHtml(title)}
+      </h3>
+      <p class="text-sm text-text-secondary mb-5 leading-relaxed">${messageHtml}</p>
+      <div class="flex justify-end gap-2">
+        <button class="px-4 py-2 text-sm rounded-lg bg-primary hover:bg-primary/80 text-white transition cursor-pointer" onclick="Modal.close()">知道了</button>
+      </div>
+    `);
   },
 
   pickedColor: '#135bec',
