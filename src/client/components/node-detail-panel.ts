@@ -678,11 +678,107 @@ export const NodeDetailPanel = {
       const res = await App.authFetch(`/api/claw/${encodeURIComponent(nodeId)}/${activeSubTab}`);
       const data = await res.json();
       if (data.error) { detail.innerHTML = `<div class="text-danger text-sm">${escHtml(data.error)}</div>`; return; }
-      detail.innerHTML = `<pre class="text-xs bg-base rounded-lg p-3 overflow-x-auto max-h-60">${escHtml(JSON.stringify(data, null, 2))}</pre>`;
+
+      if (activeSubTab === 'config') {
+        // config 子 Tab：可编辑 textarea + 保存按钮
+        const raw = typeof data === 'string' ? data : JSON.stringify(data, null, 2);
+        detail.innerHTML = `
+          <div class="space-y-3">
+            <div class="text-xs text-text-muted flex items-center gap-1.5">
+              ${L('info')} 直接编辑下方配置，点击保存后将下发到节点并触发配置重载
+            </div>
+            <textarea
+              id="claw-config-editor-${nid}"
+              data-original="${escHtml(raw)}"
+              class="w-full font-mono text-xs bg-base border border-border-default/40 rounded-lg p-3 h-64 resize-y
+                     text-text-primary focus:outline-none focus:border-primary/60 transition"
+              spellcheck="false"
+            >${escHtml(raw)}</textarea>
+            <div class="flex items-center justify-between gap-3">
+              <div id="claw-config-diff-${nid}" class="text-xs text-text-muted flex-1 truncate"></div>
+              <div class="flex gap-2">
+                <button onclick="NodeDetailPanel.resetClawConfig('${nid}')"
+                  class="px-3 py-1.5 text-xs rounded-lg border border-border-default/40 text-text-muted
+                         hover:text-text-primary hover:bg-elevated transition cursor-pointer">
+                  重置
+                </button>
+                <button onclick="NodeDetailPanel.saveClawConfig('${nid}')"
+                  id="claw-config-save-${nid}"
+                  class="px-4 py-1.5 text-xs rounded-lg bg-primary hover:bg-primary/90 text-white
+                         font-medium transition cursor-pointer flex items-center gap-1.5">
+                  ${L('save')} 保存
+                </button>
+              </div>
+            </div>
+          </div>`;
+        // 监听编辑变化，在 diff 区域展示是否有修改
+        const textarea = document.getElementById(`claw-config-editor-${nid}`) as HTMLTextAreaElement;
+        const diffHint = document.getElementById(`claw-config-diff-${nid}`);
+        if (textarea && diffHint) {
+          textarea.addEventListener('input', () => {
+            const changed = textarea.value !== textarea.dataset.original;
+            diffHint.textContent = changed ? '⚡ 有未保存的修改' : '';
+            diffHint.className = `text-xs flex-1 truncate ${changed ? 'text-amber-400' : 'text-text-muted'}`;
+          });
+        }
+      } else {
+        // sessions 及其他子 tab：保持原有裸展
+        detail.innerHTML = `<pre class="text-xs bg-base rounded-lg p-3 overflow-x-auto max-h-60">${escHtml(JSON.stringify(data, null, 2))}</pre>`;
+      }
     } catch (err: any) {
       detail.innerHTML = `<div class="text-danger text-sm">请求失败: ${escHtml(err.message)}</div>`;
     }
     refreshIcons();
+  },
+
+  /** 保存 OpenClaw 配置并下发到节点 */
+  async saveClawConfig(nodeId: string) {
+    const btn = document.getElementById(`claw-config-save-${nodeId}`) as HTMLButtonElement;
+    const textarea = document.getElementById(`claw-config-editor-${nodeId}`) as HTMLTextAreaElement;
+    const diffHint = document.getElementById(`claw-config-diff-${nodeId}`);
+    if (!btn || !textarea) return;
+
+    const newContent = textarea.value;
+    if (newContent === textarea.dataset.original) {
+      showToast('配置无变化，无需保存', 'info');
+      return;
+    }
+
+    btn.disabled = true;
+    btn.innerHTML = `<span class="[&_svg]:w-3.5 [&_svg]:h-3.5 animate-spin">${L('loader-2')}</span> 保存中…`;
+
+    try {
+      // nodeId 参数是经过 safeAttr 处理的 nid；API 需要原始 nodeId
+      // 通过 data-node-id 反查（或直接用 nodeId 因为 safeAttr 只做 HTML 转义不改值）
+      const res = await App.authFetch(`/api/claw/${encodeURIComponent(nodeId)}/config`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ patch: newContent, baseHash: '' }),
+      });
+      const json = await res.json();
+      if (json.ok || res.ok) {
+        showToast('配置已保存并下发', 'success');
+        textarea.dataset.original = newContent;
+        if (diffHint) { diffHint.textContent = ''; }
+      } else {
+        showToast(`保存失败: ${json.error || '未知错误'}`, 'error');
+      }
+    } catch (err: any) {
+      showToast(`保存失败: ${err.message}`, 'error');
+    } finally {
+      btn.disabled = false;
+      btn.innerHTML = `${L('save')} 保存`;
+      refreshIcons();
+    }
+  },
+
+  /** 重置 OpenClaw 配置到加载时的原始内容 */
+  resetClawConfig(nodeId: string) {
+    const textarea = document.getElementById(`claw-config-editor-${nodeId}`) as HTMLTextAreaElement;
+    const diffHint = document.getElementById(`claw-config-diff-${nodeId}`);
+    if (!textarea) return;
+    textarea.value = textarea.dataset.original || '';
+    if (diffHint) { diffHint.textContent = ''; diffHint.className = 'text-xs flex-1 truncate text-text-muted'; }
   },
 
   /** AI 模型 Tab — 展示 /api/claw/:nodeId/models */
