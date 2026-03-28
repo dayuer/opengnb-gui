@@ -1,6 +1,6 @@
 // @alpha: 节点详情展开面板 — 从 nodes.ts 提取
 // 包含：概览/终端/技能/OpenClaw 四个 Tab 的渲染和交互逻辑
-import { $, L, refreshIcons, escHtml, showToast, formatBytes, pctColor, pctBg, safeAttr } from '../utils';
+import { $, L, refreshIcons, escHtml, showToast, formatBytes, formatUptime, pctColor, pctBg, safeAttr } from '../utils';
 import { App } from '../core';
 
 let _chatSessions: Record<string, any> = {};
@@ -74,7 +74,7 @@ export const NodeDetailPanel = {
     html += `<div><div class="text-xs font-bold text-primary uppercase tracking-widest mb-2">运行状态</div>
       <div class="grid grid-cols-2 md:grid-cols-4 gap-2">
         ${this.statCard(L('activity'), '采集延迟', `${node.sshLatencyMs||0}ms`, node.sshLatencyMs > 500 ? 'text-danger' : 'text-success')}
-        ${this.statCard(L('clock'), '运行时长', escHtml(si.uptime || '—'), '')}
+        ${this.statCard(L('clock'), '运行时长', si.uptime ? formatUptime(parseFloat(si.uptime)) : '—', '')}
         ${this.statCard(L('bot'), 'OpenClaw', clawRunning ? '运行中' : '未运行', clawRunning ? 'text-success' : 'text-warning',
           clawRunning && clawCpuPct !== null ? `CPU ${clawCpuPct}%` : '')}
         ${this.statCard(L('monitor'), '系统', escHtml(si.hostname || '—'), 'text-primary', escHtml(si.os || '—'))}

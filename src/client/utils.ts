@@ -30,12 +30,14 @@ export function formatBytes(b: number): string {
 
 export function formatUptime(seconds: number): string {
   if (!seconds) return '—';
-  const d = Math.floor(seconds / 86400);
-  const h = Math.floor((seconds % 86400) / 3600);
-  const m = Math.floor((seconds % 3600) / 60);
-  if (d > 0) return `${d} 天 ${h} 小时`;
-  if (h > 0) return `${h} 小时 ${m} 分钟`;
-  return `${m} 分钟`;
+  const s = Math.floor(seconds);
+  const d = Math.floor(s / 86400);
+  const h = Math.floor((s % 86400) / 3600);
+  const m = Math.floor((s % 3600) / 60);
+  if (d > 0) return `${d} 天 ${h} 小时 ${m} 分`;
+  if (h > 0) return `${h} 小时 ${m} 分`;
+  if (m > 0) return `${m} 分钟`;
+  return `${s} 秒`;
 }
 
 export function pctColor(pct: number): string {

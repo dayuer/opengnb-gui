@@ -297,7 +297,7 @@ export const Nodes = {
             </div>
             <div class="text-right">
               <p class="text-xs font-bold text-text-muted uppercase tracking-widest mb-1.5">运行</p>
-              <span class="text-sm font-bold text-text-muted">${escHtml(si.uptime || '—')}</span>
+              <span class="text-sm font-bold text-text-muted">${escHtml(si.uptime ? formatUptime(parseFloat(si.uptime)) : '—')}</span>
             </div>`}
           </div>
 
