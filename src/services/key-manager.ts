@@ -7,6 +7,7 @@ const { execSync } = require('child_process');
 const { resolvePaths, ensureDataDirs } = require('./data-paths');
 const NodeStore = require('./node-store');
 const GnbConfig = require('./gnb-config');
+const { detectLocalSubnets, findSafeSubnet, CANDIDATE_SUBNETS } = require('./subnet-detector');
 const { createLogger } = require('./logger');
 const log = createLogger('KeyManager');
 
@@ -48,6 +49,7 @@ interface EnrollmentInfo {
   tunAddr?: string;
   gnbMapPath?: string;
   gnbCtlPath?: string;
+  localSubnets?: string[];
   [key: string]: unknown;
 }
 
@@ -147,9 +149,32 @@ class KeyManager {
     // GNB 配置路径（Console 节点）
     this.gnbNodeId = process.env.GNB_NODE_ID || '1001';
     this.gnbConfDir = process.env.GNB_CONF_DIR || `/opt/gnb/conf/${this.gnbNodeId}`;
-    this.gnbTunAddr = process.env.GNB_TUN_ADDR || '192.168.100.1';
-    this.gnbTunSubnet = process.env.GNB_TUN_SUBNET || '192.168.100.0/16';
     this.gnbIndexAddr = process.env.GNB_INDEX_ADDR || '';
+
+    // 弹性 TUN 子网：auto 模式自动探测安全网段
+    const rawSubnet = process.env.GNB_TUN_SUBNET || '192.168.100.0/16';
+    if (rawSubnet === 'auto') {
+      const localNets = detectLocalSubnets();
+      const safe = findSafeSubnet(CANDIDATE_SUBNETS, localNets);
+      if (!safe) {
+        log.error('所有候选子网与宿主机网段冲突，回退到 198.18.0.0/16');
+        this.gnbTunSubnet = '198.18.0.0/16';
+      } else {
+        this.gnbTunSubnet = safe;
+        log.info(`auto 模式：选定安全子网 ${safe}（排除 ${localNets.join(', ') || '无'}）`);
+      }
+    } else {
+      this.gnbTunSubnet = rawSubnet;
+    }
+    // TUN 地址从子网派生：取 .0.1 作为 Console 地址
+    const envTunAddr = process.env.GNB_TUN_ADDR;
+    if (envTunAddr && rawSubnet !== 'auto') {
+      this.gnbTunAddr = envTunAddr;
+    } else {
+      // 从子网自动派生 Console TUN 地址（x.x.0.1）
+      const subParts = this.gnbTunSubnet.split('/')[0].split('.').map(Number);
+      this.gnbTunAddr = `${subParts[0]}.${subParts[1]}.0.1`;
+    }
 
     // @alpha V2: SQLite 存储层
     this.store = new NodeStore(paths.registry.nodesDb);
@@ -297,6 +322,10 @@ class KeyManager {
     const record = { ...nodeInfo };
     delete record.passcode;
 
+    // 提取并存储节点上报的本地网段
+    const localSubnets = Array.isArray(record.localSubnets) ? record.localSubnets : [];
+    delete record.localSubnets;
+
     this.store.insert({
       ...record,
       id: nodeId,
@@ -309,6 +338,7 @@ class KeyManager {
       status: 'pending',
       ready: false,
       ownerId: pc.userId || '',
+      localSubnets: JSON.stringify(localSubnets),
       submittedAt: new Date().toISOString(),
       approvedAt: null,
     });
@@ -381,8 +411,14 @@ class KeyManager {
     if (!node) return { success: false, message: '节点不存在' };
     if (node.status === 'approved') return { success: true, message: '已审批', tunAddr: node.tunAddr };
 
-    // 分配 TUN 地址：优先手动指定，否则自动分配
-    const tunAddr = options.tunAddr || node.tunAddr || this._gnb.nextAvailableIp();
+    // 解析节点上报的本地网段（用于冲突检测）
+    let remoteSubnets: string[] = [];
+    try {
+      remoteSubnets = JSON.parse(node.localSubnets || '[]');
+    } catch { /* 解析失败忽略 */ }
+
+    // 分配 TUN 地址：优先手动指定，否则自动分配（传入 remoteSubnets 冲突检测）
+    const tunAddr = options.tunAddr || node.tunAddr || this._gnb.nextAvailableIp(remoteSubnets);
     const gnbNodeId = options.gnbNodeId || node.gnbNodeId;
 
     this.store.update(nodeId, {
