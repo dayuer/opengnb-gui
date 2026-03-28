@@ -222,6 +222,17 @@ class GnbMonitor extends EventEmitter {
       });
     }
 
+    // 更新节点本地网段（daemon 心跳实时上报，应对 DHCP 续租）
+    const localSubnets = frame.localSubnets;
+    if (Array.isArray(localSubnets) && localSubnets.length > 0) {
+      try {
+        const store = (this as any)._store;
+        if (store?.update) {
+          store.update(nodeId, { localSubnets: JSON.stringify(localSubnets) });
+        }
+      } catch { /* 更新失败不影响心跳主流程 */ }
+    }
+
     this.emit('update', this.getAllStatus());
   }
 
