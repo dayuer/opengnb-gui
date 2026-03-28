@@ -103,6 +103,7 @@ function createEnrollRouter(keyManager: any, security: any = {}) {
       gnbNodeId: node.gnbNodeId || '',
       consoleGnbNodeId: keyManager.gnbNodeId,
       consoleGnbTunAddr: keyManager.gnbTunAddr,
+      consoleGnbNetmask: keyManager.gnbNetmask,
     });
   });
 

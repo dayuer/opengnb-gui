@@ -7,6 +7,25 @@ const { createLogger } = require('./logger');
 const log = createLogger('GnbConfig');
 
 /**
+ * 解析 CIDR 字符串，返回网络地址、掩码、前缀位数
+ * @example parseCidr('192.168.100.0/16') // {parts:[192,168,100,0], prefix:16, mask:'255.255.0.0'}
+ */
+function parseCidr(cidr: string): { parts: number[]; prefix: number; mask: string } {
+  const [ip, prefixStr] = cidr.split('/');
+  const prefix = parseInt(prefixStr, 10);
+  const parts = ip.split('.').map(Number);
+  // 生成掩码
+  const maskBits = prefix === 0 ? 0 : (0xffffffff << (32 - prefix)) >>> 0;
+  const mask = [
+    (maskBits >>> 24) & 0xff,
+    (maskBits >>> 16) & 0xff,
+    (maskBits >>> 8) & 0xff,
+    maskBits & 0xff,
+  ].join('.');
+  return { parts, prefix, mask };
+}
+
+/**
  * GNB 网络配置管理
  *
  * 职责：address.conf / route.conf 生成、GNB 节点 ID 分配、
@@ -28,6 +47,10 @@ class GnbConfig {
   gnbConfDir: string;
   gnbTunAddr: string;
   gnbIndexAddr: string;
+  gnbTunSubnet: string;     // e.g. '192.168.100.0/16'
+  _subnetMask: string;      // e.g. '255.255.0.0'
+  _subnetParts: number[];   // e.g. [192, 168, 100, 0]
+  _subnetPrefix: number;    // e.g. 16
   store: GnbNodeStore;
 
   constructor(options: {
@@ -35,12 +58,18 @@ class GnbConfig {
     gnbConfDir: string;
     gnbTunAddr: string;
     gnbIndexAddr: string;
+    gnbTunSubnet?: string;
     store: GnbNodeStore;
   }) {
     this.gnbNodeId = options.gnbNodeId;
     this.gnbConfDir = options.gnbConfDir;
     this.gnbTunAddr = options.gnbTunAddr;
     this.gnbIndexAddr = options.gnbIndexAddr;
+    this.gnbTunSubnet = options.gnbTunSubnet || '192.168.100.0/16';
+    const parsed = parseCidr(this.gnbTunSubnet);
+    this._subnetMask = parsed.mask;
+    this._subnetParts = parsed.parts;
+    this._subnetPrefix = parsed.prefix;
     this.store = options.store;
   }
 
@@ -74,13 +103,13 @@ class GnbConfig {
       lines.push(`${this.gnbNodeId}|${consoleWanIp}|${gnbWanPort}`);
     }
 
-    // Console TUN 路由条目
-    lines.push(`${this.gnbNodeId}|${this.gnbTunAddr}|255.0.0.0`);
+    // Console TUN 路由条目（掩码来自 subnet 配置）
+    lines.push(`${this.gnbNodeId}|${this.gnbTunAddr}|${this._subnetMask}`);
 
     // 全部已审批节点
     for (const node of this.store.approvedWithGnb()) {
       if (node.tunAddr) {
-        lines.push(`${node.gnbNodeId}|${node.tunAddr}|${node.netmask || '255.0.0.0'}`);
+        lines.push(`${node.gnbNodeId}|${node.tunAddr}|${node.netmask || this._subnetMask}`);
       }
     }
     return lines.join('\n') + '\n';
@@ -140,19 +169,37 @@ class GnbConfig {
 
   /**
    * 自动分配下一个可用 TUN IP 地址
-   * 策略：10.1.0.x → 10.1.1.x → ... → 10.255.255.x 顺序填充
+   * 分配范围根据 GNB_TUN_SUBNET 配置自动派生，默认 192.168.100.0/16
    */
   nextAvailableIp(): string {
     const usedIps = this.store.allTunAddrs();
     if (this.gnbTunAddr) usedIps.add(this.gnbTunAddr);
 
-    for (let b = 1; b <= 255; b++) {
-      for (let c = 0; c <= 255; c++) {
-        const start = (b === 1 && c === 0) ? 2 : 1;
-        for (let d = start; d <= 254; d++) {
-          const candidate = `10.${b}.${c}.${d}`;
+    const [a, b, c0] = this._subnetParts;
+    const prefix = this._subnetPrefix;
+
+    // 对于 /24：只遍历 d；/16：遍历 c+d；/8：遍历 b+c+d
+    if (prefix <= 8) {
+      for (let bb = b; bb <= 255; bb++) {
+        for (let cc = (bb === b ? c0 : 0); cc <= 255; cc++) {
+          for (let d = 1; d <= 254; d++) {
+            const candidate = `${a}.${bb}.${cc}.${d}`;
+            if (!usedIps.has(candidate)) return candidate;
+          }
+        }
+      }
+    } else if (prefix <= 16) {
+      for (let cc = c0; cc <= 255; cc++) {
+        for (let d = 1; d <= 254; d++) {
+          const candidate = `${a}.${b}.${cc}.${d}`;
           if (!usedIps.has(candidate)) return candidate;
         }
+      }
+    } else {
+      // /24 及以下
+      for (let d = 1; d <= 254; d++) {
+        const candidate = `${a}.${b}.${c0}.${d}`;
+        if (!usedIps.has(candidate)) return candidate;
       }
     }
     throw new Error('IP 地址池已耗尽');

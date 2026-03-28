@@ -118,7 +118,9 @@ class KeyManager {
   gnbNodeId: string;
   gnbConfDir: string;
   gnbTunAddr: string;
+  gnbTunSubnet: string;
   gnbIndexAddr: string;
+  gnbNetmask: string;
   store: InstanceType<typeof NodeStore>;
   _gnb: InstanceType<typeof GnbConfig>;
   passcodes: Map<string, PasscodeEntry>;
@@ -145,7 +147,8 @@ class KeyManager {
     // GNB 配置路径（Console 节点）
     this.gnbNodeId = process.env.GNB_NODE_ID || '1001';
     this.gnbConfDir = process.env.GNB_CONF_DIR || `/opt/gnb/conf/${this.gnbNodeId}`;
-    this.gnbTunAddr = process.env.GNB_TUN_ADDR || '10.1.0.1';
+    this.gnbTunAddr = process.env.GNB_TUN_ADDR || '192.168.100.1';
+    this.gnbTunSubnet = process.env.GNB_TUN_SUBNET || '192.168.100.0/16';
     this.gnbIndexAddr = process.env.GNB_INDEX_ADDR || '';
 
     // @alpha V2: SQLite 存储层
@@ -157,8 +160,12 @@ class KeyManager {
       gnbConfDir: this.gnbConfDir,
       gnbTunAddr: this.gnbTunAddr,
       gnbIndexAddr: this.gnbIndexAddr,
+      gnbTunSubnet: this.gnbTunSubnet,
       store: this.store,
     });
+
+    // 暴露掩码属性（为 enroll 接口提供）
+    this.gnbNetmask = this._gnb._subnetMask;
 
     /** @type {Map<string, {passcode: string, createdAt: string, used: boolean}>} */
     this.passcodes = new Map();
@@ -521,47 +528,6 @@ class KeyManager {
    */
   getAllNodes() { return this.store.all(); }
 
-  /**
-   * 生成完整的 address.conf 供新节点 GNB 使用
-   *
-   * 格式：
-   *   i|0|<index_ip>|<index_port>   — 用于动态地址发现
-   *   <consoleNodeId>|<wanIp>|<wanPort>  — ★ Console GNB 公网静态地址（让节点能直接打洞）
-   *   <consoleNodeId>|<tunAddr>|255.0.0.0 — Console TUN 路由
-   *   <nodeId>|<tunAddr>|255.0.0.0       — 其他已批准节点
-   */
-  generateFullAddressConf(): string {
-    const consoleIp = process.env.CONSOLE_WAN_IP || process.env.GNB_WAN_IP || '';
-    const gnbWanPort = process.env.GNB_WAN_PORT || '9002';
-    const indexPort = process.env.GNB_INDEX_PORT || '9001';
-    const lines: string[] = [];
-
-    // Index 服务器（帮助发现动态 WAN 地址）
-    if (consoleIp) {
-      lines.push(`i|0|${consoleIp}|${indexPort}`);
-    }
-
-    // Console GNB 自身 — 公网静态 WAN 地址（★关键：让节点 GNB 能直接打洞连上 Console）
-    if (this.gnbNodeId && consoleIp) {
-      lines.push(`${this.gnbNodeId}|${consoleIp}|${gnbWanPort}`);
-    }
-
-    // Console GNB TUN 路由条目
-    if (this.gnbNodeId && this.gnbTunAddr) {
-      const tun = this.gnbTunAddr.replace(/\/\d+$/, ''); // 去掉子网掩码
-      lines.push(`${this.gnbNodeId}|${tun}|255.0.0.0`);
-    }
-
-    // 全部已批准节点
-    const approved = this.store.findByStatus('approved');
-    for (const node of approved) {
-      if (node.gnbNodeId && node.tunAddr) {
-        lines.push(`${node.gnbNodeId}|${node.tunAddr}|255.0.0.0`);
-      }
-    }
-
-    return lines.join('\n') + '\n';
-  }
 
 
   /**

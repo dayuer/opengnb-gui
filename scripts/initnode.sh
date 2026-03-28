@@ -192,6 +192,7 @@ TUN_ADDR=""
 GNB_NODE_ID=""
 CONSOLE_GNB_NODE_ID=""
 CONSOLE_GNB_TUN_ADDR=""
+CONSOLE_GNB_NETMASK=""   # 由 API 返回，默认 255.255.0.0
 
 fetch_status() {
     local resp
@@ -208,6 +209,9 @@ fetch_status() {
     GNB_NODE_ID=$(echo "$resp" | json_val gnbNodeId)
     CONSOLE_GNB_NODE_ID=$(echo "$resp" | json_val consoleGnbNodeId)
     CONSOLE_GNB_TUN_ADDR=$(echo "$resp" | json_val consoleGnbTunAddr)
+    CONSOLE_GNB_NETMASK=$(echo "$resp" | json_val consoleGnbNetmask)
+    # 安全回退：若 API 未返回 netmask（旧版 Console），使用 255.255.0.0
+    CONSOLE_GNB_NETMASK="${CONSOLE_GNB_NETMASK:-255.255.0.0}"
 }
 
 if [ "$STATUS" = "approved" ]; then
@@ -290,20 +294,31 @@ if curl -sSf -H "$ENROLL_AUTH" "$API_BASE/api/enroll/address-conf" -o "$GNB_CONF
 else
     # 回退写法：
     #  i|0|... → Index 服务器（帮助发现动态地址）
-    #  静态条目写 Console GNB 公网 IP:9002，让节点 GNB 能直接打洞到 Console
+    #  if|… → Console 作为 index+forward 节点，属性格式正确
     CONSOLE_GNB_PORT="${CONSOLE_GNB_PORT:-9002}"
     cat > "$GNB_CONF/address.conf" <<GNBEOF
 i|0|${CONSOLE_IP}|9001
-${CONSOLE_GNB_NODE_ID}|${CONSOLE_IP}|${CONSOLE_GNB_PORT}
-${CONSOLE_GNB_NODE_ID}|${CONSOLE_GNB_TUN_ADDR}|255.0.0.0
-${GNB_NODE_ID}|${TUN_ADDR}|255.0.0.0
+if|${CONSOLE_GNB_NODE_ID}|${CONSOLE_IP}|${CONSOLE_GNB_PORT}
 GNBEOF
-fi
 
-grep -v '^i|' "$GNB_CONF/address.conf" > "$GNB_CONF/route.conf"
-echo "      GNB 配置文件已写入"
+    # route.conf: Console TUN + 本节点 TUN（掩码由 API 返回，无硬编码）
+    cat > "$GNB_CONF/route.conf" <<GNBEOF
+${CONSOLE_GNB_NODE_ID}|${CONSOLE_GNB_TUN_ADDR}|${CONSOLE_GNB_NETMASK:-255.255.0.0}
+${GNB_NODE_ID}|${TUN_ADDR}|${CONSOLE_GNB_NETMASK:-255.255.0.0}
+GNBEOF
+    echo "      GNB 配置文件已写入（回退模式）"
+else
+    # 从 Console 拉取的 address.conf 只包含 address 条目，需单独生成 route.conf
+    cat > "$GNB_CONF/route.conf" <<GNBEOF
+${CONSOLE_GNB_NODE_ID}|${CONSOLE_GNB_TUN_ADDR}|${CONSOLE_GNB_NETMASK:-255.255.0.0}
+${GNB_NODE_ID}|${TUN_ADDR}|${CONSOLE_GNB_NETMASK:-255.255.0.0}
+GNBEOF
+    echo "      address.conf 已从 Console 拉取，route.conf 已生成"
+fi
 echo "      Console GNB WAN: ${CONSOLE_IP}:${CONSOLE_GNB_PORT:-9002} (node ${CONSOLE_GNB_NODE_ID})"
-echo "      Console TUN:     $CONSOLE_GNB_TUN_ADDR"
+echo "      Console TUN:     $CONSOLE_GNB_TUN_ADDR  Netmask: ${CONSOLE_GNB_NETMASK}"
+
+
 
 # --- 创建 synon 运维用户 + 注入 Console SSH 公钥 ---
 # 安全模型：Console SSH 以 synon 用户连接（非 root），sudoers 授权运维命令
@@ -414,10 +429,14 @@ if ip addr show gnb_tun 2>/dev/null | grep -q "inet "; then
     GNB_TUN_UP=true
 fi
 
-if [ "$GNB_TUN_UP" = "true" ] && [ -n "$CONSOLE_GNB_TUN_ADDR" ]; then
-    echo "      正在验证 GNB 隧道连通性 ($TUN_ADDR → $CONSOLE_GNB_TUN_ADDR)..."
+# GNB 公网节点（Console）的 TUN 地址就是其公网 IP（GNB 设计如此）
+# CONSOLE_GNB_TUN_ADDR 是虚拟路由条目地址，用于 address.conf，不用于 ping
+# 连通性检测应 ping Console 的公网 IP（CONSOLE_HOST）
+GNB_PING_TARGET="$CONSOLE_HOST"
+if [ "$GNB_TUN_UP" = "true" ] && [ -n "$GNB_PING_TARGET" ]; then
+    echo "      正在验证 GNB 隧道连通性 ($TUN_ADDR → $GNB_PING_TARGET)..."
     while true; do
-        if ping -c 1 -W 5 "$CONSOLE_GNB_TUN_ADDR" > /dev/null 2>&1; then
+        if ping -c 1 -W 5 "$GNB_PING_TARGET" > /dev/null 2>&1; then
             echo "      ✅ GNB 隧道已连通!"
             break
         else
