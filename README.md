@@ -265,7 +265,8 @@ cp .env.example .env
 | `ADMIN_TOKEN` | (自动生成) | 管理员 Token |
 | `GNB_NODE_ID` | 1001 | Console GNB 节点 ID |
 | `GNB_CONF_DIR` | `/opt/gnb/conf/1001` | GNB 配置目录 |
-| `GNB_TUN_ADDR` | `10.1.0.1` | Console TUN 地址 |
+| `GNB_TUN_ADDR` | `198.18.0.1` | Console TUN 地址 |
+| `GNB_TUN_SUBNET` | `198.18.0.0/16` | 动态弹性 TUN 分配子网池 |
 | `GNB_INDEX_NODES` | — | Index Node 公网地址 |
 | `POLL_INTERVAL_MS` | 10000 | Agent 轮询间隔（ms）|
 | `STALE_TIMEOUT_MS` | 60000 | 离线判定超时（ms）|

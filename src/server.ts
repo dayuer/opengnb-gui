@@ -143,7 +143,7 @@ function initServices(store: any) {
     sshManager,
     provisionConfig: {
       indexNodes: process.env.GNB_INDEX_NODES || '',
-      consoleApiBase: process.env.CONSOLE_API_BASE || `http://10.1.0.1:${PORT}`,
+      consoleApiBase: process.env.CONSOLE_API_BASE || `http://198.18.0.1:${PORT}`,
     },
   });
 

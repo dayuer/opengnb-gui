@@ -199,7 +199,7 @@ export const Settings = {
       <div class="border-t border-border-subtle pt-8">
         <h3 class="text-sm font-bold uppercase tracking-widest text-text-muted mb-6">网络参数</h3>
         <div class="grid grid-cols-2 md:grid-cols-4 gap-4">
-          ${this._infoCard(L('globe'), '子网', '10.1.0.0/16', 'text-primary')}
+          ${this._infoCard(L('globe'), '子网', '198.18.0.0/16', 'text-primary')}
           ${this._infoCard(L('shield'), '加密', 'ED25519', 'text-success')}
           ${this._infoCard(L('server'), '端口', '3000', '')}
           ${this._infoCard(L('link'), '域名', 'api.synonclaw.com', 'text-primary')}
