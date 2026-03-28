@@ -121,6 +121,7 @@ echo "      GNB 配置已保护: node=1001 tun=198.18.0.1/16 wan=43.156.128.95:9
 REMOTE_DEPLOY
 
 # --- 4. 部署 synon-daemon 服务 ---
+MIRROR_DIR="${APP_DIR}/data/mirror/daemon"
 echo "[4/6] 部署 synon-daemon 到 $DAEMON_DIR ..."
 ssh "$SSH_USER@$SERVER" << REMOTE_DAEMON
 set -e
