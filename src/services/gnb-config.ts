@@ -4,6 +4,7 @@ const fs = require('fs');
 const path = require('path');
 const { execSync } = require('child_process');
 const { createLogger } = require('./logger');
+const { ipInCidr } = require('./subnet-detector');
 const log = createLogger('GnbConfig');
 
 /**
@@ -170,13 +171,22 @@ class GnbConfig {
   /**
    * 自动分配下一个可用 TUN IP 地址
    * 分配范围根据 GNB_TUN_SUBNET 配置自动派生，默认 192.168.100.0/16
+   *
+   * @param remoteSubnets 节点已上报的本地网段 CIDR 列表（可选），
+   *        分配时检查候选 IP 不与这些网段冲突
    */
-  nextAvailableIp(): string {
+  nextAvailableIp(remoteSubnets?: string[]): string {
     const usedIps = this.store.allTunAddrs();
     if (this.gnbTunAddr) usedIps.add(this.gnbTunAddr);
 
     const [a, b, c0] = this._subnetParts;
     const prefix = this._subnetPrefix;
+
+    /** 检查候选 IP 是否与节点本地网段冲突 */
+    const conflictsWithRemote = (ip: string): boolean => {
+      if (!remoteSubnets || remoteSubnets.length === 0) return false;
+      return remoteSubnets.some(cidr => ipInCidr(ip, cidr));
+    };
 
     // 对于 /24：只遍历 d；/16：遍历 c+d；/8：遍历 b+c+d
     if (prefix <= 8) {
@@ -184,7 +194,7 @@ class GnbConfig {
         for (let cc = (bb === b ? c0 : 0); cc <= 255; cc++) {
           for (let d = 1; d <= 254; d++) {
             const candidate = `${a}.${bb}.${cc}.${d}`;
-            if (!usedIps.has(candidate)) return candidate;
+            if (!usedIps.has(candidate) && !conflictsWithRemote(candidate)) return candidate;
           }
         }
       }
@@ -192,14 +202,14 @@ class GnbConfig {
       for (let cc = c0; cc <= 255; cc++) {
         for (let d = 1; d <= 254; d++) {
           const candidate = `${a}.${b}.${cc}.${d}`;
-          if (!usedIps.has(candidate)) return candidate;
+          if (!usedIps.has(candidate) && !conflictsWithRemote(candidate)) return candidate;
         }
       }
     } else {
       // /24 及以下
       for (let d = 1; d <= 254; d++) {
         const candidate = `${a}.${b}.${c0}.${d}`;
-        if (!usedIps.has(candidate)) return candidate;
+        if (!usedIps.has(candidate) && !conflictsWithRemote(candidate)) return candidate;
       }
     }
     throw new Error('IP 地址池已耗尽');
