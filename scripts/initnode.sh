@@ -415,11 +415,16 @@ if ip addr show gnb_tun 2>/dev/null | grep -q "inet "; then
 fi
 
 if [ "$GNB_TUN_UP" = "true" ] && [ -n "$CONSOLE_GNB_TUN_ADDR" ]; then
-    if ping -c 3 -W 5 "$CONSOLE_GNB_TUN_ADDR" > /dev/null 2>&1; then
-        echo "      ✅ GNB 隧道已连通 ($TUN_ADDR → $CONSOLE_GNB_TUN_ADDR)"
-    else
-        echo "      ⚠️ GNB 隧道 ping 不通（peer 发现需时间，daemon 将等待 TUN 就绪后再连）"
-    fi
+    echo "      正在验证 GNB 隧道连通性 ($TUN_ADDR → $CONSOLE_GNB_TUN_ADDR)..."
+    while true; do
+        if ping -c 1 -W 5 "$CONSOLE_GNB_TUN_ADDR" > /dev/null 2>&1; then
+            echo "      ✅ GNB 隧道已连通!"
+            break
+        else
+            echo "      ⚠️ GNB 隧道 ping 不通，等候 10 秒后重试 (peer 发现需时间)..."
+            sleep 10
+        fi
+    done
 fi
 
 # --- Step 6b: 配置并启动 synon-daemon ---
