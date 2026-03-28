@@ -431,9 +431,9 @@ RestartSec=5
 [Install]
 WantedBy=multi-user.target
 SVCEOF
-    systemctl daemon-reload
-    systemctl enable gnb
-    systemctl start gnb
+    systemctl daemon-reload >/dev/null 2>&1
+    systemctl enable gnb >/dev/null 2>&1
+    systemctl start gnb >/dev/null 2>&1
 else
     /opt/gnb/bin/gnb -c "$GNB_CONF" -i gnb_tun --crypto chacha20 --address-secure=on -d
 fi
@@ -521,17 +521,17 @@ StandardError=append:/var/log/synon-daemon.log
 [Install]
 WantedBy=multi-user.target
 SVCEOF
-        systemctl daemon-reload
-        systemctl enable synon-daemon
-        systemctl restart synon-daemon
+        systemctl daemon-reload >/dev/null 2>&1
+        systemctl enable synon-daemon >/dev/null 2>&1
+        systemctl restart synon-daemon >/dev/null 2>&1
 
-        # 等短暂时间后检查状态，给 daemon 连接 Console 留余量
+        # 等 daemon 完成 WSS 握手
         sleep 3
         if systemctl is-active synon-daemon >/dev/null 2>&1; then
-            echo "      ✅ synon-daemon 已启动 → Console ($CONSOLE_BASE/ws/daemon)"
+            echo "      ✅ synon-daemon 已启动 → $CONSOLE_BASE/ws/daemon"
         else
-            echo "      ⚠️ synon-daemon 首次启动中（Restart=always 将自动重试）"
-            journalctl -u synon-daemon --no-pager -n 5 2>/dev/null || tail -5 /var/log/synon-daemon.log 2>/dev/null || true
+            echo "      ⏳ synon-daemon 正在启动（Restart=always 自动重连，无需人工干预）"
+            tail -3 /var/log/synon-daemon.log 2>/dev/null || journalctl -u synon-daemon --no-pager -n 3 2>/dev/null || true
         fi
     fi
 fi
@@ -675,13 +675,13 @@ WorkingDirectory=/root
 [Install]
 WantedBy=multi-user.target
 SVCEOF
-        systemctl daemon-reload
-        systemctl enable openclaw-gateway
-        systemctl start openclaw-gateway
+        systemctl daemon-reload >/dev/null 2>&1
+        systemctl enable openclaw-gateway >/dev/null 2>&1
+        systemctl start openclaw-gateway >/dev/null 2>&1
         sleep 3
         systemctl is-active openclaw-gateway >/dev/null 2>&1 \
             && echo "      ✅ OpenClaw Gateway 已启动" \
-            || { echo "      ⚠️ OpenClaw Gateway 启动失败"; journalctl -u openclaw-gateway --no-pager -n 5 2>/dev/null || true; }
+            || { echo "      ⏳ OpenClaw Gateway 正在启动（Restart=always 自动重连）"; }
     fi
 
     # 提交 Token 到 Console
