@@ -104,6 +104,7 @@ function createEnrollRouter(keyManager: any, security: any = {}) {
       consoleGnbNodeId: keyManager.gnbNodeId,
       consoleGnbTunAddr: keyManager.gnbTunAddr,
       consoleGnbNetmask: keyManager.gnbNetmask,
+      consoleGnbTunSubnet: keyManager.gnbTunSubnet,
     });
   });
 
