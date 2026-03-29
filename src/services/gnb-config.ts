@@ -81,6 +81,51 @@ class GnbConfig {
    *   OpenGNB 对同节点 ID 的多行解析中，首行 IP 被绑到 TUN 接口。
    *   若 WAN 行在前，GNB 会把公网 IP 绑到 TUN → 隧道完全不通。
    */
+  /**
+   * 从 Console 本地 gnb_ctl -s 解析所有节点的 WAN IP
+   * 返回 Map<gnbNodeId, {ip, port}>
+   *
+   * 缓存 30s，避免频繁 fork 进程
+   */
+  private _wanCache: { ts: number; data: Map<string, { ip: string; port: string }> } = { ts: 0, data: new Map() };
+  private _readNodeWanAddresses(): Map<string, { ip: string; port: string }> {
+    const now = Date.now();
+    if (now - this._wanCache.ts < 30000 && this._wanCache.data.size > 0) {
+      return this._wanCache.data;
+    }
+
+    const result = new Map<string, { ip: string; port: string }>();
+    const mapFile = path.join(this.gnbConfDir, 'gnb.map');
+    if (!fs.existsSync(mapFile)) return result;
+
+    try {
+      const raw = execSync(`gnb_ctl -b "${mapFile}" -s`, { timeout: 3000, encoding: 'utf8' });
+      // 解析格式：
+      //   node 1002
+      //   ...
+      //   wan_ipv4 101.35.177.232:55126
+      let currentNodeId = '';
+      for (const line of raw.split('\n')) {
+        const nodeMatch = line.match(/^node\s+(\d+)/);
+        if (nodeMatch) {
+          currentNodeId = nodeMatch[1];
+          continue;
+        }
+        if (currentNodeId && currentNodeId !== this.gnbNodeId) {
+          const wanMatch = line.match(/wan_ipv4\s+([\d.]+):(\d+)/);
+          if (wanMatch) {
+            result.set(currentNodeId, { ip: wanMatch[1], port: wanMatch[2] });
+          }
+        }
+      }
+      this._wanCache = { ts: now, data: result };
+      log.debug(`读取到 ${result.size} 个节点 WAN 地址`);
+    } catch (e: unknown) {
+      log.debug(`gnb_ctl -s 读取失败（GNB 可能未运行）: ${e instanceof Error ? e.message : String(e)}`);
+    }
+    return result;
+  }
+
   generateFullAddressConf(): string {
     const addressConfPath = path.join(this.gnbConfDir, 'address.conf');
 
@@ -98,6 +143,9 @@ class GnbConfig {
     const consoleWanIp = process.env.CONSOLE_WAN_IP || '';
     const gnbWanPort = process.env.GNB_WAN_PORT || '9002';
 
+    // ★ 从 Console 本地 gnb_ctl 读取所有节点的 WAN 地址
+    const nodeWanAddrs = this._readNodeWanAddresses();
+
     const lines = [indexLine];
 
     // ★ Console TUN 路由条目（必须在 WAN 之前！OpenGNB 首行 IP 绑 TUN 接口）
@@ -114,10 +162,15 @@ class GnbConfig {
       lines.push(`if|${this.gnbNodeId}|${consoleWanIp}|${gnbWanPort}`);
     }
 
-    // 全部已审批节点
+    // ★ 全部已审批节点：TUN 路由行 + WAN 地址行（P2P 打洞所需）
     for (const node of this.store.approvedWithGnb()) {
-      if (node.tunAddr) {
-        lines.push(`${node.gnbNodeId}|${node.tunAddr}|${node.netmask || this._subnetMask}`);
+      if (!node.tunAddr) continue;
+      // TUN 路由行（必须在 WAN 之前，首行 IP 绑 TUN 接口）
+      lines.push(`${node.gnbNodeId}|${node.tunAddr}|${node.netmask || this._subnetMask}`);
+      // WAN 地址行 — 使节点间可相互发现并尝试 P2P 打洞
+      const wan = nodeWanAddrs.get(node.gnbNodeId);
+      if (wan) {
+        lines.push(`${node.gnbNodeId}|${wan.ip}|${wan.port}`);
       }
     }
     return lines.join('\n') + '\n';

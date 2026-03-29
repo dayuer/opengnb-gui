@@ -36,8 +36,8 @@ function resolvePaths(dataDir: string) {
     security: {
       dir: securityDir,
       sshDir: path.join(securityDir, 'ssh'),
-      privateKey: path.join(securityDir, 'ssh', 'console_ed25519'),
-      publicKey: path.join(securityDir, 'ssh', 'console_ed25519.pub'),
+      privateKey: path.join(securityDir, 'ssh', process.env.SSH_KEY_NAME || 'console_ed25519'),
+      publicKey: path.join(securityDir, 'ssh', (process.env.SSH_KEY_NAME || 'console_ed25519') + '.pub'),
       backupDir: path.join(securityDir, 'backups'),
     },
 
