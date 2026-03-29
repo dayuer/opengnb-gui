@@ -10,7 +10,7 @@ import { Users } from './pages/users';
 import { Groups } from './pages/groups';
 import { Settings } from './pages/settings';
 import { Skills } from './pages/skills';
-import { Topology } from './pages/topology';
+
 
 import { NodeDetailPanel } from './components/node-detail-panel';
 
@@ -40,7 +40,7 @@ w.Users = Users;
 w.Groups = Groups;
 w.Settings = Settings;
 w.Skills = Skills;
-w.Topology = Topology;
+
 w.NodeDetailPanel = NodeDetailPanel;
 
 // --- 启动 ---

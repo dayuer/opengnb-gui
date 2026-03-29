@@ -320,4 +320,4 @@ class GnbConfig {
 }
 
 module.exports = GnbConfig;
-export {}; // CJS 模块标记
+export { }; // CJS 模块标记

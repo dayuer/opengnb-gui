@@ -28,9 +28,7 @@ BRANCH="${DEPLOY_BRANCH:-main}"
 PORT="${DEPLOY_PORT:-3000}"
 
 # synon-daemon 相关配置
-DAEMON_DIR="/opt/synon-daemon"
 DAEMON_REPO="${DAEMON_REPO_URL:-https://github.com/dayuer/synon-daemon.git}"
-DAEMON_LOG_DIR="/var/log/synon-daemon"
 
 echo ""
 echo "  ╔══════════════════════════════════════╗"
@@ -120,90 +118,78 @@ grep -q "^GNB_INDEX_PORT="   .env || echo "GNB_INDEX_PORT=9001"           >> .en
 echo "      GNB 配置已保护: node=1001 tun=198.18.0.1/16 wan=43.156.128.95:9002"
 REMOTE_DEPLOY
 
-# --- 4. 部署 synon-daemon 服务 ---
+# --- 4. 编译 synon-daemon（musl 静态链接）并部署到镜像目录 ---
+DAEMON_SRC_DIR="/root/synon-daemon"
 MIRROR_DIR="${APP_DIR}/data/mirror/daemon"
-echo "[4/6] 部署 synon-daemon 到 $DAEMON_DIR ..."
-ssh "$SSH_USER@$SERVER" << REMOTE_DAEMON
+DAEMON_TARGET="x86_64-unknown-linux-musl"
+echo "[4/6] 编译 synon-daemon（musl 静态链接）..."
+
+# 4a. 同步 synon-daemon 源码到编译服务器
+SYNON_LOCAL_DIR="$(cd "$(dirname "$0")/../.." && pwd)/synon-daemon"
+if [ -d "$SYNON_LOCAL_DIR" ]; then
+    echo "      同步 synon-daemon 源码..."
+    rsync -avz --delete \
+        --exclude 'target/' --exclude '.git/' --exclude 'dist/' \
+        "$SYNON_LOCAL_DIR/" "$SSH_USER@$SERVER:$DAEMON_SRC_DIR/"
+else
+    echo "      本地无 synon-daemon 目录，使用服务器已有代码..."
+    ssh "$SSH_USER@$SERVER" "
+      set -e
+      if [ -d $DAEMON_SRC_DIR/.git ]; then
+          cd $DAEMON_SRC_DIR && git fetch origin && git reset --hard origin/master
+      else
+          git clone --depth 1 $DAEMON_REPO $DAEMON_SRC_DIR
+      fi
+    "
+fi
+
+# 4b. 安装 musl 工具链 + 编译 + 部署到镜像目录
+ssh "$SSH_USER@$SERVER" <<REMOTE_DAEMON
 set -e
 
-mkdir -p $DAEMON_LOG_DIR
-
-# 克隆或更新代码库
-if [ -d "$DAEMON_DIR/.git" ]; then
-    echo "      拉取最新 synon-daemon..."
-    cd $DAEMON_DIR && git fetch origin && git reset --hard origin/master
-else
-    echo "      克隆 synon-daemon..."
-    git clone --depth 1 $DAEMON_REPO $DAEMON_DIR
+# 安装 musl 交叉编译工具（幂等）
+if ! command -v musl-gcc &>/dev/null; then
+    echo "      安装 musl-tools..."
+    apt-get update -qq && apt-get install -y -qq musl-tools
 fi
+
+# 安装 Rust（幂等）
+if ! command -v rustup &>/dev/null; then
+    echo "      安装 Rust..."
+    curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y
+fi
+source \$HOME/.cargo/env
+
+# 添加 musl target（幂等）
+rustup target add $DAEMON_TARGET 2>/dev/null || true
 
 # 编译
-echo "      准备兼容性 GNU 编译环境 (Rocky Linux 8)..."
+cd $DAEMON_SRC_DIR
+echo "      编译中（musl 静态链接，首次较慢）..."
+cargo build --release --target $DAEMON_TARGET 2>&1 | tail -5
 
-echo "      编译 synon-daemon 节点兼容版..."
-cd $DAEMON_DIR
-docker run --rm --network host -v $PWD:/app -w /app rockylinux:8 sh -c '
-    dnf install -y gcc make openssl-devel curl 2>/dev/null &&
-    curl --proto "=https" --tlsv1.2 -sSf https://sh.rustup.rs | RUSTUP_HOME=/opt/rustup CARGO_HOME=/opt/cargo sh -s -- -y --no-modify-path &&
-    CARGO_HOME=/opt/cargo PATH=/opt/cargo/bin:$PATH cargo build --release 2>&1 | tail -n 20
-'
+DAEMON_BIN="target/$DAEMON_TARGET/release/synon-daemon"
+echo "      \$(file \$DAEMON_BIN | cut -d: -f2)"
 
-# 安装二进制（非 --target 交叉编译时产物在 target/release/）
-cp target/release/synon-daemon $DAEMON_DIR/synon-daemon
-chmod +x $DAEMON_DIR/synon-daemon
-echo "      已安装: $DAEMON_DIR/synon-daemon — \$(file $DAEMON_DIR/synon-daemon | cut -d: -f2)"
-
-# 推送到 Console 镜像目录供节点下载
-MIRROR_DIR="$APP_DIR/data/mirror/daemon"
+# 部署到 Console 镜像目录
 mkdir -p "$MIRROR_DIR"
-cp $DAEMON_DIR/synon-daemon "$MIRROR_DIR/synon-daemon-x86_64-linux-gnu"
-# 保留一个旧名字的镜像，兼容已经部署过且没有更新 initnode.sh 的老节点
-cp $DAEMON_DIR/synon-daemon "$MIRROR_DIR/synon-daemon-x86_64-musl"
-echo "      已将向下兼容 GNU 版本部署到镜像目录"
+cp "\$DAEMON_BIN" "$MIRROR_DIR/synon-daemon-x86_64-musl"
+# 向下兼容旧节点（已部署的 initnode.sh 可能用 -linux-gnu 名字）
+cp "$MIRROR_DIR/synon-daemon-x86_64-musl" "$MIRROR_DIR/synon-daemon-x86_64-linux-gnu"
+# 写入版本号 + SHA256
+grep '^version' $DAEMON_SRC_DIR/Cargo.toml | head -1 | sed 's/.*"\(.*\)"/\1/' > "$MIRROR_DIR/.version"
+sha256sum "$MIRROR_DIR/synon-daemon-x86_64-musl" | awk '{print \$1}' > "$MIRROR_DIR/synon-daemon-x86_64-musl.sha256"
+echo "      ✅ synon-daemon 静态版已部署到镜像目录"
+ls -lh "$MIRROR_DIR/"
 
-# 创建配置文件（如不存在）
-if [ ! -f $DAEMON_DIR/agent.conf ]; then
-    echo "      创建默认 agent.conf..."
-    cat > $DAEMON_DIR/agent.conf << 'CONF_EOF'
-# synon-daemon 配置文件
-# 运行于 Console 服务器，不连接 Console WSS。
-# 此文件是好 Console 上的展示用退出占位，实际节点配置由 initnode.sh 生成
-CONF_EOF
+# 清理 Docker（编译已改为原生 musl，不再需要容器）
+if command -v docker &>/dev/null; then
+    echo "      清理 Docker..."
+    docker system prune -af 2>/dev/null || true
+    apt-get remove -y docker docker-engine docker.io containerd runc 2>/dev/null || true
+    apt-get autoremove -y 2>/dev/null || true
+    echo "      ✅ Docker 已清理"
 fi
-
-# systemd 服务单元
-cat > /etc/systemd/system/synon-daemon.service << 'UNIT_EOF'
-[Unit]
-Description=SynonClaw Daemon — 节点控制面代理
-After=network-online.target gnb.service
-Wants=network-online.target
-
-[Service]
-Type=simple
-User=root
-WorkingDirectory=/opt/synon-daemon
-ExecStart=/opt/synon-daemon/synon-daemon --config /opt/synon-daemon/agent.conf
-Restart=always
-RestartSec=5
-TimeoutStartSec=10
-TimeoutStopSec=10
-Environment=RUST_LOG=info
-# 日志输出到文件
-StandardOutput=append:/var/log/synon-daemon/daemon.log
-StandardError=append:/var/log/synon-daemon/daemon.log
-
-[Install]
-WantedBy=multi-user.target
-UNIT_EOF
-
-systemctl daemon-reload
-# 注意：Console 服务器本身不需要运行 synon-daemon，套 disable 防止自启
-systemctl disable synon-daemon 2>/dev/null || true
-systemctl stop synon-daemon 2>/dev/null || true
-echo "      synon-daemon 已构建完成，服务单元已注册（Console 上不启动）"
-echo "      日志目录: $DAEMON_LOG_DIR"
-echo "      配置文件: $DAEMON_DIR/agent.conf"
-echo "      二进制：  $DAEMON_DIR/synon-daemon"
 REMOTE_DAEMON
 
 # --- 5. 配置 systemd + nginx ---

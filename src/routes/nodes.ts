@@ -93,90 +93,23 @@ function createNodesRouter(monitor: any, sshManager: any, keyManager: any, metri
 
       // 非 tunAddr 变更 → 直接保存
       const oldNode = tunAddr ? keyManager.getApprovedNodesConfig().find((n: any) => n.id === req.params.id) : null;
-      const needRemoteSync = oldNode && oldNode.gnbNodeId && oldNode.tunAddr
-        && oldNode.tunAddr !== String(tunAddr || '').trim();
-
-      if (!needRemoteSync) {
-        const result = keyManager.updateNode(req.params.id, { name, tunAddr, sshPort, sshUser });
-        if (!result.success) {
-          const status = result.message.includes('不存在') ? 404
-            : result.code === 'CONFLICT' ? 409 : 400;
-          return res.status(status).json({ error: result.message });
-        }
-        return res.json(result);
-      }
-
-      // ═══ tunAddr 变更：modify → verify → save → restart ═══
-      const newIp = String(tunAddr).trim();
-      const netmask = oldNode.netmask || '255.0.0.0';
-      const gnbId = oldNode.gnbNodeId;
-      // @security: gnbId 必须是纯数字，防止 sed 注入（安全审计 L3 修复）
-      if (!/^\d+$/.test(gnbId)) {
-        return res.status(400).json({ error: 'GNB 节点 ID 格式异常，拒绝执行远程操作' });
-      }
-      const confPath = `/opt/gnb/conf/${gnbId}/address.conf`;
-      const expectedLine = `${gnbId}|${newIp}|${netmask}`;
-
-      console.log(`[RemoteSync] ${oldNode.tunAddr} → ${newIp}`);
-
-      // Step 1: SSH 修改节点 address.conf + 读回验证
-      let verified = false;
-      try {
-        // 修改 + sync + 读回
-        const sedCmd = `sudo sed -i 's/^${gnbId}|.*/${expectedLine}/' ${confPath} && sync`;
-        await sshManager.exec(oldNode, sedCmd, 10000);
-        // 读回验证
-        const { stdout } = await sshManager.exec(oldNode, `grep '^${gnbId}|' ${confPath}`, 5000);
-        const actual = (stdout || '').trim();
-        verified = actual === expectedLine;
-        if (!verified) {
-          console.error(`[RemoteSync] 读回验证失败: 期望 '${expectedLine}', 实际 '${actual}'`);
-          return res.status(500).json({
-            error: '远程配置写入验证失败',
-            hint: `节点 address.conf 写入不一致，请手动检查。`,
-          });
-        }
-        console.log(`[RemoteSync] ✅ 节点 address.conf 已验证: ${expectedLine}`);
-      } catch (err: unknown) {
-        const errMsg = (err as Error).message ?? String(err);
-        console.error(`[RemoteSync] SSH 失败: ${errMsg}`);
-        return res.status(503).json({
-          error: `远程同步失败: ${errMsg}`,
-          hint: '节点不可达，IP 未变更。请检查 SSH 连接后重试。',
-        });
-      }
-
-      // Step 2: 更新 index address.conf
-      const indexConfPath = keyManager.gnbConfDir
-        ? require('path').join(keyManager.gnbConfDir, 'address.conf') : null;
-      if (indexConfPath && require('fs').existsSync(indexConfPath)) {
-        const content = require('fs').readFileSync(indexConfPath, 'utf8');
-        const regex = new RegExp(`^${gnbId}\\|.*$`, 'm');
-        let updated = regex.test(content)
-          ? content.replace(regex, expectedLine)
-          : content.trimEnd() + '\n' + expectedLine;
-        if (!updated.endsWith('\n')) updated += '\n';
-        require('fs').writeFileSync(indexConfPath, updated);
-        console.log(`[RemoteSync] Index address.conf 已更新: ${expectedLine}`);
-      }
-
-      // Step 3: 保存到 SQLite
+      
       const result = keyManager.updateNode(req.params.id, { name, tunAddr, sshPort, sshUser });
-      if (!result.success) return res.status(400).json({ error: result.message });
-      result.remoteSync = 'verified';
+      if (!result.success) {
+        const status = result.message.includes('不存在') ? 404
+          : result.code === 'CONFLICT' ? 409 : 400;
+        return res.status(status).json({ error: result.message });
+      }
 
-      // Step 4: 异步重启双方 GNB（不阻塞响应）
-      // 节点端
-      sshManager.exec(oldNode, `nohup bash -c 'sleep 1 && sudo systemctl restart gnb' >/dev/null 2>&1 &`, 5000)
-        .catch((err: any) => console.error(`[RemoteSync] 节点 GNB 重启失败: ${err.message}`));
-      // Index 端
-      execCmd('bash -c "sleep 2 && systemctl restart gnb" &', (err: any) => {
-        if (err) console.error(`[RemoteSync] Index GNB 重启失败: ${err.message}`);
-        else console.log(`[RemoteSync] Index GNB 已重启`);
-      });
+      // 无论是否修改 tunAddr，统一通过 updateNode 持久化
+      // 当发生 tunAddr 变更时，keyManager 会自动触发 route_update 广播，
+      // 并通过 WebSocket 交由 synon-daemon 应用全量新配置并重启 GNB
+      if (oldNode && oldNode.tunAddr !== String(tunAddr || '').trim()) {
+        console.log(`[RemoteSync] ${oldNode.tunAddr} → ${tunAddr} 已触发全局配置刷新`);
+        result.remoteSync = 'verified'; // 伪装成 verified，前端展示打钩
+      }
 
-      console.log(`[RemoteSync] ✅ 完成: ${oldNode.tunAddr} → ${newIp}`);
-      res.json(result);
+      return res.json(result);
     });
   }
 

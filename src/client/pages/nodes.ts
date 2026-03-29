@@ -219,10 +219,8 @@ export const Nodes = {
       if (isPending) statusBadge = `<span class="bg-warning/20 text-warning text-xs font-bold px-2.5 py-0.5 rounded-full uppercase tracking-tight">待审批</span>`;
       else if (isRejected) statusBadge = `<span class="bg-danger/20 text-danger text-xs font-bold px-2.5 py-0.5 rounded-full uppercase tracking-tight">已拒绝</span>`;
       else if (isOnline) {
-        const pingMs = monitorNode?.pingMs;
         const wsOk = monitorNode?.wsConnected;
-        const pingLabel = pingMs != null ? ` <span class="opacity-60 font-normal">${pingMs}ms</span>` : '';
-        statusBadge = `<span class="bg-secondary-container text-success text-xs font-bold px-2.5 py-0.5 rounded-full uppercase tracking-tight flex items-center gap-1"><span class="w-1.5 h-1.5 rounded-full bg-success${wsOk ? ' animate-pulse' : ''}"></span>${wsOk ? 'WS' : '在线'}${pingLabel}</span>`;
+        statusBadge = `<span class="bg-secondary-container text-success text-xs font-bold px-2.5 py-0.5 rounded-full uppercase tracking-tight flex items-center gap-1"><span class="w-1.5 h-1.5 rounded-full bg-success${wsOk ? ' animate-pulse' : ''}"></span>${wsOk ? 'WS' : '在线'}</span>`;
       }
       else statusBadge = `<span class="bg-danger/20 text-danger text-xs font-bold px-2.5 py-0.5 rounded-full uppercase tracking-tight">离线</span>`;
 
@@ -279,12 +277,6 @@ export const Nodes = {
                   <div data-mem-bar class="h-full rounded-full transition-all ${memPct > 80 ? 'bg-warning' : 'bg-primary'}" style="width:${Math.min(memPct, 100)}%"></div>
                 </div>
               </div>
-            </div>
-            <div class="text-right">
-              <p class="text-xs font-bold text-text-muted uppercase tracking-widest mb-1.5">Ping</p>
-              ${monitorNode?.pingMs != null
-                ? `<span data-latency class="text-sm font-bold tabular-nums ${(monitorNode.pingMs) > 150 ? 'text-danger' : (monitorNode.pingMs) > 80 ? 'text-warning' : 'text-success'}">${monitorNode.pingMs}ms</span>`
-                : `<span data-latency class="text-sm font-bold text-text-muted">--</span>`}
             </div>` : `<div class="col-span-1 md:col-span-2 opacity-30 space-y-2">
               <div>
                 <div class="flex justify-between text-xs font-bold text-text-muted uppercase tracking-widest mb-1"><span>CPU</span><span>--</span></div>
@@ -390,8 +382,6 @@ export const Nodes = {
       const si = mon.sysInfo || {};
       const cpu = si.cpuUsage ?? 0;
       const mem = si.memTotalMB > 0 ? Math.round(si.memUsedMB / si.memTotalMB * 100) : 0;
-      const lat = mon.sshLatencyMs || 0;
-
       const cpuEl = card.querySelector('[data-cpu-pct]');
       if (cpuEl) cpuEl.textContent = `${cpu}%`;
       const cpuBar = card.querySelector('[data-cpu-bar]');
@@ -405,11 +395,6 @@ export const Nodes = {
       if (memBar) {
         (memBar as HTMLElement).style.width = `${Math.min(mem, 100)}%`;
         memBar.className = `h-full rounded-full transition-all ${mem > 80 ? 'bg-warning' : 'bg-primary'}`;
-      }
-      const latEl = card.querySelector('[data-latency]');
-      if (latEl) {
-        latEl.textContent = `${lat}ms`;
-        latEl.className = `text-sm font-bold ${lat > 500 ? 'text-danger' : ''}`;
       }
     }
 

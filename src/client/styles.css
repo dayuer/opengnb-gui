@@ -202,8 +202,7 @@
 .responsive-table thead { display: table-header-group; }
 .responsive-table tbody tr { display: table-row; }
 
-/* ── 拓扑图触摸优化 ── */
-#topology-canvas { touch-action: none; }
+
 
 @media (max-width: 767px) {
   /* Body 顶部留出 mobile header 空间 */
@@ -284,8 +283,7 @@
   /* 页面 padding 缩减 */
   .page-padded { padding: 16px 12px !important; }
 
-  /* Topology 触摸提示 */
-  .topology-hint { display: none !important; }
+
 
   /* 顶部 page-header 允许折行 */
   .page-header { flex-wrap: wrap !important; gap: 8px !important; }
@@ -330,9 +328,7 @@
   /* Settings 表单区域全宽 */
   #settings-content .grid { grid-template-columns: 1fr !important; }
 
-  /* Topology 全宽，禁止缩放偏移 */
-  #topology-wrap { width: 100% !important; overflow: hidden !important; }
-  #topology-wrap svg { max-width: 100% !important; height: auto !important; }
+
 
   /* 弹窗全宽 */
   .modal-dialog { width: calc(100vw - 32px) !important; max-width: 100% !important; }

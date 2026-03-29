@@ -9,7 +9,7 @@ function getNodes(): any { return (window as any).Nodes; }
 function getUsers(): any { return (window as any).Users; }
 function getSettings(): any { return (window as any).Settings; }
 function getSkills(): any { return (window as any).Skills; }
-function getTopology(): any { return (window as any).Topology; }
+
 
 interface NodeFilter {
   groupId: string | null;
@@ -43,7 +43,7 @@ export const App = {
     users: '团队设置',
     settings: '系统设置',
     skills: '技能商店',
-    topology: '网络拓扑',
+
   } as PageTitles,
 
   // --- 认证 ---
@@ -134,7 +134,7 @@ export const App = {
       case 'groups':    this.switchPage('nodes'); return;
       case 'settings':  getSettings().render(container); break;
       case 'skills':    getSkills().render(container); break;
-      case 'topology':  getTopology().render(container); break;
+
       default:
         container.innerHTML = `<div class="flex flex-col items-center justify-center h-64 text-text-muted">
           <span class="text-4xl mb-2">${L('lock')}</span><span>未知页面</span></div>`;
